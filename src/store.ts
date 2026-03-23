@@ -14,12 +14,15 @@ import type {
   LogEntry,
 } from "./types/artifacts.js";
 
+export type DurabilityStatus = "confirmed" | "partial" | "memory_only";
+
 export interface JobRecord {
   jobId: string;
   requestId: string;
   rawRequest: string;
   currentGate: string;
   createdAt: string;
+  durability: DurabilityStatus;
   intentBrief?: IntentBrief;
   intentConfirmed?: boolean;
   appSpec?: AppSpec;
@@ -52,7 +55,8 @@ export class JobStore {
   }
 
   create(job: JobRecord): void {
-    this.jobs.set(job.jobId, { ...job, createdAt: new Date().toISOString() });
+    const durability: DurabilityStatus = this.persistence ? "memory_only" : "memory_only";
+    this.jobs.set(job.jobId, { ...job, durability, createdAt: new Date().toISOString() });
     this.logs.set(job.jobId, []);
     this.latestJobId = job.jobId;
   }
@@ -72,11 +76,22 @@ export class JobStore {
     const updated = { ...existing, ...updates };
     this.jobs.set(jobId, updated);
 
-    // Write-through to Postgres (fire-and-forget, don't block pipeline)
+    // Write-through to Postgres (don't block pipeline, but track failures)
     if (this.persistence) {
-      this.persistArtifacts(jobId, existing, updates).catch((err) => {
-        console.error(`[persistence] Write failed for ${jobId}:`, err.message);
-      });
+      this.persistArtifacts(jobId, existing, updates)
+        .then(() => {
+          const job = this.jobs.get(jobId);
+          if (job) {
+            job.durability = "confirmed";
+          }
+        })
+        .catch((err) => {
+          console.error(`[persistence] Write failed for ${jobId}:`, err.message);
+          const job = this.jobs.get(jobId);
+          if (job) {
+            job.durability = "partial";
+          }
+        });
     }
   }
 
@@ -90,7 +105,9 @@ export class JobStore {
     if (logs) logs.push(full);
 
     if (this.persistence) {
-      this.persistence.persistLog(jobId, full).catch(() => {});
+      this.persistence.persistLog(jobId, full).catch((err) => {
+        console.error(`[persistence] Log write failed for ${jobId}:`, err.message);
+      });
     }
   }
 
@@ -121,6 +138,7 @@ export class JobStore {
       rawRequest: brief.raw_request,
       currentGate: "unknown",
       createdAt: brief.created_at,
+      durability: "confirmed", // loaded from Postgres, so it's confirmed
       intentBrief: brief,
       intentConfirmed: brief.confirmation_status === "confirmed" ||
         brief.confirmation_status === "auto_confirmed_low_ambiguity",

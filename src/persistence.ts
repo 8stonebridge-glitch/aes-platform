@@ -5,21 +5,39 @@
  */
 
 import pg from "pg";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Fixed namespace UUID (DNS namespace) for deterministic UUID v5 generation.
+const AES_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+
+/**
+ * Generate a deterministic UUID v5 from an input string.
+ * Same input always produces the same UUID, even across process restarts.
+ */
+function deterministicUUID(input: string): string {
+  const hash = createHash("sha1")
+    .update(Buffer.from(AES_NAMESPACE.replace(/-/g, ""), "hex"))
+    .update(input)
+    .digest("hex");
+
+  return [
+    hash.substring(0, 8),
+    hash.substring(8, 12),
+    "5" + hash.substring(13, 16), // version 5
+    ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16) + hash.substring(17, 20), // variant
+    hash.substring(20, 32),
+  ].join("-");
+}
+
 // Ensure IDs are valid UUIDs for Postgres.
-// Deterministic: same input always produces the same UUID.
-const uuidCache = new Map<string, string>();
-function ensureUUID(id: string): string {
+// Deterministic: same input always produces the same UUID across restarts.
+export function ensureUUID(id: string): string {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (uuidRegex.test(id)) return id;
-  if (uuidCache.has(id)) return uuidCache.get(id)!;
-  const generated = randomUUID();
-  uuidCache.set(id, generated);
-  return generated;
+  return deterministicUUID(id);
 }
 import type {
   IntentBrief,
@@ -47,10 +65,10 @@ export class PersistenceLayer {
   }
 
   async initialize(): Promise<void> {
-    // Run build_logs migration
+    // Run full schema migration (all 6 tables, idempotent with IF NOT EXISTS)
     try {
       const __dirname = dirname(fileURLToPath(import.meta.url));
-      const sql = readFileSync(join(__dirname, "schema", "build-logs.sql"), "utf-8");
+      const sql = readFileSync(join(__dirname, "schema", "001-initial-schema.sql"), "utf-8");
       await this.pool.query(sql);
     } catch {
       // Schema might already exist — that's fine
@@ -292,16 +310,26 @@ export class PersistenceLayer {
   }
 
   async loadValidationResults(jobId: string): Promise<ValidationResult[]> {
+    // Read from build_logs (same table persistValidationResults writes to).
+    // Gate 1 validation results are stored as build_logs with gate='gate_1'.
+    // Failures have error_code set; passes have message matching "CODE: PASS".
     const res = await this.pool.query(
-      `SELECT validator_name as code, verdict, evidence FROM validator_results
-       WHERE bridge_id = $1 OR build_run_id = $1`,
+      `SELECT message, error_code FROM build_logs
+       WHERE job_id = $1 AND gate = 'gate_1'
+       AND (error_code IS NOT NULL OR message LIKE '%: PASS')
+       ORDER BY created_at ASC`,
       [jobId]
     );
-    return res.rows.map((r) => ({
-      code: r.code,
-      passed: r.verdict === "PASS",
-      reason: r.evidence?.reason,
-    }));
+    return res.rows.map((r) => {
+      if (r.error_code) {
+        // Failure entry: message is "CODE: FAIL — reason"
+        const reason = r.message?.replace(/^[^:]+:\s*FAIL\s*—?\s*/, "") || undefined;
+        return { code: r.error_code, passed: false, reason };
+      }
+      // Pass entry: message is "CODE: PASS"
+      const code = r.message?.replace(/:\s*PASS$/, "").trim() || "UNKNOWN";
+      return { code, passed: true };
+    });
   }
 
   async loadApproval(jobId: string): Promise<ApprovalRecord | null> {

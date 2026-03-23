@@ -155,6 +155,7 @@ export async function runGraph(
     requestId: input.requestId,
     rawRequest: input.rawRequest,
     currentGate: input.currentGate,
+    durability: store.hasPersistence() ? "memory_only" : "memory_only",
     createdAt: new Date().toISOString(),
   });
 

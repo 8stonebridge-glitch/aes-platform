@@ -33,6 +33,7 @@ export async function statusCommand(jobId?: string): Promise<void> {
 
   logHeader(`Job: ${job.jobId}`);
   logKeyValue("Status", job.currentGate);
+  logKeyValue("Durability", job.durability || "memory_only");
   logKeyValue("Request", job.rawRequest);
   logKeyValue("Created", new Date(job.createdAt).toLocaleString());
 

@@ -30,6 +30,7 @@ export async function replayCommand(jobId: string): Promise<void> {
   logHeader(`Replay: ${job.jobId}`);
   logKeyValue("Request", job.rawRequest);
   logKeyValue("Created", job.createdAt);
+  logKeyValue("Durability", job.durability || "unknown");
   logDivider();
 
   // Gate 0 — Intent

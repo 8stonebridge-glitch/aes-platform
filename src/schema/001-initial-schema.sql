@@ -1,0 +1,113 @@
+-- AES v12 Platform — Full schema migration.
+-- Idempotent: uses CREATE TABLE IF NOT EXISTS so safe to run against existing databases.
+
+-- ─── Intent Briefs (Gate 0 output) ───────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS intent_briefs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id TEXT NOT NULL UNIQUE,
+  raw_request TEXT NOT NULL,
+  inferred_app_class TEXT,
+  inferred_primary_users TEXT[],
+  inferred_core_outcome TEXT,
+  inferred_platforms TEXT[],
+  inferred_risk_class TEXT,
+  inferred_integrations TEXT[],
+  explicit_inclusions TEXT[],
+  explicit_exclusions TEXT[],
+  ambiguity_flags TEXT[],
+  assumptions TEXT[],
+  confirmation_statement TEXT,
+  confirmation_status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_intent_briefs_request_id ON intent_briefs(request_id);
+CREATE INDEX IF NOT EXISTS idx_intent_briefs_status ON intent_briefs(confirmation_status);
+
+-- ─── App Specs (Gate 1 output) ──────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS app_specs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id UUID NOT NULL,
+  request_id UUID NOT NULL,
+  intent_brief_id UUID REFERENCES intent_briefs(id),
+  title TEXT NOT NULL,
+  summary TEXT,
+  app_class TEXT,
+  risk_class TEXT,
+  spec_data JSONB NOT NULL,
+  confidence_overall NUMERIC,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_specs_app_id ON app_specs(app_id);
+CREATE INDEX IF NOT EXISTS idx_app_specs_request_id ON app_specs(request_id);
+
+-- ─── Feature Bridges (Gate 2 output) ────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS feature_bridges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bridge_id UUID NOT NULL UNIQUE,
+  app_id UUID NOT NULL,
+  app_spec_id UUID REFERENCES app_specs(id),
+  feature_id TEXT NOT NULL,
+  feature_name TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  bridge_data JSONB NOT NULL,
+  confidence_overall NUMERIC,
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_bridges_app_id ON feature_bridges(app_id);
+CREATE INDEX IF NOT EXISTS idx_feature_bridges_bridge_id ON feature_bridges(bridge_id);
+CREATE INDEX IF NOT EXISTS idx_feature_bridges_feature_id ON feature_bridges(feature_id);
+
+-- ─── Veto Results (Gate 3 output) ───────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS veto_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bridge_id UUID NOT NULL REFERENCES feature_bridges(id),
+  any_triggered BOOLEAN NOT NULL DEFAULT false,
+  triggered_codes TEXT[],
+  result_data JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_veto_results_bridge_id ON veto_results(bridge_id);
+
+-- ─── User Approvals ─────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_approvals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id UUID NOT NULL,
+  app_spec_id UUID REFERENCES app_specs(id),
+  approval_type TEXT NOT NULL,
+  approved BOOLEAN NOT NULL,
+  user_comment TEXT,
+  presented_data JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_approvals_app_id ON user_approvals(app_id);
+
+-- ─── Build Logs ─────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS build_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id TEXT NOT NULL,
+  gate TEXT,
+  feature_id TEXT,
+  message TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_build_logs_job_id ON build_logs(job_id);
+CREATE INDEX IF NOT EXISTS idx_build_logs_gate ON build_logs(job_id, gate);

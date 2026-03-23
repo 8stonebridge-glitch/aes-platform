@@ -2,6 +2,7 @@ import type { AESStateType } from "../state.js";
 import { randomUUID } from "node:crypto";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { GateErrorCode, type ValidationResult, type FeatureBridge } from "../types/artifacts.js";
 
 /**
  * Bridge Compiler — compiles one FeatureBridge per feature from:
@@ -171,6 +172,122 @@ function compileBridge(
   };
 }
 
+/**
+ * Validate a compiled bridge against all 10 G2 rules.
+ * Returns an array of ValidationResult for each check.
+ * Failed checks set bridge status to "blocked".
+ */
+export function validateBridge(bridge: any): ValidationResult[] {
+  const results: ValidationResult[] = [];
+
+  // G2_NO_SINGLE_FEATURE_TARGET: bridge must reference exactly 1 feature
+  results.push({
+    code: GateErrorCode.G2_NO_SINGLE_FEATURE_TARGET,
+    passed: typeof bridge.feature_id === "string" && bridge.feature_id.length > 0,
+    reason: bridge.feature_id ? undefined : "Bridge does not reference a single feature_id",
+  });
+
+  // G2_SCOPE_NOT_EXPLICIT: build_scope.objective must be non-empty
+  const objective = bridge.build_scope?.objective;
+  results.push({
+    code: GateErrorCode.G2_SCOPE_NOT_EXPLICIT,
+    passed: typeof objective === "string" && objective.trim().length > 0,
+    reason: objective?.trim() ? undefined : "build_scope.objective is empty or missing",
+  });
+
+  // G2_WRITE_SCOPE_UNBOUNDED: write_scope.allowed_repo_paths must be non-empty
+  const writePaths = bridge.write_scope?.allowed_repo_paths;
+  results.push({
+    code: GateErrorCode.G2_WRITE_SCOPE_UNBOUNDED,
+    passed: Array.isArray(writePaths) && writePaths.length > 0,
+    reason: writePaths?.length ? undefined : "write_scope.allowed_repo_paths is empty",
+  });
+
+  // G2_FORBIDDEN_PATHS_IN_SCOPE: no overlap between allowed and forbidden paths
+  const allowed = new Set(bridge.write_scope?.allowed_repo_paths || []);
+  const forbidden = bridge.write_scope?.forbidden_repo_paths || [];
+  const overlapping = forbidden.filter((p: string) => allowed.has(p));
+  results.push({
+    code: GateErrorCode.G2_FORBIDDEN_PATHS_IN_SCOPE,
+    passed: overlapping.length === 0,
+    reason: overlapping.length > 0
+      ? `Paths in both allowed and forbidden: ${overlapping.join(", ")}`
+      : undefined,
+  });
+
+  // G2_UNRESOLVED_DEPENDENCIES: all dependencies must be satisfied or explicitly blocked
+  const deps = bridge.dependencies || [];
+  const unresolved = deps.filter(
+    (d: any) => d.status !== "satisfied" && d.status !== "blocked"
+  );
+  results.push({
+    code: GateErrorCode.G2_UNRESOLVED_DEPENDENCIES,
+    passed: unresolved.length === 0,
+    reason: unresolved.length > 0
+      ? `${unresolved.length} unresolved dependency(ies)`
+      : undefined,
+  });
+
+  // G2_MISSING_CRITICAL_RULES: at least 1 rule for non-trivial features
+  const rules = bridge.applied_rules || [];
+  const isTrivial = bridge.feature_name?.toLowerCase().includes("trivial");
+  results.push({
+    code: GateErrorCode.G2_MISSING_CRITICAL_RULES,
+    passed: rules.length > 0 || isTrivial,
+    reason: rules.length === 0 && !isTrivial
+      ? "No rules attached to non-trivial feature"
+      : undefined,
+  });
+
+  // G2_MISSING_REQUIRED_TESTS: at least 1 test attached
+  const tests = bridge.required_tests || [];
+  results.push({
+    code: GateErrorCode.G2_MISSING_REQUIRED_TESTS,
+    passed: tests.length > 0,
+    reason: tests.length === 0 ? "No required tests attached to bridge" : undefined,
+  });
+
+  // G2_MISSING_REUSE_ASSETS: if reuse candidates were selected, they must be resolvable
+  const selectedReuse = bridge.selected_reuse_assets || [];
+  const candidates = bridge.reuse_candidates || [];
+  const candidateIds = new Set(candidates.map((c: any) => c.candidate_id));
+  const unresolvable = selectedReuse.filter((id: string) => !candidateIds.has(id));
+  results.push({
+    code: GateErrorCode.G2_MISSING_REUSE_ASSETS,
+    passed: unresolvable.length === 0,
+    reason: unresolvable.length > 0
+      ? `Selected assets not in candidates: ${unresolvable.join(", ")}`
+      : undefined,
+  });
+
+  // G2_TRIGGERED_HARD_VETOES: no triggered vetoes at compile time
+  const vetoes = bridge.hard_vetoes || [];
+  const triggeredVetoes = vetoes.filter((v: any) => v.triggered);
+  results.push({
+    code: GateErrorCode.G2_TRIGGERED_HARD_VETOES,
+    passed: triggeredVetoes.length === 0,
+    reason: triggeredVetoes.length > 0
+      ? `${triggeredVetoes.length} hard veto(es) already triggered`
+      : undefined,
+  });
+
+  // G2_NO_SUCCESS_DEFINITION: success_definition must have non-empty fields
+  const sd = bridge.success_definition;
+  const hasSuccessDef =
+    sd &&
+    typeof sd.user_visible_outcome === "string" &&
+    sd.user_visible_outcome.trim().length > 0 &&
+    typeof sd.technical_outcome === "string" &&
+    sd.technical_outcome.trim().length > 0;
+  results.push({
+    code: GateErrorCode.G2_NO_SUCCESS_DEFINITION,
+    passed: !!hasSuccessDef,
+    reason: hasSuccessDef ? undefined : "success_definition has empty or missing fields",
+  });
+
+  return results;
+}
+
 export async function bridgeCompiler(
   state: AESStateType
 ): Promise<Partial<AESStateType>> {
@@ -194,6 +311,23 @@ export async function bridgeCompiler(
     const matches = catalogMatches[feature.feature_id] || [];
     const bridge = compileBridge(feature, state.appSpec, matches, i);
 
+    // Run G2 validation checks
+    const g2Results = validateBridge(bridge);
+    bridge.g2_validation = g2Results;
+
+    const g2Failures = g2Results.filter((r: ValidationResult) => !r.passed);
+    if (g2Failures.length > 0) {
+      bridge.status = "blocked";
+      bridge.blocked_reason = g2Failures.map((r: ValidationResult) => `${r.code}: ${r.reason}`).join("; ");
+      for (const f of g2Failures) {
+        store.addLog(state.jobId, {
+          gate: "gate_2",
+          feature_id: feature.feature_id,
+          message: `G2 FAIL — ${f.code}: ${f.reason || ""}`,
+        });
+      }
+    }
+
     bridges[feature.feature_id] = bridge;
 
     const selectedCount = bridge.selected_reuse_assets.length;
@@ -203,10 +337,10 @@ export async function bridgeCompiler(
     cb?.onFeatureStatus(
       feature.feature_id,
       feature.name,
-      "draft"
+      bridge.status
     );
     cb?.onStep(
-      `${feature.name}: ${selectedCount} reuse assets, ${ruleCount} rules, ${testCount} tests, ${(bridge.confidence.overall * 100).toFixed(0)}% confidence`
+      `${feature.name}: ${selectedCount} reuse assets, ${ruleCount} rules, ${testCount} tests, ${(bridge.confidence.overall * 100).toFixed(0)}% confidence${g2Failures.length > 0 ? ` [BLOCKED: ${g2Failures.length} G2 failures]` : ""}`
     );
   }
 
