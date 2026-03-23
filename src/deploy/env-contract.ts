@@ -12,10 +12,10 @@ export interface EnvRequirement {
 }
 
 export const CLERK_ENV: EnvRequirement[] = [
-  { key: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", source: "clerk", required: true, description: "Clerk publishable key for the app", example: "pk_test_..." },
-  { key: "CLERK_SECRET_KEY", source: "clerk", required: true, description: "Clerk secret key for server-side auth", example: "sk_test_..." },
-  { key: "NEXT_PUBLIC_CLERK_SIGN_IN_URL", source: "manual", required: true, description: "Sign-in page route", example: "/sign-in" },
-  { key: "NEXT_PUBLIC_CLERK_SIGN_UP_URL", source: "manual", required: true, description: "Sign-up page route", example: "/sign-up" },
+  { key: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", source: "clerk", required: false, description: "Clerk publishable key (optional — keyless mode works without)", example: "pk_test_..." },
+  { key: "CLERK_SECRET_KEY", source: "clerk", required: false, description: "Clerk secret key (optional — keyless mode works without)", example: "sk_test_..." },
+  { key: "NEXT_PUBLIC_CLERK_SIGN_IN_URL", source: "manual", required: false, description: "Sign-in page route (optional)", example: "/sign-in" },
+  { key: "NEXT_PUBLIC_CLERK_SIGN_UP_URL", source: "manual", required: false, description: "Sign-up page route (optional)", example: "/sign-up" },
 ];
 
 export const CONVEX_ENV: EnvRequirement[] = [

@@ -58,17 +58,29 @@ export class FrameworkValidator {
   }
 
   private checkClerkMiddleware(base: string): FrameworkCheckResult {
+    // Check for proxy.ts (new pattern) or middleware.ts (old pattern)
+    const proxyPath = join(base, "proxy.ts");
     const mwPath = join(base, "middleware.ts");
-    if (!existsSync(mwPath)) {
-      return { check: "clerk_middleware", passed: false, detail: "middleware.ts not found — routes are unprotected" };
+    const hasProxy = existsSync(proxyPath);
+    const hasMw = existsSync(mwPath);
+
+    if (!hasProxy && !hasMw) {
+      return { check: "clerk_middleware", passed: false, detail: "Neither proxy.ts nor middleware.ts found — routes are unprotected" };
     }
 
-    const content = readFileSync(mwPath, "utf-8");
+    const filePath = hasProxy ? proxyPath : mwPath;
+    const content = readFileSync(filePath, "utf-8");
+
     if (!content.includes("clerkMiddleware")) {
-      return { check: "clerk_middleware", passed: false, detail: "middleware.ts does not use clerkMiddleware" };
+      return { check: "clerk_middleware", passed: false, detail: `${hasProxy ? "proxy.ts" : "middleware.ts"} does not use clerkMiddleware` };
     }
 
-    return { check: "clerk_middleware", passed: true, detail: "Clerk middleware configured" };
+    // Check for deprecated authMiddleware
+    if (content.includes("authMiddleware")) {
+      return { check: "clerk_middleware", passed: false, detail: "Uses deprecated authMiddleware — must use clerkMiddleware" };
+    }
+
+    return { check: "clerk_middleware", passed: true, detail: `Clerk ${hasProxy ? "proxy.ts" : "middleware.ts"} configured with clerkMiddleware` };
   }
 
   private checkConvexOrgFiltering(base: string): FrameworkCheckResult {
@@ -119,26 +131,39 @@ export class FrameworkValidator {
   private checkEnvConfig(base: string): FrameworkCheckResult {
     const hasExample = existsSync(join(base, ".env.local.example"));
     if (!hasExample) {
-      return { check: "env_config", passed: false, detail: ".env.local.example not found — deployment will fail" };
+      return { check: "env_config", passed: false, detail: ".env.local.example not found" };
     }
 
     const content = readFileSync(join(base, ".env.local.example"), "utf-8");
-    const required = ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY", "NEXT_PUBLIC_CONVEX_URL"];
+    // Only Convex URL is strictly required — Clerk works in keyless mode
+    const required = ["NEXT_PUBLIC_CONVEX_URL"];
     const missing = required.filter(key => !content.includes(key));
 
     if (missing.length > 0) {
-      return { check: "env_config", passed: false, detail: `Missing env vars in example: ${missing.join(", ")}` };
+      return { check: "env_config", passed: false, detail: `Missing required env vars: ${missing.join(", ")}` };
     }
-    return { check: "env_config", passed: true, detail: "All required env vars documented" };
+    return { check: "env_config", passed: true, detail: "Required env vars documented (Clerk is optional — keyless mode)" };
   }
 
   private checkRouteProtection(base: string): FrameworkCheckResult {
+    const proxyPath = join(base, "proxy.ts");
     const mwPath = join(base, "middleware.ts");
-    if (!existsSync(mwPath)) {
-      return { check: "route_protection", passed: false, detail: "No middleware — all routes unprotected" };
+    const hasProxy = existsSync(proxyPath);
+    const hasMw = existsSync(mwPath);
+
+    if (!hasProxy && !hasMw) {
+      return { check: "route_protection", passed: false, detail: "No proxy.ts or middleware.ts — all routes unprotected" };
     }
 
-    const content = readFileSync(mwPath, "utf-8");
+    const filePath = hasProxy ? proxyPath : mwPath;
+    const content = readFileSync(filePath, "utf-8");
+
+    // New proxy.ts pattern uses clerkMiddleware() without explicit route matching
+    if (hasProxy && content.includes("clerkMiddleware")) {
+      return { check: "route_protection", passed: true, detail: "Clerk proxy.ts configured with clerkMiddleware" };
+    }
+
+    // Legacy middleware.ts pattern with explicit route matching
     if (content.includes("isPublicRoute") && content.includes("auth.protect")) {
       return { check: "route_protection", passed: true, detail: "Public/protected route split configured" };
     }

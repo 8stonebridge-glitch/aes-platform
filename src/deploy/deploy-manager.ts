@@ -84,10 +84,12 @@ export class DeployManager {
         base_commit: workspace.base_commit,
         workspace: workspace.workspace_id,
         env_vars_required: [
-          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-          "CLERK_SECRET_KEY",
           "NEXT_PUBLIC_CONVEX_URL",
           "CONVEX_DEPLOYMENT",
+        ],
+        env_vars_optional: [
+          "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+          "CLERK_SECRET_KEY",
         ],
         deploy_steps: [
           "1. Create Vercel project: vercel --yes",

@@ -164,6 +164,20 @@ describe("enhanced governance checks", () => {
     expect(authViolations.length).toBeGreaterThan(0);
   });
 
+  it("detects auth boundary drift for proxy.ts", () => {
+    const pkg = makeMinimalPkg({ feature_name: "Test Feature" });
+    const run = makeMinimalRun({
+      files_created: ["proxy.ts"],
+      files_modified: [],
+    });
+
+    const result = verifyBuild("j-test", pkg, run);
+    const authViolations = result.constraint_violations.filter(v =>
+      v.includes("Auth boundary drift")
+    );
+    expect(authViolations.length).toBeGreaterThan(0);
+  });
+
   it("detects route drift for out-of-scope routes", () => {
     const pkg = makeMinimalPkg({ feature_name: "My Feature" });
     const run = makeMinimalRun({

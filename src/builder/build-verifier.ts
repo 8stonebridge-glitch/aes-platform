@@ -80,6 +80,7 @@ export function verifyBuild(
   // 4d. Auth boundary drift: check if auth middleware or clerk config was touched
   for (const file of allFiles) {
     if (file.includes("middleware.ts") || file.includes("middleware.js") ||
+        file.includes("proxy.ts") ||
         file.includes("clerk") || file.includes("auth.config") ||
         file.includes("convex/auth") || file.includes("_app.tsx") ||
         (file.includes("layout.tsx") && file.split("/").length <= 2)) {  // root layout only

@@ -209,7 +209,7 @@ export async function deployFeatureCommand(jobId: string, featureId: string) {
   const failedChecks = checkResults.filter(c => !c.passed && !c.skipped);
   if (failedChecks.length > 0) blockers.push(`${failedChecks.length} repo check(s) failed`);
   if (!process.env.VERCEL_TOKEN) blockers.push("VERCEL_TOKEN not set — cannot auto-deploy");
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) blockers.push("Clerk keys not set — auth will not work");
+  // Clerk works in keyless mode — no keys needed for dev/preview
   if (!process.env.NEXT_PUBLIC_CONVEX_URL) blockers.push("Convex URL not set — backend will not work");
 
   if (blockers.length > 0) {

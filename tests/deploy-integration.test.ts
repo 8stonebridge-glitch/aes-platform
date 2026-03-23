@@ -69,20 +69,19 @@ describe("RepoScaffolder", () => {
     expect(auditContent).toContain("orgId");
   });
 
-  it("creates Clerk middleware", () => {
+  it("creates Clerk proxy.ts with clerkMiddleware", () => {
     const dir = createTempDir();
     dirs.push(dir);
 
     const scaffolder = new RepoScaffolder();
     scaffolder.scaffold(dir, { app_name: "Test App", app_slug: "test-app" });
 
-    const mwPath = join(dir, "middleware.ts");
-    expect(existsSync(mwPath)).toBe(true);
+    const proxyPath = join(dir, "proxy.ts");
+    expect(existsSync(proxyPath)).toBe(true);
+    expect(existsSync(join(dir, "middleware.ts"))).toBe(false);
 
-    const content = readFileSync(mwPath, "utf-8");
+    const content = readFileSync(proxyPath, "utf-8");
     expect(content).toContain("clerkMiddleware");
-    expect(content).toContain("isPublicRoute");
-    expect(content).toContain("auth.protect");
   });
 });
 
@@ -112,15 +111,15 @@ describe("FrameworkValidator", () => {
     expect(allPassed).toBe(true);
   });
 
-  it("catches missing middleware", () => {
+  it("catches missing proxy.ts and middleware.ts", () => {
     const dir = createTempDir();
     dirs.push(dir);
 
     const scaffolder = new RepoScaffolder();
     scaffolder.scaffold(dir, { app_name: "Test App", app_slug: "test-app" });
 
-    // Remove middleware
-    unlinkSync(join(dir, "middleware.ts"));
+    // Remove proxy.ts
+    unlinkSync(join(dir, "proxy.ts"));
 
     const validator = new FrameworkValidator();
     const results = validator.validateAll(dir);
@@ -128,11 +127,48 @@ describe("FrameworkValidator", () => {
     const clerkCheck = results.find(r => r.check === "clerk_middleware");
     expect(clerkCheck).toBeTruthy();
     expect(clerkCheck!.passed).toBe(false);
-    expect(clerkCheck!.detail).toContain("middleware.ts not found");
+    expect(clerkCheck!.detail).toContain("Neither proxy.ts nor middleware.ts found");
 
     const routeCheck = results.find(r => r.check === "route_protection");
     expect(routeCheck).toBeTruthy();
     expect(routeCheck!.passed).toBe(false);
+  });
+
+  it("passes when proxy.ts exists with clerkMiddleware", () => {
+    const dir = createTempDir();
+    dirs.push(dir);
+
+    const scaffolder = new RepoScaffolder();
+    scaffolder.scaffold(dir, { app_name: "Test App", app_slug: "test-app" });
+
+    const validator = new FrameworkValidator();
+    const results = validator.validateAll(dir);
+
+    const clerkCheck = results.find(r => r.check === "clerk_middleware");
+    expect(clerkCheck).toBeTruthy();
+    expect(clerkCheck!.passed).toBe(true);
+    expect(clerkCheck!.detail).toContain("proxy.ts");
+  });
+
+  it("catches deprecated authMiddleware", () => {
+    const dir = createTempDir();
+    dirs.push(dir);
+
+    const scaffolder = new RepoScaffolder();
+    scaffolder.scaffold(dir, { app_name: "Test App", app_slug: "test-app" });
+
+    // Overwrite proxy.ts with deprecated authMiddleware
+    writeFileSync(join(dir, "proxy.ts"), `import { authMiddleware, clerkMiddleware } from "@clerk/nextjs/server";
+export default authMiddleware();
+`);
+
+    const validator = new FrameworkValidator();
+    const results = validator.validateAll(dir);
+
+    const clerkCheck = results.find(r => r.check === "clerk_middleware");
+    expect(clerkCheck).toBeTruthy();
+    expect(clerkCheck!.passed).toBe(false);
+    expect(clerkCheck!.detail).toContain("deprecated authMiddleware");
   });
 
   it("catches missing schema", () => {
@@ -186,20 +222,18 @@ export const listAll = query({
 });
 
 describe("env-contract", () => {
-  it("validates required keys", () => {
-    // Missing all keys
+  it("validates required keys — Clerk keys are optional (keyless mode)", () => {
+    // Missing all keys — only Convex keys should be required
     const result1 = validateEnv(ALL_APP_ENV, {});
     expect(result1.valid).toBe(false);
-    expect(result1.missing).toContain("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
-    expect(result1.missing).toContain("CLERK_SECRET_KEY");
+    // Clerk keys are now optional
+    expect(result1.missing).not.toContain("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+    expect(result1.missing).not.toContain("CLERK_SECRET_KEY");
+    // Convex keys are still required
     expect(result1.missing).toContain("NEXT_PUBLIC_CONVEX_URL");
 
-    // All keys provided
+    // Convex keys provided (Clerk keys optional)
     const result2 = validateEnv(ALL_APP_ENV, {
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_123",
-      CLERK_SECRET_KEY: "sk_test_123",
-      NEXT_PUBLIC_CLERK_SIGN_IN_URL: "/sign-in",
-      NEXT_PUBLIC_CLERK_SIGN_UP_URL: "/sign-up",
       NEXT_PUBLIC_CONVEX_URL: "https://test.convex.cloud",
       CONVEX_DEPLOYMENT: "dev:test",
     });
@@ -259,7 +293,7 @@ describe("DeployManager", () => {
     const manifest = JSON.parse(readFileSync(join(ws.path, ".aes-deploy-manifest.json"), "utf-8"));
     expect(manifest.app_name).toBe("deploy-test");
     expect(manifest.ready_for_deploy).toBe(true);
-    expect(manifest.env_vars_required).toContain("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+    expect(manifest.env_vars_required).toContain("NEXT_PUBLIC_CONVEX_URL");
     expect(manifest.branch).toBe(ws.branch);
   });
 });

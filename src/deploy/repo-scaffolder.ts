@@ -155,11 +155,9 @@ export default config;
   }
 
   private writeEnvExample(base: string) {
-    writeFileSync(join(base, ".env.local.example"), `# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+    writeFileSync(join(base, ".env.local.example"), `# Clerk (OPTIONAL — keyless mode works without these)
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+# CLERK_SECRET_KEY=sk_test_...
 
 # Convex
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
@@ -263,27 +261,14 @@ export const list = query({
   }
 
   private writeClerkMiddleware(base: string) {
-    writeFileSync(join(base, "middleware.ts"), `import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-  "/api/webhooks(.*)",
-]);
-
-export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
-  }
-});
-
+    writeFileSync(join(base, "proxy.ts"), `import { clerkMiddleware } from '@clerk/nextjs/server'
+export default clerkMiddleware()
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
+    '/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    '/(api|trpc)(.*)',
   ],
-};
+}
 `);
   }
 
@@ -291,7 +276,7 @@ export const config = {
     mkdirSync(join(base, "app"), { recursive: true });
 
     writeFileSync(join(base, "app", "layout.tsx"), `import type { Metadata } from "next";
-import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkProvider, SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
 import { ConvexClientProvider } from "./convex-provider";
 import "./globals.css";
 
@@ -310,7 +295,19 @@ export default function RootLayout({
       <body>
         <ClerkProvider>
           <ConvexClientProvider>
-            {children}
+            <header className="flex justify-between items-center px-6 py-3 border-b">
+              <span className="font-semibold">${config.app_name}</span>
+              <div className="flex items-center gap-3">
+                <Show when="signed-out">
+                  <SignInButton />
+                  <SignUpButton />
+                </Show>
+                <Show when="signed-in">
+                  <UserButton />
+                </Show>
+              </div>
+            </header>
+            <main>{children}</main>
           </ConvexClientProvider>
         </ClerkProvider>
       </body>
@@ -319,22 +316,26 @@ export default function RootLayout({
 }
 `);
 
-    // Convex provider component
+    // Convex provider — works with keyless Clerk too
     writeFileSync(join(base, "app", "convex-provider.tsx"), `"use client";
 
 import { ConvexProviderWithClerk } from "convex/react-clerk";
-import { ClerkProvider, useAuth } from "@clerk/nextjs";
+import { useAuth } from "@clerk/nextjs";
 import { ConvexReactClient } from "convex/react";
 
-const convex = new ConvexReactClient(
-  process.env.NEXT_PUBLIC_CONVEX_URL as string
-);
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 export function ConvexClientProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  if (!convex) {
+    // No Convex URL yet — render children without Convex
+    return <>{children}</>;
+  }
+
   return (
     <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
       {children}
@@ -346,7 +347,6 @@ export function ConvexClientProvider({
 
   private writeHomePage(base: string, config: RepoConfig) {
     writeFileSync(join(base, "app", "page.tsx"), `import { auth } from "@clerk/nextjs/server";
-import Link from "next/link";
 
 export default async function HomePage() {
   const { userId } = await auth();
@@ -354,30 +354,17 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-8">
       <h1 className="text-4xl font-bold mb-4">${config.app_name}</h1>
-      <p className="text-muted-foreground mb-8">Built by AES v12</p>
+      <p className="text-gray-500 mb-8">Built by AES v12</p>
 
       {userId ? (
-        <Link
+        <a
           href="/dashboard"
-          className="bg-primary text-primary-foreground px-6 py-3 rounded-lg"
+          className="bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800"
         >
           Go to Dashboard
-        </Link>
+        </a>
       ) : (
-        <div className="flex gap-4">
-          <Link
-            href="/sign-in"
-            className="bg-primary text-primary-foreground px-6 py-3 rounded-lg"
-          >
-            Sign In
-          </Link>
-          <Link
-            href="/sign-up"
-            className="border px-6 py-3 rounded-lg"
-          >
-            Sign Up
-          </Link>
-        </div>
+        <p className="text-gray-400">Sign in to get started</p>
       )}
     </main>
   );
