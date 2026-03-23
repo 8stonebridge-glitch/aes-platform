@@ -12,6 +12,7 @@ import { resumeCommand } from "./commands/resume.js";
 import { exportCommand } from "./commands/export.js";
 import { buildFeatureCommand } from "./commands/build-feature.js";
 import { demoCommand } from "./commands/demo.js";
+import { approveBuildCommand } from "./commands/approve-build.js";
 
 const program = new Command();
 
@@ -91,6 +92,15 @@ program
   .option("--approve-merge", "Approve merge (requires explicit human approval)")
   .action((jobId: string, featureId: string, opts: { approveMerge?: boolean }) => {
     return buildFeatureCommand(jobId, featureId, opts);
+  });
+
+program
+  .command("approve-build")
+  .description("Approve a built feature for merge")
+  .argument("<job-id>", "Job ID")
+  .argument("<feature-id>", "Feature ID to approve")
+  .action((jobId: string, featureId: string) => {
+    return approveBuildCommand(jobId, featureId);
   });
 
 program

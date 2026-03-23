@@ -222,3 +222,8 @@ EXCEPTION WHEN OTHERS THEN NULL; END $$;
 DO $$ BEGIN
   ALTER TABLE build_logs ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
 EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+-- ─── Check results column for builder_runs ──────────────────────────────
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS check_results JSONB DEFAULT '[]';
+EXCEPTION WHEN OTHERS THEN NULL; END $$;

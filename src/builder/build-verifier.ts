@@ -70,10 +70,28 @@ export function verifyBuild(
     }
   }
 
-  // 4c. Permission/role drift: check if auth middleware or clerk config was touched
+  // 4c. Secret/env drift: check if .env files were created or modified
   for (const file of allFiles) {
-    if (file.includes("middleware") || file.includes("clerk") || file.includes("auth.ts")) {
-      constraintViolations.push(`Permission drift: builder modified auth-related file ${file} — requires review`);
+    if (file.match(/\.env($|\.)/)) {
+      constraintViolations.push(`Secret/env drift: builder touched ${file} — env files must not be modified by builders`);
+    }
+  }
+
+  // 4d. Auth boundary drift: check if auth middleware or clerk config was touched
+  for (const file of allFiles) {
+    if (file.includes("middleware.ts") || file.includes("middleware.js") ||
+        file.includes("clerk") || file.includes("auth.config") ||
+        file.includes("convex/auth") || file.includes("_app.tsx") ||
+        (file.includes("layout.tsx") && file.split("/").length <= 2)) {  // root layout only
+      constraintViolations.push(`Auth boundary drift: builder modified ${file} — auth config changes require separate review`);
+    }
+  }
+
+  // 4e. Route/linkage drift: check that generated routes match the feature scope
+  const featureSlug = pkg.feature_name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  for (const file of allFiles) {
+    if (file.startsWith("app/") && !file.includes(featureSlug) && !file.includes("layout") && !file.includes("_")) {
+      constraintViolations.push(`Route drift: builder created route ${file} outside feature scope (expected under app/${featureSlug}/)`);
     }
   }
 
@@ -91,14 +109,14 @@ export function verifyBuild(
   const testCoverageMet = missingTests.length === 0 && failedTests.length === 0;
   const passed = scopeViolations.length === 0 && constraintViolations.length === 0 && testCoverageMet;
 
-  // Create FixTrail entries for failures
+  // Create FixTrail entries for failures with retryability info
   if (scopeViolations.length > 0) {
     fixEntries.push({
       fix_id: `fix-${randomUUID().substring(0, 8)}`,
       job_id: jobId,
       gate: "build_verification",
       error_code: "SCOPE_VIOLATION",
-      issue_summary: `Builder wrote outside allowed scope: ${scopeViolations.length} violation(s)`,
+      issue_summary: `Builder wrote outside allowed scope: ${scopeViolations.length} violation(s) (not retryable — requires bridge repair)`,
       root_cause: "builder_scope_drift",
       repair_action: "narrow_scope",
       status: "detected",
@@ -115,7 +133,7 @@ export function verifyBuild(
       job_id: jobId,
       gate: "build_verification",
       error_code: "CONSTRAINT_VIOLATION",
-      issue_summary: `Builder violated bridge constraints: ${constraintViolations.join("; ")}`,
+      issue_summary: `Builder violated bridge constraints: ${constraintViolations.join("; ")} (retryable after fix)`,
       root_cause: "bridge_constraint_miss",
       repair_action: "add_test",
       status: "detected",
@@ -133,4 +151,35 @@ export function verifyBuild(
     test_coverage_met: testCoverageMet,
     fix_trail_entries: fixEntries,
   };
+}
+
+/**
+ * Create FixTrail entries for repo-level check failures (typecheck, lint, test, build).
+ */
+export function createCheckFixTrailEntries(
+  jobId: string,
+  runId: string,
+  bridgeId: string,
+  checkResults: { check: string; passed: boolean; output: string; skipped: boolean }[]
+): FixTrailEntry[] {
+  const entries: FixTrailEntry[] = [];
+  for (const cr of checkResults) {
+    if (!cr.passed && !cr.skipped) {
+      entries.push({
+        fix_id: `fix-${randomUUID().substring(0, 8)}`,
+        job_id: jobId,
+        gate: "repo_check",
+        error_code: `CHECK_FAILED_${cr.check.toUpperCase()}`,
+        issue_summary: `Repo check '${cr.check}' failed: ${cr.output.substring(0, 200)} (retryable after code fix)`,
+        root_cause: `${cr.check}_failure`,
+        repair_action: "fix_code",
+        status: "detected",
+        related_artifact_ids: [runId, bridgeId],
+        schema_version: CURRENT_SCHEMA_VERSION,
+        created_at: new Date().toISOString(),
+        resolved_at: null,
+      });
+    }
+  }
+  return entries;
 }

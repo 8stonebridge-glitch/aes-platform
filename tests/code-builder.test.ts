@@ -277,7 +277,7 @@ describe("Build Verifier — governance checks", () => {
 
     const result = verifyBuild("j-test-perm", pkg, run);
     expect(result.passed).toBe(false);
-    expect(result.constraint_violations.some(v => v.includes("Permission drift"))).toBe(true);
+    expect(result.constraint_violations.some(v => v.includes("Auth boundary drift"))).toBe(true);
     expect(result.constraint_violations.some(v => v.includes("middleware"))).toBe(true);
   });
 });

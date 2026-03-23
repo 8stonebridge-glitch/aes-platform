@@ -22,7 +22,8 @@ import { runGraph } from "../../graph.js";
 import { getJobStore } from "../../store.js";
 import { compileBuilderPackage } from "../../builder-artifact.js";
 import { CodeBuilder } from "../../builder/code-builder.js";
-import { verifyBuild } from "../../builder/build-verifier.js";
+import { verifyBuild, createCheckFixTrailEntries } from "../../builder/build-verifier.js";
+import { CheckRunner } from "../../builder/check-runner.js";
 import { viewCommand } from "./view.js";
 import type { BuilderPackage } from "../../builder-artifact.js";
 
@@ -160,6 +161,22 @@ async function runBuildPhase(
     }
   }
 
+  // Run repo checks
+  logStep("Running repo checks...");
+  const checkRunner = new CheckRunner();
+  const checkResults = await checkRunner.runAll(workspace.path);
+  run.check_results = checkResults;
+
+  for (const cr of checkResults) {
+    if (cr.skipped) {
+      logKeyValue(`  \u2298 ${cr.check}`, `skipped (${cr.skip_reason})`);
+    } else if (cr.passed) {
+      logKeyValue(`  \u2713 ${cr.check}`, `${cr.duration_ms}ms`);
+    } else {
+      logWarn(`  \u2717 ${cr.check}: FAILED ${cr.duration_ms}ms`);
+    }
+  }
+
   // Verify
   const verification = verifyBuild(jobId, pkg, run);
   run.scope_violations = verification.scope_violations;
@@ -192,12 +209,23 @@ async function runBuildPhase(
         final_commit: run.final_commit,
         diff_summary: run.diff_summary,
         pr_summary: run.pr_summary,
+        check_results: run.check_results,
       });
     } catch (_err: any) {
       // Non-fatal
     }
 
     for (const entry of verification.fix_trail_entries) {
+      try {
+        await persistence.persistFixTrail(entry);
+      } catch (_err: any) {
+        // Non-fatal
+      }
+    }
+
+    // Persist FixTrail entries for repo check failures
+    const checkFixEntries = createCheckFixTrailEntries(jobId, run.run_id, pkg.bridge_id, run.check_results);
+    for (const entry of checkFixEntries) {
       try {
         await persistence.persistFixTrail(entry);
       } catch (_err: any) {

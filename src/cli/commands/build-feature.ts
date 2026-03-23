@@ -7,7 +7,8 @@
 import { getJobStore } from "../../store.js";
 import { compileBuilderPackage } from "../../builder-artifact.js";
 import { CodeBuilder } from "../../builder/code-builder.js";
-import { verifyBuild } from "../../builder/build-verifier.js";
+import { verifyBuild, createCheckFixTrailEntries } from "../../builder/build-verifier.js";
+import { CheckRunner } from "../../builder/check-runner.js";
 
 export async function buildFeatureCommand(jobId: string, featureId: string, options?: { approveMerge?: boolean }) {
   const store = getJobStore();
@@ -57,7 +58,28 @@ export async function buildFeatureCommand(jobId: string, featureId: string, opti
     }
   }
 
-  // 6. Post-build verification
+  // 6. Run repo-level checks
+  console.log(`Running repo checks...`);
+  const checkRunner = new CheckRunner();
+  const checkResults = await checkRunner.runAll(workspace.path);
+  run.check_results = checkResults;
+
+  // Display check results
+  console.log();
+  console.log(`=== Repo Checks ===`);
+  for (const cr of checkResults) {
+    if (cr.skipped) {
+      console.log(`  \u2298 ${cr.check.padEnd(12)} skipped (${cr.skip_reason})`);
+    } else if (cr.passed) {
+      console.log(`  \u2713 ${cr.check.padEnd(12)} ${cr.duration_ms}ms`);
+    } else {
+      console.log(`  \u2717 ${cr.check.padEnd(12)} FAILED ${cr.duration_ms}ms`);
+      console.log(`    ${cr.output.substring(0, 200)}`);
+    }
+  }
+  console.log();
+
+  // 7. Post-build verification
   console.log(`Verifying build output...`);
   const verification = verifyBuild(jobId, pkg, run);
 
@@ -78,7 +100,7 @@ export async function buildFeatureCommand(jobId: string, featureId: string, opti
     console.log(`Verification PASSED`);
   }
 
-  // 7. Update run status in Postgres
+  // 8. Update run status in Postgres
   if (persistence) {
     try {
       await persistence.updateBuilderRunStatus(run.run_id, run.status, {
@@ -96,13 +118,25 @@ export async function buildFeatureCommand(jobId: string, featureId: string, opti
         final_commit: run.final_commit,
         diff_summary: run.diff_summary,
         pr_summary: run.pr_summary,
+        check_results: run.check_results,
       });
     } catch (err: any) {
       console.error(`Warning: Failed to update builder run: ${err.message}`);
     }
 
-    // 8. Persist FixTrail entries if verification failed
+    // 9. Persist FixTrail entries for verification failures
     for (const entry of verification.fix_trail_entries) {
+      try {
+        await persistence.persistFixTrail(entry);
+        console.log(`  FixTrail entry created: ${entry.error_code}`);
+      } catch (err: any) {
+        console.error(`Warning: Failed to persist FixTrail: ${err.message}`);
+      }
+    }
+
+    // 10. Persist FixTrail entries for repo check failures
+    const checkFixEntries = createCheckFixTrailEntries(jobId, run.run_id, pkg.bridge_id, run.check_results);
+    for (const entry of checkFixEntries) {
       try {
         await persistence.persistFixTrail(entry);
         console.log(`  FixTrail entry created: ${entry.error_code}`);
@@ -112,7 +146,7 @@ export async function buildFeatureCommand(jobId: string, featureId: string, opti
     }
   }
 
-  // 9. Print summary
+  // 11. Print summary
   console.log();
   console.log(`=== Build Summary ===`);
   console.log(`Run ID:       ${run.run_id}`);
@@ -123,6 +157,7 @@ export async function buildFeatureCommand(jobId: string, featureId: string, opti
   console.log(`Files created: ${run.files_created.length}`);
   console.log(`Files modified: ${run.files_modified.length}`);
   console.log(`Tests:        ${run.test_results.filter(t => t.passed).length}/${run.test_results.length} passed`);
+  console.log(`Checks:       ${run.check_results.filter(c => c.passed || c.skipped).length}/${run.check_results.length} OK`);
   console.log(`Verification: ${run.verification_passed ? "PASSED" : "REJECTED"}`);
   if (run.failure_reason) console.log(`Failure:      ${run.failure_reason}`);
   console.log();

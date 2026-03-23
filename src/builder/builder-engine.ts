@@ -32,6 +32,7 @@ export class TemplateBuilder {
       files_modified: [],
       files_deleted: [],
       test_results: [],
+      check_results: [],
       acceptance_coverage: { total_required: 0, covered: 0, missing: [] },
       scope_violations: [],
       constraint_violations: [],

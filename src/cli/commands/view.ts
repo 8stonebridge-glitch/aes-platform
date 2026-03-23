@@ -136,6 +136,21 @@ export async function viewCommand(jobId: string): Promise<void> {
         console.log(`    ${chalk.gray("Tests:")}      ${passedTests}/${totalTests} passed`);
         console.log(`    ${chalk.gray("Verified:")}   ${r.verification_passed ? "PASSED" : "REJECTED"}`);
       }
+
+      // Show check results
+      const checks = r.check_results || [];
+      if (checks.length > 0) {
+        console.log(`    ${chalk.gray("CHECKS")}`);
+        for (const cr of checks) {
+          if (cr.skipped) {
+            console.log(`      \u2298 ${cr.check.padEnd(12)} skipped (${cr.skip_reason || "no config"})`);
+          } else if (cr.passed) {
+            console.log(`      ${chalk.green("\u2713")} ${cr.check.padEnd(12)} ${cr.duration_ms}ms`);
+          } else {
+            console.log(`      ${chalk.red("\u2717")} ${cr.check.padEnd(12)} FAILED ${cr.duration_ms}ms`);
+          }
+        }
+      }
     }
     console.log();
   }

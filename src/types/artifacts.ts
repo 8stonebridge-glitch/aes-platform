@@ -323,7 +323,7 @@ export interface VetoResult {
 export interface ApprovalRecord {
   job_id: string;
   app_spec_id: string;
-  approval_type: "intent_confirmation" | "app_plan_approval";
+  approval_type: "intent_confirmation" | "app_plan_approval" | "build_merge_approval";
   approved: boolean;
   user_comment?: string;
   schema_version: number;
@@ -359,7 +359,16 @@ export interface FixTrailEntry {
   resolved_at: string | null;
 }
 
-// ─── Catalog Match ─────────────────────────────────────────────────────
+// ─── Check Result (repo-level check output) ──────────────────────────
+
+export interface CheckResult {
+  check: string;
+  passed: boolean;
+  output: string;
+  duration_ms: number;
+  skipped: boolean;
+  skip_reason?: string;
+}
 
 // ─── Builder Run Types ────────────────────────────────────────────────
 
@@ -368,7 +377,8 @@ export type BuilderRunStatus =
   | "building"
   | "build_failed"
   | "build_succeeded"
-  | "build_rejected";
+  | "build_rejected"
+  | "build_approved";
 
 export interface BuilderRunRecord {
   run_id: string;
@@ -395,6 +405,9 @@ export interface BuilderRunRecord {
     covered: number;
     missing: string[];
   };
+
+  // Repo-level check results (typecheck, lint, test, build)
+  check_results: CheckResult[];
 
   // Verification
   scope_violations: string[];

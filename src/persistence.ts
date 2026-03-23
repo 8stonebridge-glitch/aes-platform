@@ -434,8 +434,9 @@ export class PersistenceLayer {
         files_deleted, test_results, acceptance_coverage, scope_violations,
         constraint_violations, verification_passed, failure_reason,
         builder_model, duration_ms, schema_version,
-        workspace_id, branch, base_commit, final_commit, diff_summary, pr_summary
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+        workspace_id, branch, base_commit, final_commit, diff_summary, pr_summary,
+        check_results
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
       [
         run.run_id, run.job_id, run.bridge_id, run.feature_id, run.feature_name,
         run.status, run.input_package_hash, JSON.stringify(run.builder_package),
@@ -444,7 +445,8 @@ export class PersistenceLayer {
         run.scope_violations, run.constraint_violations, run.verification_passed,
         run.failure_reason, run.builder_model, run.duration_ms, run.schema_version,
         run.workspace_id || null, run.branch || null, run.base_commit || null,
-        run.final_commit || null, run.diff_summary || null, run.pr_summary || null
+        run.final_commit || null, run.diff_summary || null, run.pr_summary || null,
+        JSON.stringify(run.check_results || [])
       ]
     );
   }
@@ -471,6 +473,7 @@ export class PersistenceLayer {
     if (updates.final_commit) { sets.push(`final_commit = $${idx}`); params.push(updates.final_commit); idx++; }
     if (updates.diff_summary) { sets.push(`diff_summary = $${idx}`); params.push(updates.diff_summary); idx++; }
     if (updates.pr_summary) { sets.push(`pr_summary = $${idx}`); params.push(updates.pr_summary); idx++; }
+    if (updates.check_results) { sets.push(`check_results = $${idx}`); params.push(JSON.stringify(updates.check_results)); idx++; }
 
     await this.pool.query(
       `UPDATE builder_runs SET ${sets.join(", ")} WHERE run_id = $1`,
@@ -512,6 +515,7 @@ export class PersistenceLayer {
       final_commit: r.final_commit || null,
       diff_summary: r.diff_summary || null,
       pr_summary: r.pr_summary || null,
+      check_results: r.check_results || [],
     }));
   }
 

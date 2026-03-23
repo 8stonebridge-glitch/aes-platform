@@ -45,6 +45,40 @@ export class WorkspaceManager {
   }
 
   /**
+   * Clone an existing repo and create a feature branch.
+   * If repoUrl is provided, clone it. Otherwise create a fresh workspace.
+   */
+  createFromRepo(jobId: string, featureName: string, repoUrl?: string): Workspace {
+    const slug = featureName.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 40);
+    const branch = `aes/${jobId}/${slug}`;
+    const workspaceId = `ws-${jobId}-${slug}`;
+
+    const basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+
+    if (repoUrl) {
+      // Clone the real repo
+      execSync(`git clone --depth 1 ${repoUrl} .`, { cwd: basePath, stdio: "pipe" });
+      execSync(`git checkout -b ${branch}`, { cwd: basePath, stdio: "pipe" });
+    } else {
+      // Fresh workspace (same as createWorkspace)
+      execSync("git init", { cwd: basePath, stdio: "pipe" });
+      execSync(`git checkout -b ${branch}`, { cwd: basePath, stdio: "pipe" });
+      writeFileSync(join(basePath, ".aes-workspace"), JSON.stringify({
+        workspace_id: workspaceId,
+        job_id: jobId,
+        feature: featureName,
+        branch,
+        created_at: new Date().toISOString(),
+      }, null, 2));
+      execSync("git add -A", { cwd: basePath, stdio: "pipe" });
+      execSync('git commit -m "AES workspace init"', { cwd: basePath, stdio: "pipe" });
+    }
+
+    const baseCommit = execSync("git rev-parse HEAD", { cwd: basePath, stdio: "pipe" }).toString().trim();
+    return { workspace_id: workspaceId, path: basePath, branch, base_commit: baseCommit };
+  }
+
+  /**
    * Get the diff of all changes since workspace creation.
    */
   getDiff(workspace: Workspace): string {

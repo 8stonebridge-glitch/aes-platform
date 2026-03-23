@@ -14,12 +14,14 @@ function hashPackage(pkg: BuilderPackage): string {
 export class CodeBuilder {
   private workspaceManager = new WorkspaceManager();
 
-  async build(jobId: string, pkg: BuilderPackage): Promise<{ run: BuilderRunRecord; workspace: Workspace; prSummary: string }> {
+  async build(jobId: string, pkg: BuilderPackage, repoUrl?: string): Promise<{ run: BuilderRunRecord; workspace: Workspace; prSummary: string }> {
     const runId = `br-${randomUUID().substring(0, 8)}`;
     const startTime = Date.now();
 
-    // 1. Create isolated workspace
-    const workspace = this.workspaceManager.createWorkspace(jobId, pkg.feature_name);
+    // 1. Create isolated workspace (clone from repo if URL provided)
+    const workspace = repoUrl
+      ? this.workspaceManager.createFromRepo(jobId, pkg.feature_name, repoUrl)
+      : this.workspaceManager.createWorkspace(jobId, pkg.feature_name);
 
     const run: BuilderRunRecord = {
       run_id: runId,
@@ -34,6 +36,7 @@ export class CodeBuilder {
       files_modified: [],
       files_deleted: [],
       test_results: [],
+      check_results: [],
       acceptance_coverage: { total_required: 0, covered: 0, missing: [] },
       scope_violations: [],
       constraint_violations: [],
