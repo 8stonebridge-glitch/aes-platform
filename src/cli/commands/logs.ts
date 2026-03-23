@@ -7,17 +7,15 @@ export async function logsCommand(
   options: { gate?: string; feature?: string }
 ): Promise<void> {
   const store = getJobStore();
-  const job = store.get(jobId);
 
-  if (!job) {
-    console.log(chalk.red(`Job ${jobId} not found`));
-    return;
+  // Try memory first, then Postgres
+  let logs = store.getLogs(jobId);
+  if (!logs || logs.length === 0) {
+    logs = await store.loadLogsFromPostgres(jobId);
   }
 
-  const logs = store.getLogs(jobId);
-
   if (!logs || logs.length === 0) {
-    console.log(chalk.gray("No logs yet."));
+    console.log(chalk.gray(`No logs found for ${jobId}.`));
     return;
   }
 
@@ -28,7 +26,7 @@ export async function logsCommand(
   }
 
   if (options.feature) {
-    filtered = filtered.filter((l: any) => l.featureId === options.feature);
+    filtered = filtered.filter((l: any) => (l.featureId || l.feature_id) === options.feature);
   }
 
   logHeader(`Logs for ${jobId}`);
@@ -36,8 +34,8 @@ export async function logsCommand(
   for (const entry of filtered) {
     const time = new Date(entry.timestamp).toLocaleTimeString();
     const gate = entry.gate ? chalk.cyan(`[${entry.gate}]`) : "";
-    const feature = entry.featureId
-      ? chalk.magenta(`(${entry.featureId})`)
+    const feature = entry.feature_id
+      ? chalk.magenta(`(${entry.feature_id})`)
       : "";
     console.log(`  ${chalk.gray(time)} ${gate} ${feature} ${entry.message}`);
   }

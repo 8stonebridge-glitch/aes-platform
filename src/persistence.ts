@@ -1,0 +1,354 @@
+/**
+ * Postgres persistence layer for AES v12.
+ * Writes artifacts to the aes-artifacts schema tables.
+ * Reads back for replay and reconstruction.
+ */
+
+import pg from "pg";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Ensure IDs are valid UUIDs for Postgres.
+// Deterministic: same input always produces the same UUID.
+const uuidCache = new Map<string, string>();
+function ensureUUID(id: string): string {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(id)) return id;
+  if (uuidCache.has(id)) return uuidCache.get(id)!;
+  const generated = randomUUID();
+  uuidCache.set(id, generated);
+  return generated;
+}
+import type {
+  IntentBrief,
+  AppSpec,
+  FeatureBridge,
+  ValidationResult,
+  VetoResult,
+  ApprovalRecord,
+  LogEntry,
+} from "./types/artifacts.js";
+
+export class PersistenceLayer {
+  private pool: pg.Pool;
+
+  constructor(connectionString: string) {
+    // Parse connection string for host/port to avoid IPv6 issues
+    const url = new URL(connectionString);
+    this.pool = new pg.Pool({
+      host: url.hostname,
+      port: parseInt(url.port || "5432"),
+      user: url.username,
+      password: url.password,
+      database: url.pathname.slice(1),
+    });
+  }
+
+  async initialize(): Promise<void> {
+    // Run build_logs migration
+    try {
+      const __dirname = dirname(fileURLToPath(import.meta.url));
+      const sql = readFileSync(join(__dirname, "schema", "build-logs.sql"), "utf-8");
+      await this.pool.query(sql);
+    } catch {
+      // Schema might already exist — that's fine
+    }
+  }
+
+  // ─── Gate 0: Intent Brief ──────────────────────────────────────────
+
+  private intentBriefDbIds = new Map<string, string>();
+
+  async persistIntentBrief(jobId: string, brief: IntentBrief): Promise<void> {
+    const requestId = ensureUUID(brief.request_id);
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO intent_briefs (
+        request_id, raw_request, inferred_app_class, inferred_primary_users,
+        inferred_core_outcome, inferred_platforms, inferred_risk_class,
+        inferred_integrations, explicit_inclusions, explicit_exclusions,
+        ambiguity_flags, assumptions, confirmation_statement, confirmation_status
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      ON CONFLICT DO NOTHING
+      RETURNING id`,
+      [
+        requestId, brief.raw_request, brief.inferred_app_class,
+        brief.inferred_primary_users, brief.inferred_core_outcome,
+        brief.inferred_platforms, brief.inferred_risk_class,
+        brief.inferred_integrations, brief.explicit_inclusions,
+        brief.explicit_exclusions, brief.ambiguity_flags, brief.assumptions,
+        brief.confirmation_statement, brief.confirmation_status,
+      ]
+    );
+    if (result.rows[0]?.id) {
+      this.intentBriefDbIds.set(brief.request_id, result.rows[0].id);
+    }
+  }
+
+  async updateIntentBriefStatus(requestId: string, status: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE intent_briefs SET confirmation_status = $1, updated_at = now() WHERE request_id = $2`,
+      [status, requestId]
+    );
+  }
+
+  // ─── Gate 1: AppSpec ───────────────────────────────────────────────
+
+  async persistAppSpec(jobId: string, spec: AppSpec): Promise<string> {
+    const appId = ensureUUID(spec.app_id);
+    const requestId = ensureUUID(spec.request_id);
+    // Use the actual DB ID from the intent_briefs insert, not a generated UUID
+    const intentBriefId = this.intentBriefDbIds.get(spec.intent_brief_id)
+      || this.intentBriefDbIds.get(spec.request_id)
+      || ensureUUID(spec.intent_brief_id);
+    const rows = await this.pool.query<{ id: string }>(
+      `INSERT INTO app_specs (
+        app_id, request_id, intent_brief_id, title, summary,
+        app_class, risk_class, spec_data, confidence_overall, version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING id`,
+      [
+        appId, requestId, intentBriefId,
+        spec.title, spec.summary, spec.app_class, spec.risk_class,
+        JSON.stringify(spec), spec.confidence.overall, 1,
+      ]
+    );
+    return rows.rows[0].id;
+  }
+
+  // ─── Gate 1: Validation Results ────────────────────────────────────
+
+  async persistValidationResults(
+    jobId: string,
+    bridgeId: string,
+    buildRunId: string,
+    results: ValidationResult[]
+  ): Promise<void> {
+    // Gate 1 validation results don't have a bridge yet (bridges are Gate 2).
+    // Store them as build_logs with structured error codes instead of in validator_results
+    // which has an FK to feature_bridges.
+    for (const r of results) {
+      await this.pool.query(
+        `INSERT INTO build_logs (job_id, gate, message, level, error_code)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          jobId,
+          "gate_1",
+          r.passed ? `${r.code}: PASS` : `${r.code}: FAIL — ${r.reason || ""}`,
+          r.passed ? "info" : "error",
+          r.passed ? null : r.code,
+        ]
+      );
+    }
+  }
+
+  // ─── Gate 2: Feature Bridges ───────────────────────────────────────
+
+  private bridgeDbIds = new Map<string, string>();
+
+  async persistFeatureBridges(
+    jobId: string,
+    appSpecId: string,
+    bridges: Record<string, FeatureBridge>
+  ): Promise<void> {
+    for (const [featureId, bridge] of Object.entries(bridges)) {
+      if (!bridge.bridge_id) continue;
+      const result = await this.pool.query<{ id: string }>(
+        `INSERT INTO feature_bridges (
+          bridge_id, app_id, app_spec_id, feature_id, feature_name,
+          status, bridge_data, confidence_overall, version
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT DO NOTHING
+        RETURNING id`,
+        [
+          ensureUUID(bridge.bridge_id), ensureUUID(bridge.app_id), appSpecId, bridge.feature_id,
+          bridge.feature_name, bridge.status, JSON.stringify(bridge),
+          bridge.confidence?.overall || 0, 1,
+        ]
+      );
+      if (result.rows[0]?.id) {
+        this.bridgeDbIds.set(bridge.bridge_id, result.rows[0].id);
+      }
+    }
+  }
+
+  // ─── Gate 3: Veto Results ──────────────────────────────────────────
+
+  async persistVetoResults(
+    jobId: string,
+    bridges: Record<string, FeatureBridge>
+  ): Promise<void> {
+    for (const [featureId, bridge] of Object.entries(bridges)) {
+      if (!bridge.bridge_id || !bridge.hard_vetoes) continue;
+      const triggered = bridge.hard_vetoes.filter((v: VetoResult) => v.triggered);
+      // Use the DB row ID, not the bridge_id field
+      const dbId = this.bridgeDbIds.get(bridge.bridge_id);
+      if (!dbId) continue; // Can't persist without a valid FK
+      await this.pool.query(
+        `INSERT INTO veto_results (
+          bridge_id, any_triggered, triggered_codes, result_data
+        ) VALUES ($1,$2,$3,$4)`,
+        [
+          dbId,
+          triggered.length > 0,
+          triggered.map((v: VetoResult) => v.code),
+          JSON.stringify(bridge.hard_vetoes),
+        ]
+      );
+    }
+  }
+
+  // ─── Approval ──────────────────────────────────────────────────────
+
+  async persistApproval(approval: ApprovalRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO user_approvals (
+        app_id, app_spec_id, approval_type, approved, user_comment, presented_data
+      ) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        ensureUUID(approval.job_id),
+        approval.app_spec_id,  // Already a DB UUID from persistAppSpec
+        approval.approval_type,
+        approval.approved,
+        approval.user_comment || null,
+        JSON.stringify({ approval_type: approval.approval_type }),
+      ]
+    );
+  }
+
+  // ─── Logs ──────────────────────────────────────────────────────────
+
+  async persistLog(jobId: string, entry: LogEntry): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO build_logs (job_id, gate, feature_id, message, level, error_code)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        jobId, entry.gate || null, entry.feature_id || null,
+        entry.message, entry.level || "info", entry.error_code || null,
+      ]
+    );
+  }
+
+  // ─── Load / Reconstruct ────────────────────────────────────────────
+
+  async loadIntentBrief(requestId: string): Promise<IntentBrief | null> {
+    const res = await this.pool.query(
+      `SELECT * FROM intent_briefs WHERE request_id = $1 LIMIT 1`,
+      [requestId]
+    );
+    return res.rows[0] || null;
+  }
+
+  async loadAppSpecByRequestId(requestId: string): Promise<AppSpec | null> {
+    const res = await this.pool.query(
+      `SELECT spec_data FROM app_specs WHERE request_id = $1 ORDER BY version DESC LIMIT 1`,
+      [requestId]
+    );
+    if (!res.rows[0]) return null;
+    return typeof res.rows[0].spec_data === "string"
+      ? JSON.parse(res.rows[0].spec_data)
+      : res.rows[0].spec_data;
+  }
+
+  async loadAppSpec(appId: string): Promise<AppSpec | null> {
+    const res = await this.pool.query(
+      `SELECT spec_data FROM app_specs WHERE app_id = $1 ORDER BY version DESC LIMIT 1`,
+      [appId]
+    );
+    if (!res.rows[0]) return null;
+    return typeof res.rows[0].spec_data === "string"
+      ? JSON.parse(res.rows[0].spec_data)
+      : res.rows[0].spec_data;
+  }
+
+  async loadFeatureBridges(appId: string): Promise<Record<string, FeatureBridge>> {
+    const res = await this.pool.query(
+      `SELECT feature_id, bridge_data FROM feature_bridges WHERE app_id = $1`,
+      [appId]
+    );
+    const bridges: Record<string, FeatureBridge> = {};
+    for (const row of res.rows) {
+      const data = typeof row.bridge_data === "string"
+        ? JSON.parse(row.bridge_data)
+        : row.bridge_data;
+      bridges[row.feature_id] = data;
+    }
+    return bridges;
+  }
+
+  async loadVetoResults(bridgeIds: string[]): Promise<VetoResult[]> {
+    if (bridgeIds.length === 0) return [];
+    const res = await this.pool.query(
+      `SELECT result_data FROM veto_results WHERE bridge_id = ANY($1)`,
+      [bridgeIds]
+    );
+    return res.rows.flatMap((r) => {
+      const data = typeof r.result_data === "string"
+        ? JSON.parse(r.result_data)
+        : r.result_data;
+      return Array.isArray(data) ? data : [data];
+    });
+  }
+
+  async loadValidationResults(jobId: string): Promise<ValidationResult[]> {
+    const res = await this.pool.query(
+      `SELECT validator_name as code, verdict, evidence FROM validator_results
+       WHERE bridge_id = $1 OR build_run_id = $1`,
+      [jobId]
+    );
+    return res.rows.map((r) => ({
+      code: r.code,
+      passed: r.verdict === "PASS",
+      reason: r.evidence?.reason,
+    }));
+  }
+
+  async loadApproval(jobId: string): Promise<ApprovalRecord | null> {
+    const res = await this.pool.query(
+      `SELECT * FROM user_approvals WHERE app_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [jobId]
+    );
+    if (!res.rows[0]) return null;
+    const row = res.rows[0];
+    return {
+      job_id: row.app_id,
+      app_spec_id: row.app_spec_id,
+      approval_type: row.approval_type,
+      approved: row.approved,
+      user_comment: row.user_comment,
+      created_at: row.created_at?.toISOString(),
+    };
+  }
+
+  async loadLogs(jobId: string): Promise<LogEntry[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM build_logs WHERE job_id = $1 ORDER BY created_at ASC`,
+      [jobId]
+    );
+    return res.rows.map((r) => ({
+      timestamp: r.created_at?.toISOString(),
+      gate: r.gate,
+      feature_id: r.feature_id,
+      message: r.message,
+      level: r.level,
+      error_code: r.error_code,
+    }));
+  }
+
+  async listJobs(): Promise<{ job_id: string; raw_request: string; created_at: string }[]> {
+    const res = await this.pool.query(
+      `SELECT request_id as job_id, raw_request, created_at
+       FROM intent_briefs ORDER BY created_at DESC LIMIT 50`
+    );
+    return res.rows.map((r) => ({
+      job_id: r.job_id,
+      raw_request: r.raw_request,
+      created_at: r.created_at?.toISOString(),
+    }));
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+}

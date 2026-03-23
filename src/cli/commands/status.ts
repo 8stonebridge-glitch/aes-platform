@@ -9,10 +9,25 @@ import { getJobStore } from "../../store.js";
 
 export async function statusCommand(jobId?: string): Promise<void> {
   const store = getJobStore();
-  const job = jobId ? store.get(jobId) : store.getLatest();
+
+  // Try memory first, then Postgres
+  let job = jobId ? store.get(jobId) : store.getLatest();
+  if (!job && jobId) {
+    job = await store.loadFromPostgres(jobId) || undefined;
+  }
 
   if (!job) {
-    console.log(chalk.gray("No active jobs found."));
+    // List available jobs from Postgres
+    const pgJobs = await store.listFromPostgres();
+    if (pgJobs.length > 0) {
+      console.log(chalk.gray("No active in-memory job. Recent persisted jobs:"));
+      for (const j of pgJobs.slice(0, 5)) {
+        console.log(`  ${chalk.cyan(j.job_id)} — ${j.raw_request} (${j.created_at})`);
+      }
+      console.log(chalk.gray(`\nUse: aes status <job-id> or aes replay <job-id>`));
+    } else {
+      console.log(chalk.gray("No jobs found."));
+    }
     return;
   }
 
@@ -39,8 +54,8 @@ export async function statusCommand(jobId?: string): Promise<void> {
     console.log(chalk.bold("  Features:"));
     for (const fId of job.featureBuildOrder) {
       const bridge = job.featureBridges?.[fId];
-      const result = job.buildResults?.[fId];
-      const status = result?.status || bridge?.status || "pending";
+      const result = job.buildResults?.[fId] as Record<string, unknown> | undefined;
+      const status = (result?.status as string) || bridge?.status || "pending";
       const name = bridge?.feature_name || fId;
       logFeatureStatus(fId, name, status);
     }

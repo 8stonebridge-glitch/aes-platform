@@ -1,27 +1,23 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { GateErrorCode } from "../types/artifacts.js";
+import type { ValidationResult } from "../types/artifacts.js";
 
 /**
  * Spec Validator — runs Gate 1 validation rules against the AppSpec.
- * These are the 10 canonical rules from the contracts.
+ * All error codes use G1_ prefix to distinguish from Gate 2/3.
  */
 
-interface RuleResult {
-  code: string;
-  passed: boolean;
-  reason?: string;
-}
-
-function runValidationRules(spec: any): RuleResult[] {
-  const results: RuleResult[] = [];
+function runValidationRules(spec: any): ValidationResult[] {
+  const results: ValidationResult[] = [];
 
   // 1. ALL_FEATURES_HAVE_ACTORS
   const featuresWithoutActors = spec.features.filter(
     (f: any) => !f.actor_ids || f.actor_ids.length === 0
   );
   results.push({
-    code: "ALL_FEATURES_HAVE_ACTORS",
+    code: GateErrorCode.G1_FEATURES_WITHOUT_ACTORS,
     passed: featuresWithoutActors.length === 0,
     reason: featuresWithoutActors.length > 0
       ? `Features without actors: ${featuresWithoutActors.map((f: any) => f.feature_id).join(", ")}`
@@ -33,7 +29,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (f: any) => !f.outcome || f.outcome.trim().length === 0
   );
   results.push({
-    code: "ALL_FEATURES_HAVE_OUTCOMES",
+    code: GateErrorCode.G1_FEATURES_WITHOUT_OUTCOMES,
     passed: featuresWithoutOutcomes.length === 0,
     reason: featuresWithoutOutcomes.length > 0
       ? `Features without outcomes: ${featuresWithoutOutcomes.map((f: any) => f.feature_id).join(", ")}`
@@ -46,7 +42,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (w.steps || []).filter((s: any) => s.feature_id && !featureIds.has(s.feature_id))
   );
   results.push({
-    code: "ALL_WORKFLOWS_REFERENCE_VALID_FEATURES",
+    code: GateErrorCode.G1_WORKFLOWS_INVALID_FEATURES,
     passed: invalidWorkflowRefs.length === 0,
     reason: invalidWorkflowRefs.length > 0
       ? `Invalid feature refs in workflows`
@@ -59,7 +55,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (p: any) => !roleIds.has(p.role_id)
   );
   results.push({
-    code: "ALL_PERMISSIONS_REFERENCE_VALID_ROLES",
+    code: GateErrorCode.G1_PERMISSIONS_INVALID_ROLES,
     passed: invalidPermRoles.length === 0,
     reason: invalidPermRoles.length > 0
       ? `Permissions reference invalid roles: ${invalidPermRoles.map((p: any) => p.role_id).join(", ")}`
@@ -72,7 +68,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (p: any) => !validResources.has(p.resource)
   );
   results.push({
-    code: "ALL_PERMISSION_RESOURCES_DEFINED",
+    code: GateErrorCode.G1_PERMISSIONS_UNDEFINED_RESOURCES,
     passed: invalidPermResources.length === 0,
     reason: invalidPermResources.length > 0
       ? `Permissions reference undefined resources`
@@ -84,7 +80,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (e: any) => !featureIds.has(e.from_feature_id) || !featureIds.has(e.to_feature_id)
   );
   results.push({
-    code: "NO_UNDEFINED_FEATURE_DEPENDENCIES",
+    code: GateErrorCode.G1_UNDEFINED_FEATURE_DEPENDENCIES,
     passed: undefinedDeps.length === 0,
     reason: undefinedDeps.length > 0
       ? `Dependency graph references undefined features`
@@ -102,7 +98,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (f: any) => !testedFeatures.has(f.feature_id)
   );
   results.push({
-    code: "ALL_CRITICAL_FEATURES_HAVE_ACCEPTANCE_TESTS",
+    code: GateErrorCode.G1_CRITICAL_FEATURES_NO_TESTS,
     passed: untestedCritical.length === 0,
     reason: untestedCritical.length > 0
       ? `Critical features without tests: ${untestedCritical.map((f: any) => f.feature_id).join(", ")}`
@@ -114,7 +110,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (i: any) => i.fallback_defined === false
   );
   results.push({
-    code: "ALL_EXTERNAL_INTEGRATIONS_DECLARE_FALLBACK_STATUS",
+    code: GateErrorCode.G1_INTEGRATIONS_NO_FALLBACK,
     passed: integrationsWithoutFallback.length === 0 || spec.integrations.length === 0,
     reason: integrationsWithoutFallback.length > 0
       ? `Integrations without fallback: ${integrationsWithoutFallback.map((i: any) => i.name).join(", ")}`
@@ -125,7 +121,7 @@ function runValidationRules(spec: any): RuleResult[] {
   const auditFeatures = spec.features.filter((f: any) => f.audit_required);
   // For now, pass if audit features exist and the app has at least basic structure
   results.push({
-    code: "ALL_AUDIT_REQUIRED_FEATURES_HAVE_AUDIT_REQUIREMENTS",
+    code: GateErrorCode.G1_AUDIT_FEATURES_NO_REQUIREMENTS,
     passed: true, // Template-derived specs have this by construction
   });
 
@@ -134,7 +130,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (f: any) => f.offline_behavior_required
   );
   results.push({
-    code: "ALL_OFFLINE_REQUIRED_FEATURES_HAVE_OFFLINE_REQUIREMENTS",
+    code: GateErrorCode.G1_OFFLINE_FEATURES_NO_REQUIREMENTS,
     passed: true, // Will be enforced more strictly with LLM decomposer
   });
 
@@ -163,7 +159,7 @@ function runValidationRules(spec: any): RuleResult[] {
     (a) => !declaredRoleIds.has(a)
   );
   results.push({
-    code: "ALL_ACTORS_RESOLVE_TO_DECLARED_ROLES",
+    code: GateErrorCode.G1_ACTORS_WITHOUT_ROLES,
     passed: undeclaredActors.length === 0,
     reason: undeclaredActors.length > 0
       ? `Actors without declared roles: ${undeclaredActors.join(", ")}`

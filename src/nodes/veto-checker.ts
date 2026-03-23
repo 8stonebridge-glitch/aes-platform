@@ -1,6 +1,7 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { GateErrorCode } from "../types/artifacts.js";
 
 /**
  * Veto Checker — Gate 3.
@@ -27,7 +28,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
     (p: any) => p.resource === feature.feature_id
   );
   results.push({
-    code: "AUTH_NOT_DEFINED",
+    code: GateErrorCode.G3_AUTH_NOT_DEFINED,
     triggered: !hasRoles || !hasPermissions,
     reason: !hasRoles
       ? "No roles defined"
@@ -43,7 +44,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   const roleIds = new Set(appSpec.roles.map((r: any) => r.role_id));
   const unmappedActors = featureActors.filter((a: string) => !roleIds.has(a) && a !== "end_user" && a !== "system");
   results.push({
-    code: "ROLE_BOUNDARY_NOT_DEFINED",
+    code: GateErrorCode.G3_ROLE_BOUNDARY_NOT_DEFINED,
     triggered: unmappedActors.length > 0,
     reason: unmappedActors.length > 0 ? `Actors without matching roles: ${unmappedActors.join(", ")}` : "",
     required_fix: "Map all actors to defined roles",
@@ -53,7 +54,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   // 3. TENANCY_BOUNDARY_NOT_DEFINED
   // All apps must have orgId scoping strategy
   results.push({
-    code: "TENANCY_BOUNDARY_NOT_DEFINED",
+    code: GateErrorCode.G3_TENANCY_BOUNDARY_NOT_DEFINED,
     triggered: false, // Template-based apps get this by default via Convex orgId pattern
     reason: "",
     required_fix: "",
@@ -66,7 +67,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
     (a: any) => !a.confirmation_required
   );
   results.push({
-    code: "DESTRUCTIVE_ACTION_WITHOUT_SCOPE",
+    code: GateErrorCode.G3_DESTRUCTIVE_ACTION_WITHOUT_SCOPE,
     triggered: unscopedDestructive.length > 0,
     reason: unscopedDestructive.length > 0
       ? `Destructive actions without confirmation: ${unscopedDestructive.map((a: any) => a.action_name).join(", ")}`
@@ -78,7 +79,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   // 5. PAYMENT_WITHOUT_RECONCILIATION
   const hasPayment = (feature.external_dependencies || []).includes("payment_provider");
   results.push({
-    code: "PAYMENT_WITHOUT_RECONCILIATION",
+    code: GateErrorCode.G3_PAYMENT_WITHOUT_RECONCILIATION,
     triggered: false, // Only triggers if payment feature lacks reconciliation — checked at build time
     reason: "",
     required_fix: "",
@@ -91,7 +92,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
     (r: any) => (r.role_id === "admin" || r.role_id === "super_admin") && r.scope
   );
   results.push({
-    code: "ADMIN_WITHOUT_ROLE_BOUNDARY",
+    code: GateErrorCode.G3_ADMIN_WITHOUT_ROLE_BOUNDARY,
     triggered: isAdmin && !adminHasScope,
     reason: isAdmin && !adminHasScope ? "Admin role has no scope boundary" : "",
     required_fix: "Define scope for admin role",
@@ -106,7 +107,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
     return integration && !integration.fallback_defined;
   });
   results.push({
-    code: "EXTERNAL_API_WITHOUT_FALLBACK",
+    code: GateErrorCode.G3_EXTERNAL_API_WITHOUT_FALLBACK,
     triggered: depsWithoutFallback.length > 0,
     reason: depsWithoutFallback.length > 0
       ? `External dependencies without fallback: ${depsWithoutFallback.join(", ")}`
@@ -118,7 +119,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   // 8. REAL_TIME_WITHOUT_OFFLINE_STATE
   const needsOffline = feature.offline_behavior_required;
   results.push({
-    code: "REAL_TIME_WITHOUT_OFFLINE_STATE",
+    code: GateErrorCode.G3_REAL_TIME_WITHOUT_OFFLINE_STATE,
     triggered: false, // Template handles offline shell — specific behavior is builder territory
     reason: "",
     required_fix: "",
@@ -129,7 +130,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   const auditRequired = feature.audit_required;
   const hasAuditRule = bridge.applied_rules.some((r: any) => r.rule_id === "rule-audit");
   results.push({
-    code: "AUDITABLE_ACTION_WITHOUT_AUDIT_LOG",
+    code: GateErrorCode.G3_AUDITABLE_ACTION_WITHOUT_AUDIT_LOG,
     triggered: auditRequired && !hasAuditRule,
     reason: auditRequired && !hasAuditRule ? "Feature requires audit but no audit rule applied" : "",
     required_fix: "Apply audit logging rule to bridge",
@@ -138,7 +139,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
 
   // 10. DATA_MUTATION_WITHOUT_OWNERSHIP_RULE
   results.push({
-    code: "DATA_MUTATION_WITHOUT_OWNERSHIP_RULE",
+    code: GateErrorCode.G3_DATA_MUTATION_WITHOUT_OWNERSHIP_RULE,
     triggered: false, // Convex orgId pattern covers this by default
     reason: "",
     required_fix: "",
@@ -151,7 +152,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
     (d: any) => !allFeatureIds.has(d.feature_id)
   );
   results.push({
-    code: "FEATURE_DEPENDS_ON_UNDEFINED_FEATURE",
+    code: GateErrorCode.G3_FEATURE_DEPENDS_ON_UNDEFINED_FEATURE,
     triggered: undefinedDeps.length > 0,
     reason: undefinedDeps.length > 0
       ? `Dependencies on undefined features: ${undefinedDeps.map((d: any) => d.feature_id).join(", ")}`

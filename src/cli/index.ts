@@ -6,6 +6,7 @@ import { statusCommand } from "./commands/status.js";
 import { approveCommand } from "./commands/approve.js";
 import { logsCommand } from "./commands/logs.js";
 import { abortCommand } from "./commands/abort.js";
+import { replayCommand } from "./commands/replay.js";
 
 const program = new Command();
 
@@ -46,5 +47,11 @@ program
   .description("Abort a running job")
   .argument("<job-id>", "Job ID to abort")
   .action(abortCommand);
+
+program
+  .command("replay")
+  .description("Replay a prior run from Postgres (no re-execution)")
+  .argument("<job-id>", "Job ID to replay")
+  .action(replayCommand);
 
 program.parse();

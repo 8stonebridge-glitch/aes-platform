@@ -133,8 +133,23 @@ export async function runGraph(
 ): Promise<AESStateType> {
   _callbacks = callbacks;
 
-  // Store the job
+  // Initialize persistence if Postgres is available
   const store = getJobStore();
+  if (!store.hasPersistence()) {
+    const pgUrl = process.env.AES_POSTGRES_URL;
+    if (pgUrl) {
+      try {
+        const { PersistenceLayer } = await import("./persistence.js");
+        const persistence = new PersistenceLayer(pgUrl);
+        await persistence.initialize();
+        store.setPersistence(persistence);
+      } catch (err: any) {
+        // Postgres unavailable — continue in-memory only
+        callbacks.onWarn?.(`Postgres unavailable: ${err.message} — running in-memory only`);
+      }
+    }
+  }
+
   store.create({
     jobId: input.jobId,
     requestId: input.requestId,
