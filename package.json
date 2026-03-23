@@ -1,0 +1,18 @@
+{
+  "name": "@aes/platform",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AES v12 LangGraph.js orchestrator and operator UI",
+  "main": "dist/graph.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.35",
+    "@langchain/langgraph": "^1.2.5",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}
