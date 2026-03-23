@@ -288,6 +288,197 @@ export const ROLE_VISIBILITY_TESTS: RequiredTest[] = [
   },
 ];
 
+// ─── Role Isolation Tests (25) ───────────────────────────────────────
+// These verify that each role's UI surface ONLY shows features belonging
+// to that role, and NEVER leaks another role's features.
+
+export const ROLE_ISOLATION_TESTS: RequiredTest[] = [
+  // ── Admin Route Isolation ──
+  {
+    test_id: "ri-admin-has-overview",
+    name: "Admin has /admin/overview page",
+    type: "role_isolation",
+    description: "Admin navigates to /admin/overview. Page renders with dashboard metrics.",
+    pass_condition: "Status 200. Page contains org-wide KPI metrics.",
+  },
+  {
+    test_id: "ri-admin-has-approvals",
+    name: "Admin has /admin/approvals page",
+    type: "role_isolation",
+    description: "Admin navigates to /admin/approvals. Page renders with approval queue.",
+    pass_condition: "Status 200. Page contains approval tabs (Pending Approval, Awaiting Review).",
+  },
+  {
+    test_id: "ri-admin-has-people",
+    name: "Admin has /admin/people page",
+    type: "role_isolation",
+    description: "Admin navigates to /admin/people. Page renders with employee list and invite.",
+    pass_condition: "Status 200. Page contains employee table and invite button.",
+  },
+  {
+    test_id: "ri-admin-has-reports",
+    name: "Admin has /admin/reports page",
+    type: "role_isolation",
+    description: "Admin navigates to /admin/reports. Page renders with analytics.",
+    pass_condition: "Status 200. Page contains KPI row, team performance, export button.",
+  },
+  {
+    test_id: "ri-admin-has-sites",
+    name: "Admin has /admin/sites page",
+    type: "role_isolation",
+    description: "Admin navigates to /admin/sites. Page renders with team/site management.",
+    pass_condition: "Status 200. Page contains site list.",
+  },
+  {
+    test_id: "ri-admin-no-my-day",
+    name: "Admin does NOT have My Day page",
+    type: "role_isolation",
+    description: "Admin tries to navigate to /employee/my-day.",
+    pass_condition: "Redirect to /admin/overview or 403. Admin never sees employee My Day.",
+  },
+  {
+    test_id: "ri-admin-no-checkin",
+    name: "Admin does NOT have Check-in/Handoff page",
+    type: "role_isolation",
+    description: "Admin tries to navigate to /employee/check-in.",
+    pass_condition: "Redirect or 403. Admin never sees employee handoff form.",
+  },
+
+  // ── Employee Route Isolation ──
+  {
+    test_id: "ri-employee-has-myday",
+    name: "Employee has /employee/my-day page",
+    type: "role_isolation",
+    description: "Employee navigates to /employee/my-day. Page renders with daily view.",
+    pass_condition: "Status 200. Page contains today's tasks and handoff prompt.",
+  },
+  {
+    test_id: "ri-employee-has-checkin",
+    name: "Employee has /employee/check-in page",
+    type: "role_isolation",
+    description: "Employee navigates to /employee/check-in. Page renders with handoff form.",
+    pass_condition: "Status 200. Page contains handoff submission form.",
+  },
+  {
+    test_id: "ri-employee-no-approvals",
+    name: "Employee does NOT have Approvals page",
+    type: "role_isolation",
+    description: "Employee tries to navigate to /admin/approvals.",
+    pass_condition: "Redirect to /employee/my-day or 403. Employee never sees approval queue.",
+  },
+  {
+    test_id: "ri-employee-no-people",
+    name: "Employee does NOT have People page",
+    type: "role_isolation",
+    description: "Employee tries to navigate to /admin/people.",
+    pass_condition: "Redirect or 403. Employee never sees employee management.",
+  },
+  {
+    test_id: "ri-employee-no-reports",
+    name: "Employee does NOT have Reports page",
+    type: "role_isolation",
+    description: "Employee tries to navigate to /admin/reports.",
+    pass_condition: "Redirect or 403. Employee never sees analytics dashboard.",
+  },
+  {
+    test_id: "ri-employee-no-sites",
+    name: "Employee does NOT have Sites/Teams page",
+    type: "role_isolation",
+    description: "Employee tries to navigate to /admin/sites.",
+    pass_condition: "Redirect or 403. Employee never sees site management.",
+  },
+  {
+    test_id: "ri-employee-no-task-create",
+    name: "Employee does NOT have /admin/tasks/new page",
+    type: "role_isolation",
+    description: "Employee tries to navigate to /admin/tasks/new.",
+    pass_condition: "Redirect or 403. Employee cannot access admin task creation.",
+  },
+
+  // ── Subadmin Route Isolation ──
+  {
+    test_id: "ri-subadmin-has-overview",
+    name: "Subadmin has /subadmin/overview page",
+    type: "role_isolation",
+    description: "Subadmin navigates to /subadmin/overview. Page renders with team-scoped dashboard.",
+    pass_condition: "Status 200. Metrics are team-scoped, not org-wide.",
+  },
+  {
+    test_id: "ri-subadmin-has-checkins",
+    name: "Subadmin has /subadmin/check-ins page",
+    type: "role_isolation",
+    description: "Subadmin navigates to /subadmin/check-ins. Page shows team check-in status.",
+    pass_condition: "Status 200. Page contains team member handoff status.",
+  },
+  {
+    test_id: "ri-subadmin-has-team",
+    name: "Subadmin has /subadmin/people page",
+    type: "role_isolation",
+    description: "Subadmin navigates to /subadmin/people. Page renders with team member list.",
+    pass_condition: "Status 200. Page contains only their team members, not all org members.",
+  },
+  {
+    test_id: "ri-subadmin-no-approvals",
+    name: "Subadmin does NOT have admin Approvals page",
+    type: "role_isolation",
+    description: "Subadmin tries to navigate to /admin/approvals.",
+    pass_condition: "Redirect to /subadmin/overview or 403.",
+  },
+  {
+    test_id: "ri-subadmin-no-admin-people",
+    name: "Subadmin does NOT have admin People page",
+    type: "role_isolation",
+    description: "Subadmin tries to navigate to /admin/people (admin-level people management).",
+    pass_condition: "Redirect or 403. Subadmin sees /subadmin/people (team view) but not /admin/people (org-level provisioning).",
+  },
+  {
+    test_id: "ri-subadmin-no-reports",
+    name: "Subadmin does NOT have Reports page",
+    type: "role_isolation",
+    description: "Subadmin tries to navigate to /admin/reports.",
+    pass_condition: "Redirect or 403. Subadmin never sees org-wide analytics.",
+  },
+  {
+    test_id: "ri-subadmin-no-sites",
+    name: "Subadmin does NOT have Sites management page",
+    type: "role_isolation",
+    description: "Subadmin tries to navigate to /admin/sites.",
+    pass_condition: "Redirect or 403. Subadmin cannot manage sites.",
+  },
+
+  // ── Nav Isolation (what links are rendered) ──
+  {
+    test_id: "ri-nav-admin-items",
+    name: "Admin nav shows exactly: Overview, Tasks, Approvals, Messages, Teams, People, Reports, More",
+    type: "role_isolation",
+    description: "Render admin sidebar. Assert exact nav items and no employee/subadmin-only items like My Day or Check-ins.",
+    pass_condition: "Nav contains exactly 8 items. No My Day, no Handoff, no Check-ins.",
+  },
+  {
+    test_id: "ri-nav-employee-items",
+    name: "Employee nav shows exactly: My Day, Tasks, Handoff, Messages, More",
+    type: "role_isolation",
+    description: "Render employee sidebar. Assert exact nav items and no admin-only items like Approvals, People, Reports, Sites.",
+    pass_condition: "Nav contains exactly 5 items. No Approvals, no People, no Reports, no Sites, no Overview.",
+  },
+  {
+    test_id: "ri-nav-subadmin-items",
+    name: "Subadmin nav shows exactly: Overview, Tasks, Check-ins, Messages, Team, More",
+    type: "role_isolation",
+    description: "Render subadmin sidebar. Assert exact nav items and no admin-only items like Approvals, Reports, Sites.",
+    pass_condition: "Nav contains exactly 6 items. No Approvals, no Reports, no Sites, no My Day.",
+  },
+
+  // ── Cross-role API boundary enforcement ──
+  {
+    test_id: "ri-employee-api-blocked-admin-routes",
+    name: "Employee is blocked from ALL admin API routes",
+    type: "role_isolation",
+    description: "Employee session calls every /api/admin/* endpoint. All must return 403.",
+    pass_condition: "POST /api/admin/people → 403. PATCH /api/admin/people/[id] → 403. DELETE /api/admin/people/[id] → 403. GET /api/admin/export → 403.",
+  },
+];
+
 // ─── Task State Machine Contract Tests (13) ──────────────────────────
 
 export const STATE_MACHINE_TESTS: RequiredTest[] = [
@@ -389,17 +580,19 @@ export const STATE_MACHINE_TESTS: RequiredTest[] = [
 export const ALL_CONTRACT_TESTS: RequiredTest[] = [
   ...API_ROUTE_TESTS,
   ...ROLE_VISIBILITY_TESTS,
+  ...ROLE_ISOLATION_TESTS,
   ...STATE_MACHINE_TESTS,
 ];
 
 // ─── Test Categories for Selective Runs ──────────────────────────────
 
-export type ContractTestCategory = "api_routes" | "role_visibility" | "state_machine" | "all";
+export type ContractTestCategory = "api_routes" | "role_visibility" | "role_isolation" | "state_machine" | "all";
 
 export function getTestsByCategory(category: ContractTestCategory): RequiredTest[] {
   switch (category) {
     case "api_routes": return API_ROUTE_TESTS;
     case "role_visibility": return ROLE_VISIBILITY_TESTS;
+    case "role_isolation": return ROLE_ISOLATION_TESTS;
     case "state_machine": return STATE_MACHINE_TESTS;
     case "all": return ALL_CONTRACT_TESTS;
   }
@@ -438,6 +631,12 @@ export const SEED_REQUIREMENTS: SeedRequirement[] = [
   ...ROLE_VISIBILITY_TESTS.map(t => ({
     test_id: t.test_id,
     needs: ["user:admin", "user:subadmin", "user:employee", "org", "membership:admin", "membership:subadmin", "membership:employee", "site", "team"],
+  })),
+
+  // Role isolation — each needs authenticated sessions for all 3 roles
+  ...ROLE_ISOLATION_TESTS.map(t => ({
+    test_id: t.test_id,
+    needs: ["user:admin", "user:subadmin", "user:employee", "org", "membership:admin", "membership:subadmin", "membership:employee", "site", "team", "auth_session:admin", "auth_session:subadmin", "auth_session:employee"],
   })),
 
   // State machine — need full org setup
@@ -555,7 +754,90 @@ export const FEATURE_AUDIT_MAP: FeatureAudit[] = [
     mapped_tests: [], // Contract tests pending — E2E messaging.spec.ts covers this for now
     audit_gate: 0,
   },
+
+  // ── Role Isolation (cross-cutting — applies to all roles) ──
+  {
+    feature_id: "feat-role-isolation",
+    name: "Role Isolation",
+    user_expectation: "Each role only sees pages and features they are supposed to. Admin never sees employee-only pages. Employee never sees admin pages. No role can access another role's routes or nav items.",
+    mapped_tests: [
+      // Admin has correct pages
+      "ri-admin-has-overview", "ri-admin-has-approvals", "ri-admin-has-people",
+      "ri-admin-has-reports", "ri-admin-has-sites",
+      // Admin doesn't have employee pages
+      "ri-admin-no-my-day", "ri-admin-no-checkin",
+      // Employee has correct pages
+      "ri-employee-has-myday", "ri-employee-has-checkin",
+      // Employee doesn't have admin pages
+      "ri-employee-no-approvals", "ri-employee-no-people",
+      "ri-employee-no-reports", "ri-employee-no-sites", "ri-employee-no-task-create",
+      // Subadmin has correct pages
+      "ri-subadmin-has-overview", "ri-subadmin-has-checkins", "ri-subadmin-has-team",
+      // Subadmin doesn't have admin-only pages
+      "ri-subadmin-no-approvals", "ri-subadmin-no-admin-people",
+      "ri-subadmin-no-reports", "ri-subadmin-no-sites",
+      // Nav isolation
+      "ri-nav-admin-items", "ri-nav-employee-items", "ri-nav-subadmin-items",
+      // API boundary
+      "ri-employee-api-blocked-admin-routes",
+    ],
+    audit_gate: 25,
+  },
 ];
+
+// ─── Dynamic Build Feature Gate ──────────────────────────────────────
+// Any feature listed during a build MUST have a test mapping.
+// If a build introduces a feature not in FEATURE_AUDIT_MAP, the build
+// is BLOCKED until tests are added.
+
+/**
+ * Check if all features from a build have test mappings.
+ * Returns list of unmapped features that block the build.
+ */
+export function checkBuildFeatureCoverage(
+  buildFeatureIds: string[]
+): { covered: string[]; unmapped: string[]; blocked: boolean } {
+  const knownFeatureIds = new Set(FEATURE_AUDIT_MAP.map(f => f.feature_id));
+  const covered: string[] = [];
+  const unmapped: string[] = [];
+
+  for (const fid of buildFeatureIds) {
+    if (knownFeatureIds.has(fid)) {
+      const feature = FEATURE_AUDIT_MAP.find(f => f.feature_id === fid)!;
+      if (feature.mapped_tests.length > 0) {
+        covered.push(fid);
+      } else {
+        unmapped.push(fid); // Feature exists but has zero tests
+      }
+    } else {
+      unmapped.push(fid); // Feature not in map at all
+    }
+  }
+
+  return {
+    covered,
+    unmapped,
+    blocked: unmapped.length > 0,
+  };
+}
+
+/**
+ * Register a new feature discovered during a build.
+ * Returns the feature stub that must be filled with tests before the build can proceed.
+ */
+export function createFeatureStub(
+  featureId: string,
+  name: string,
+  userExpectation: string
+): FeatureAudit {
+  return {
+    feature_id: featureId,
+    name,
+    user_expectation: userExpectation,
+    mapped_tests: [], // BLOCKED until tests are added
+    audit_gate: 0,
+  };
+}
 
 /**
  * Run a feature-level audit. Returns pass/fail per feature based on test results.
@@ -639,7 +921,8 @@ export const CONTRACT_TEST_SUMMARY = {
   total: ALL_CONTRACT_TESTS.length,
   api_routes: API_ROUTE_TESTS.length,
   role_visibility: ROLE_VISIBILITY_TESTS.length,
+  role_isolation: ROLE_ISOLATION_TESTS.length,
   state_machine: STATE_MACHINE_TESTS.length,
   features: FEATURE_AUDIT_MAP.length,
-  categories: ["api_routes", "role_visibility", "state_machine"] as const,
+  categories: ["api_routes", "role_visibility", "role_isolation", "state_machine"] as const,
 };

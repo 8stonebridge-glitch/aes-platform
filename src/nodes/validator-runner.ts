@@ -56,6 +56,7 @@ export async function validatorRunner(
   // Group tests by type for efficient execution
   const apiTests = testsToRun.filter(t => t.type === "contract");
   const roleTests = testsToRun.filter(t => t.type === "role_visibility");
+  const isolationTests = testsToRun.filter(t => t.type === "role_isolation");
   const smTests = testsToRun.filter(t => t.type === "state_machine");
 
   // Run each group
@@ -73,6 +74,14 @@ export async function validatorRunner(
     results.push(...roleResults);
     const passed = roleResults.filter(r => r.passed).length;
     cb?.onStep(`Role visibility: ${passed}/${roleTests.length} passed`);
+  }
+
+  if (isolationTests.length > 0) {
+    cb?.onStep(`Running ${isolationTests.length} role isolation tests...`);
+    const isoResults = await runTestGroup(state.jobId, isolationTests, "role_isolation");
+    results.push(...isoResults);
+    const passed = isoResults.filter(r => r.passed).length;
+    cb?.onStep(`Role isolation: ${passed}/${isolationTests.length} passed`);
   }
 
   if (smTests.length > 0) {
@@ -138,6 +147,7 @@ function determineCategories(state: AESStateType): ContractTestCategory[] {
   );
   if (hasAuthFeature) {
     categories.push("role_visibility");
+    categories.push("role_isolation"); // Always run isolation with auth/role changes
   }
 
   const hasTaskFeature = builtFeatures.some(f =>
@@ -145,6 +155,16 @@ function determineCategories(state: AESStateType): ContractTestCategory[] {
   );
   if (hasTaskFeature) {
     categories.push("state_machine");
+  }
+
+  // Any UI/layout/navigation change triggers role isolation tests
+  const hasUIFeature = builtFeatures.some(f =>
+    f.toLowerCase().includes("ui") || f.toLowerCase().includes("layout") ||
+    f.toLowerCase().includes("nav") || f.toLowerCase().includes("page") ||
+    f.toLowerCase().includes("dashboard") || f.toLowerCase().includes("shell")
+  );
+  if (hasUIFeature && !categories.includes("role_isolation")) {
+    categories.push("role_isolation");
   }
 
   return categories;
