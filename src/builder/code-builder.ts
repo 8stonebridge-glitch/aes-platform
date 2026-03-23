@@ -7,6 +7,39 @@ import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { WorkspaceManager, type Workspace } from "./workspace-manager.js";
 
+// ─── Catalog Enforcement Rules ──────────────────────────────────────────
+
+export const CATALOG_ENFORCEMENT_RULES = `
+## CATALOG ENFORCEMENT — HARD RULES
+
+FORBIDDEN — Writing these raw HTML elements:
+- <button> — use Button from @aes/ui
+- <input> — use Input from @aes/ui
+- <textarea> — use Textarea from @aes/ui
+- <table>, <thead>, <tbody>, <tr>, <td>, <th> — use Table from @aes/ui
+- <select> — use Select from @aes/ui
+- Custom card divs (div with border+rounded) — use Card from @aes/ui
+- Custom badge spans (span with rounded-full+text-xs) — use Badge from @aes/ui
+- Custom loading spinners — use LoadingState from @aes/ui
+- Custom empty states — use EmptyState from @aes/ui
+- Custom error displays — use ErrorState from @aes/ui
+- Custom toast/notification displays — use Toast from @aes/ui
+
+REQUIRED — Every page file must:
+- Import at least one component from @aes/ui
+- Use Button for all clickable actions
+- Use Input/Textarea for all form fields
+- Use Card for all content containers
+- Use Badge for all status indicators
+- Use Table for all tabular data
+- Use LoadingState when data is loading
+- Use EmptyState when no data exists
+- Use ErrorState when fetch fails
+
+If a component exists in @aes/ui that matches what you need, you MUST use it.
+Writing a custom version of any @aes/ui component is a SCOPE VIOLATION.
+`;
+
 function hashPackage(pkg: BuilderPackage): string {
   return createHash("sha256").update(JSON.stringify(pkg)).digest("hex").substring(0, 16);
 }

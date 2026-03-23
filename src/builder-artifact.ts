@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 import type { FeatureBridge } from "./types/artifacts.js";
 import type { JobRecord } from "./store.js";
+import { CATALOG_ENFORCEMENT_RULES } from "./builder/code-builder.js";
 
 export interface BuilderPackage {
   package_id: string;
@@ -31,6 +32,10 @@ export interface BuilderPackage {
 
   // Reuse
   reuse_assets: { name: string; source_path: string; description: string }[];
+  reuse_requirements: { package: string; components: string[] }[];
+
+  // Catalog enforcement rules (builder instructions)
+  catalog_enforcement_rules: string;
 
   // Rules
   rules: { rule_id: string; title: string; severity: string }[];
@@ -114,6 +119,11 @@ export function compileBuilderPackage(
     may_delete_files: bridge.write_scope.may_delete_files,
 
     reuse_assets: reuseAssets,
+    reuse_requirements: ((bridge as any).reuse_requirements || []).map((r: any) => ({
+      package: r.package,
+      components: r.components,
+    })),
+    catalog_enforcement_rules: CATALOG_ENFORCEMENT_RULES,
     rules,
     required_tests: requiredTests,
 

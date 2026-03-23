@@ -1,7 +1,8 @@
 import type { BuilderPackage } from "../builder-artifact.js";
 import type { BuilderRunRecord, FixTrailEntry } from "../types/artifacts.js";
-import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
+import { CURRENT_SCHEMA_VERSION, GateErrorCode } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
+import { validateCatalogUsage, type CatalogValidatorResult } from "../validators/catalog-usage-validator.js";
 
 export interface VerificationResult {
   passed: boolean;
@@ -9,6 +10,7 @@ export interface VerificationResult {
   constraint_violations: string[];
   test_coverage_met: boolean;
   fix_trail_entries: FixTrailEntry[];
+  catalog_validation?: CatalogValidatorResult;
 }
 
 export function verifyBuild(
@@ -107,6 +109,41 @@ export function verifyBuild(
     }
   }
 
+  // 6. Catalog usage validation — check built files use @aes/ui instead of raw HTML
+  const builtFiles = allFiles
+    .filter(f => f.endsWith(".tsx") || f.endsWith(".jsx"))
+    .map(f => ({
+      path: f,
+      content: (run as any).file_contents?.[f] || "",
+    }));
+
+  const reuseRequirements = pkg.reuse_requirements || [];
+  let catalogResult: CatalogValidatorResult | undefined;
+
+  if (builtFiles.length > 0) {
+    catalogResult = validateCatalogUsage(builtFiles, reuseRequirements);
+
+    if (catalogResult.verdict === "FAIL") {
+      for (const v of catalogResult.violations) {
+        if (v.severity === "error") {
+          constraintViolations.push(
+            `${GateErrorCode.G2_RAW_PRIMITIVE_VIOLATION}: ${v.violation} in ${v.file}:${v.line} — ${v.expected}`
+          );
+        }
+      }
+
+      // Check for missing required packages
+      const missingPkgs = catalogResult.violations.filter(v =>
+        v.violation.startsWith("Required package")
+      );
+      if (missingPkgs.length > 0) {
+        constraintViolations.push(
+          `${GateErrorCode.G2_CATALOG_ASSETS_NOT_USED}: ${missingPkgs.map(v => v.violation).join("; ")}`
+        );
+      }
+    }
+  }
+
   const testCoverageMet = missingTests.length === 0 && failedTests.length === 0;
   const passed = scopeViolations.length === 0 && constraintViolations.length === 0 && testCoverageMet;
 
@@ -151,6 +188,7 @@ export function verifyBuild(
     constraint_violations: constraintViolations,
     test_coverage_met: testCoverageMet,
     fix_trail_entries: fixEntries,
+    catalog_validation: catalogResult,
   };
 }
 

@@ -4,6 +4,92 @@ import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { GateErrorCode, CURRENT_SCHEMA_VERSION, type ValidationResult, type FeatureBridge, type FixTrailEntry } from "../types/artifacts.js";
 
+// ─── Reuse Requirements ──────────────────────────────────────────────────
+
+export interface ReuseRequirement {
+  package: string;
+  components: string[];
+  reason: string;
+}
+
+export function resolveReuseRequirements(feature: any): ReuseRequirement[] {
+  const requirements: ReuseRequirement[] = [];
+
+  // Every feature that has UI needs @aes/ui primitives
+  requirements.push({
+    package: "@aes/ui",
+    components: ["Button", "Input", "Card", "Badge"],
+    reason: "All UI features must use design system primitives",
+  });
+
+  // Features with lists/tables need Table
+  const tableKeywords = ["queue", "list", "table", "audit", "history", "log"];
+  if (tableKeywords.some(k => feature.name?.toLowerCase().includes(k))) {
+    requirements.push({
+      package: "@aes/ui",
+      components: ["Table"],
+      reason: "List/table features must use @aes/ui/Table",
+    });
+  }
+
+  // Features with status display need Badge
+  const statusKeywords = ["status", "approval", "review", "workflow", "state"];
+  if (statusKeywords.some(k => feature.name?.toLowerCase().includes(k))) {
+    requirements.push({
+      package: "@aes/ui",
+      components: ["Badge"],
+      reason: "Status features must use @aes/ui/Badge",
+    });
+  }
+
+  // Features with forms need Input
+  const formKeywords = ["form", "submit", "request", "create", "comment"];
+  if (formKeywords.some(k => feature.name?.toLowerCase().includes(k))) {
+    requirements.push({
+      package: "@aes/ui",
+      components: ["Input", "Dialog"],
+      reason: "Form features must use @aes/ui/Input and @aes/ui/Dialog",
+    });
+  }
+
+  // Layout requirement
+  requirements.push({
+    package: "@aes/layouts",
+    components: ["SidebarLayout"],
+    reason: "All pages must use a shared layout",
+  });
+
+  // Features with loading states
+  requirements.push({
+    package: "@aes/ui",
+    components: ["LoadingState", "EmptyState", "ErrorState"],
+    reason: "All features must use shared loading/empty/error states",
+  });
+
+  // Toast for feedback
+  requirements.push({
+    package: "@aes/ui",
+    components: ["Toast"],
+    reason: "User feedback must use shared toast component",
+  });
+
+  return deduplicateRequirements(requirements);
+}
+
+function deduplicateRequirements(reqs: ReuseRequirement[]): ReuseRequirement[] {
+  const merged = new Map<string, ReuseRequirement>();
+  for (const r of reqs) {
+    const existing = merged.get(r.package);
+    if (existing) {
+      existing.components = [...new Set([...existing.components, ...r.components])];
+      existing.reason += "; " + r.reason;
+    } else {
+      merged.set(r.package, { ...r });
+    }
+  }
+  return [...merged.values()];
+}
+
 /**
  * Bridge Compiler — compiles one FeatureBridge per feature from:
  * - The feature definition in AppSpec
@@ -124,6 +210,9 @@ function compileBridge(
       confidence.test_coverage) /
     5;
 
+  // Resolve catalog reuse requirements for this feature
+  const reuseRequirements = resolveReuseRequirements(feature);
+
   return {
     bridge_id: randomUUID(),
     app_id: appSpec.app_id,
@@ -156,6 +245,7 @@ function compileBridge(
     },
     reuse_candidates: catalogMatches || [],
     selected_reuse_assets: selectedAssets,
+    reuse_requirements: reuseRequirements,
     applied_rules: rules,
     required_tests: relevantTests,
     dependencies: deps,
