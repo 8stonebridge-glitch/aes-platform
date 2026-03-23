@@ -57,6 +57,7 @@ export async function validatorRunner(
   const apiTests = testsToRun.filter(t => t.type === "contract");
   const roleTests = testsToRun.filter(t => t.type === "role_visibility");
   const isolationTests = testsToRun.filter(t => t.type === "role_isolation");
+  const pageDesignTests = testsToRun.filter(t => t.type === "role_page_design");
   const smTests = testsToRun.filter(t => t.type === "state_machine");
 
   // Run each group
@@ -82,6 +83,14 @@ export async function validatorRunner(
     results.push(...isoResults);
     const passed = isoResults.filter(r => r.passed).length;
     cb?.onStep(`Role isolation: ${passed}/${isolationTests.length} passed`);
+  }
+
+  if (pageDesignTests.length > 0) {
+    cb?.onStep(`Running ${pageDesignTests.length} role page design tests...`);
+    const pdResults = await runTestGroup(state.jobId, pageDesignTests, "role_page_design");
+    results.push(...pdResults);
+    const passed = pdResults.filter(r => r.passed).length;
+    cb?.onStep(`Role page design: ${passed}/${pageDesignTests.length} passed`);
   }
 
   if (smTests.length > 0) {
@@ -165,6 +174,9 @@ function determineCategories(state: AESStateType): ContractTestCategory[] {
   );
   if (hasUIFeature && !categories.includes("role_isolation")) {
     categories.push("role_isolation");
+  }
+  if (hasUIFeature && !categories.includes("role_page_design")) {
+    categories.push("role_page_design");
   }
 
   return categories;

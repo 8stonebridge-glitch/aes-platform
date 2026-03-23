@@ -479,6 +479,179 @@ export const ROLE_ISOLATION_TESTS: RequiredTest[] = [
   },
 ];
 
+// ─── Role Page Design Tests (22) ─────────────────────────────────────
+// These verify that each role's pages contain the UI components, actions,
+// and content DESIGNED for that role's workflow — not just access control,
+// but that the page is built for how that role actually works.
+
+export const ROLE_PAGE_DESIGN_TESTS: RequiredTest[] = [
+  // ── Admin Task Page Design ──
+  {
+    test_id: "rpd-admin-task-list",
+    name: "Admin task list shows: all tasks, bulk actions, assign-to-anyone, filter by team/site/status",
+    type: "role_page_design",
+    description: "Admin views /admin/tasks. Page must show all org tasks with bulk approve button, delegation controls, team/site/status filters, and ability to assign tasks to any member.",
+    pass_condition: "Page contains: bulk select checkboxes, 'Approve Selected' button, team filter dropdown, site filter dropdown, status filter, 'New Task' button with unrestricted assignee picker.",
+  },
+  {
+    test_id: "rpd-admin-task-detail",
+    name: "Admin task detail shows: approve/verify/rework/delegate actions, full audit trail, all assignee options",
+    type: "role_page_design",
+    description: "Admin views /admin/tasks/[id]. Detail page must show management actions (approve, verify, rework, delegate) and full audit trail with actor names.",
+    pass_condition: "Page contains: Approve/Verify/Rework/Delegate buttons (based on task status), audit trail section, assignee change dropdown with all org members.",
+  },
+  {
+    test_id: "rpd-admin-overview",
+    name: "Admin overview shows: org-wide KPIs, all-team summary, at-risk employees, approval queue count",
+    type: "role_page_design",
+    description: "Admin views /admin/overview. Dashboard must show org-wide metrics, not team-scoped.",
+    pass_condition: "Page contains: totalTasks (org-wide), completion %, overdue %, rework rate, approval queue size, at-risk section, team performance table covering ALL teams.",
+  },
+
+  // ── Employee Task Page Design ──
+  {
+    test_id: "rpd-employee-task-list",
+    name: "Employee task list shows: only assigned tasks, submit/no-change actions, NO bulk approve, NO delegate, NO assign-to-others",
+    type: "role_page_design",
+    description: "Employee views /employee/tasks. Page must show only their assigned tasks with submit and no-change actions. Must NOT show bulk approve, delegate, or assign-to-others.",
+    pass_condition: "Page contains: task list (only assigned to this employee), 'Submit' action on in-progress tasks, 'No Change' action. Page does NOT contain: bulk select, 'Approve' button, 'Delegate' button, assignee picker with other members.",
+  },
+  {
+    test_id: "rpd-employee-task-detail",
+    name: "Employee task detail shows: submit work, add note, mark no-change. NO approve/verify/rework/delegate.",
+    type: "role_page_design",
+    description: "Employee views /employee/tasks/[id]. Detail page must show worker actions only.",
+    pass_condition: "Page contains: 'Submit' button (if in_progress), 'Add Note' button, 'No Change' button. Page does NOT contain: Approve, Verify, Rework, Delegate buttons or assignee change dropdown.",
+  },
+  {
+    test_id: "rpd-employee-myday",
+    name: "Employee My Day shows: today's tasks, handoff status, personal progress. NO team metrics, NO other employees' tasks.",
+    type: "role_page_design",
+    description: "Employee views /employee/my-day. Page is personal daily view focused on their work.",
+    pass_condition: "Page contains: today's assigned tasks, handoff completion status, personal task progress. Page does NOT contain: team performance table, other employees' names/tasks, org-wide metrics.",
+  },
+  {
+    test_id: "rpd-employee-checkin",
+    name: "Employee check-in/handoff shows: handoff form with task summary, submit button. NO other employees' handoffs.",
+    type: "role_page_design",
+    description: "Employee views /employee/check-in. Page is a personal handoff submission form.",
+    pass_condition: "Page contains: handoff text area, today's task summary, submit button. Page does NOT contain: other employees' handoff history, team compliance metrics.",
+  },
+
+  // ── Subadmin Task Page Design ──
+  {
+    test_id: "rpd-subadmin-task-list",
+    name: "Subadmin task list shows: team-only tasks, approve/verify for team, assign within team only",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/tasks. Page must show only their team's tasks with team-scoped management actions.",
+    pass_condition: "Page contains: task list (team-scoped only), approve/verify actions for team tasks, assignee picker limited to team members. Page does NOT contain: tasks from other teams, org-wide filters, 'Invite' button.",
+  },
+  {
+    test_id: "rpd-subadmin-task-detail",
+    name: "Subadmin task detail shows: approve/verify/rework/delegate within team. NO org-wide delegation.",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/tasks/[id]. Detail shows team-scoped management actions.",
+    pass_condition: "Page contains: Approve/Verify/Rework/Delegate buttons (for team tasks only), delegate picker limited to team members. Page does NOT contain: org-wide member picker, site management links.",
+  },
+  {
+    test_id: "rpd-subadmin-overview",
+    name: "Subadmin overview shows: team-scoped KPIs, team member list, team compliance. NO org-wide metrics.",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/overview. Dashboard must be team-scoped, not org-wide.",
+    pass_condition: "Page contains: team task count (NOT org-wide), team completion %, team overdue %, team members. Page does NOT contain: org-wide totalTasks, other teams' data, site management.",
+  },
+  {
+    test_id: "rpd-subadmin-checkins",
+    name: "Subadmin check-ins shows: team members' handoff status. NO other teams' handoffs.",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/check-ins. Page shows team handoff compliance.",
+    pass_condition: "Page contains: list of team members with today's handoff status (completed/pending). Page does NOT contain: members from other teams, org-wide compliance rate.",
+  },
+  {
+    test_id: "rpd-subadmin-people",
+    name: "Subadmin people page shows: team member list, view-only. NO invite, NO remove, NO role change.",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/people. Page shows team roster without admin-level management.",
+    pass_condition: "Page contains: team member names, roles, contact info. Page does NOT contain: 'Invite' button, 'Remove' button, role dropdown, 'Add Employee' form.",
+  },
+
+  // ── Shared Pages with Role-Specific Content ──
+  {
+    test_id: "rpd-messages-same-for-all",
+    name: "Messages page shows same UI for all roles (own conversations only)",
+    type: "role_page_design",
+    description: "All three roles view their messages page. UI is identical but scoped to own conversations.",
+    pass_condition: "All roles see: conversation list, message thread, compose input. Content is scoped to their own conversations only.",
+  },
+  {
+    test_id: "rpd-more-settings-role-appropriate",
+    name: "More/Settings page shows role-appropriate options",
+    type: "role_page_design",
+    description: "Each role views their /more page. Options should match their permissions.",
+    pass_condition: "Admin sees: org settings, notification preferences, sign out. Employee sees: notification preferences, sign out. Subadmin sees: notification preferences, sign out. No role sees settings they cannot change.",
+  },
+
+  // ── Action Button Isolation (critical) ──
+  {
+    test_id: "rpd-employee-no-approve-button-anywhere",
+    name: "Employee NEVER sees an Approve/Verify/Rework button on ANY page",
+    type: "role_page_design",
+    description: "Navigate through all employee pages. Search entire rendered DOM for approve/verify/rework action buttons.",
+    pass_condition: "Zero instances of Approve, Verify, or Rework buttons found in any employee page render.",
+  },
+  {
+    test_id: "rpd-employee-no-delegate-button-anywhere",
+    name: "Employee NEVER sees a Delegate button on ANY page",
+    type: "role_page_design",
+    description: "Navigate through all employee pages. Search entire rendered DOM for delegate action.",
+    pass_condition: "Zero instances of Delegate button or assignee change dropdown found in any employee page render.",
+  },
+  {
+    test_id: "rpd-employee-no-bulk-actions-anywhere",
+    name: "Employee NEVER sees bulk action controls on ANY page",
+    type: "role_page_design",
+    description: "Navigate through all employee pages. Search for bulk select checkboxes or 'Select All' controls.",
+    pass_condition: "Zero instances of bulk select UI found in any employee page render.",
+  },
+  {
+    test_id: "rpd-subadmin-no-invite-button",
+    name: "Subadmin NEVER sees an Invite/Add Employee button",
+    type: "role_page_design",
+    description: "Navigate through all subadmin pages. Search for invite or add employee actions.",
+    pass_condition: "Zero instances of 'Invite', 'Add Employee', or employee provisioning form found in any subadmin page render.",
+  },
+  {
+    test_id: "rpd-subadmin-no-export-button",
+    name: "Subadmin NEVER sees an Export button",
+    type: "role_page_design",
+    description: "Navigate through all subadmin pages. Search for export CSV actions.",
+    pass_condition: "Zero instances of 'Export' or 'Download CSV' button found in any subadmin page render.",
+  },
+  {
+    test_id: "rpd-subadmin-no-org-settings",
+    name: "Subadmin NEVER sees org-level settings",
+    type: "role_page_design",
+    description: "Subadmin views /subadmin/more. Must not show org settings like rework threshold, escalation rules, etc.",
+    pass_condition: "Page does NOT contain: rework threshold input, escalation settings, org name change, billing settings.",
+  },
+
+  // ── Data Leak Prevention ──
+  {
+    test_id: "rpd-employee-no-other-employee-names",
+    name: "Employee pages never show other employees' names in task lists or dashboards",
+    type: "role_page_design",
+    description: "Employee views all their pages. Other employees' names, tasks, or performance data must never appear (except in conversations they're part of).",
+    pass_condition: "Task list shows only employee's own tasks. No other employee names appear in task cards, dashboards, or performance sections. Messages may show conversation partners.",
+  },
+  {
+    test_id: "rpd-subadmin-no-other-team-data",
+    name: "Subadmin pages never show other teams' data",
+    type: "role_page_design",
+    description: "Subadmin views all their pages. Tasks, members, metrics, and handoffs from other teams must never appear.",
+    pass_condition: "All data on every subadmin page is scoped to their team(s) only. No cross-team task cards, member names, or metrics.",
+  },
+];
+
 // ─── Task State Machine Contract Tests (13) ──────────────────────────
 
 export const STATE_MACHINE_TESTS: RequiredTest[] = [
@@ -581,18 +754,20 @@ export const ALL_CONTRACT_TESTS: RequiredTest[] = [
   ...API_ROUTE_TESTS,
   ...ROLE_VISIBILITY_TESTS,
   ...ROLE_ISOLATION_TESTS,
+  ...ROLE_PAGE_DESIGN_TESTS,
   ...STATE_MACHINE_TESTS,
 ];
 
 // ─── Test Categories for Selective Runs ──────────────────────────────
 
-export type ContractTestCategory = "api_routes" | "role_visibility" | "role_isolation" | "state_machine" | "all";
+export type ContractTestCategory = "api_routes" | "role_visibility" | "role_isolation" | "role_page_design" | "state_machine" | "all";
 
 export function getTestsByCategory(category: ContractTestCategory): RequiredTest[] {
   switch (category) {
     case "api_routes": return API_ROUTE_TESTS;
     case "role_visibility": return ROLE_VISIBILITY_TESTS;
     case "role_isolation": return ROLE_ISOLATION_TESTS;
+    case "role_page_design": return ROLE_PAGE_DESIGN_TESTS;
     case "state_machine": return STATE_MACHINE_TESTS;
     case "all": return ALL_CONTRACT_TESTS;
   }
@@ -637,6 +812,12 @@ export const SEED_REQUIREMENTS: SeedRequirement[] = [
   ...ROLE_ISOLATION_TESTS.map(t => ({
     test_id: t.test_id,
     needs: ["user:admin", "user:subadmin", "user:employee", "org", "membership:admin", "membership:subadmin", "membership:employee", "site", "team", "auth_session:admin", "auth_session:subadmin", "auth_session:employee"],
+  })),
+
+  // Role page design — needs full org + tasks + data to verify rendered content
+  ...ROLE_PAGE_DESIGN_TESTS.map(t => ({
+    test_id: t.test_id,
+    needs: ["user:admin", "user:subadmin", "user:employee", "org", "membership:admin", "membership:subadmin", "membership:employee", "site", "team", "task:open", "task:in_progress", "task:submitted", "task:pending_approval", "auth_session:admin", "auth_session:subadmin", "auth_session:employee", "org_settings"],
   })),
 
   // State machine — need full org setup
@@ -783,6 +964,29 @@ export const FEATURE_AUDIT_MAP: FeatureAudit[] = [
     ],
     audit_gate: 25,
   },
+  {
+    feature_id: "feat-role-page-design",
+    name: "Role Page Design",
+    user_expectation: "Each role's pages are designed for their specific workflow. Admin sees management actions. Employee sees worker actions. Subadmin sees team-scoped management. No role sees another role's actions, buttons, data, or controls.",
+    mapped_tests: [
+      // Admin page design
+      "rpd-admin-task-list", "rpd-admin-task-detail", "rpd-admin-overview",
+      // Employee page design
+      "rpd-employee-task-list", "rpd-employee-task-detail", "rpd-employee-myday", "rpd-employee-checkin",
+      // Subadmin page design
+      "rpd-subadmin-task-list", "rpd-subadmin-task-detail", "rpd-subadmin-overview",
+      "rpd-subadmin-checkins", "rpd-subadmin-people",
+      // Shared pages
+      "rpd-messages-same-for-all", "rpd-more-settings-role-appropriate",
+      // Action button isolation
+      "rpd-employee-no-approve-button-anywhere", "rpd-employee-no-delegate-button-anywhere",
+      "rpd-employee-no-bulk-actions-anywhere", "rpd-subadmin-no-invite-button",
+      "rpd-subadmin-no-export-button", "rpd-subadmin-no-org-settings",
+      // Data leak prevention
+      "rpd-employee-no-other-employee-names", "rpd-subadmin-no-other-team-data",
+    ],
+    audit_gate: 22,
+  },
 ];
 
 // ─── Dynamic Build Feature Gate ──────────────────────────────────────
@@ -922,7 +1126,8 @@ export const CONTRACT_TEST_SUMMARY = {
   api_routes: API_ROUTE_TESTS.length,
   role_visibility: ROLE_VISIBILITY_TESTS.length,
   role_isolation: ROLE_ISOLATION_TESTS.length,
+  role_page_design: ROLE_PAGE_DESIGN_TESTS.length,
   state_machine: STATE_MACHINE_TESTS.length,
   features: FEATURE_AUDIT_MAP.length,
-  categories: ["api_routes", "role_visibility", "role_isolation", "state_machine"] as const,
+  categories: ["api_routes", "role_visibility", "role_isolation", "role_page_design", "state_machine"] as const,
 };
