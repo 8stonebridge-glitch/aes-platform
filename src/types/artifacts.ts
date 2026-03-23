@@ -410,6 +410,14 @@ export interface BuilderRunRecord {
   schema_version: number;
   created_at: string;
   completed_at: string | null;
+
+  // Workspace info (code-builder)
+  workspace_id: string | null;
+  branch: string | null;
+  base_commit: string | null;
+  final_commit: string | null;
+  diff_summary: string | null;
+  pr_summary: string | null;
 }
 
 // ─── Catalog Match ─────────────────────────────────────────────────────

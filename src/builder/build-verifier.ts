@@ -63,6 +63,20 @@ export function verifyBuild(
     constraintViolations.push("Builder produced no files");
   }
 
+  // 4b. Config drift: check if package.json or tsconfig.json were modified
+  for (const file of allFiles) {
+    if (file === "package.json" || file === "tsconfig.json" || file === "next.config.js" || file === "next.config.mjs") {
+      constraintViolations.push(`Config drift: builder modified ${file} — requires manual review`);
+    }
+  }
+
+  // 4c. Permission/role drift: check if auth middleware or clerk config was touched
+  for (const file of allFiles) {
+    if (file.includes("middleware") || file.includes("clerk") || file.includes("auth.ts")) {
+      constraintViolations.push(`Permission drift: builder modified auth-related file ${file} — requires review`);
+    }
+  }
+
   // 5. Check acceptance coverage
   const coverage = run.acceptance_coverage;
   if (coverage && coverage.total_required > 0) {

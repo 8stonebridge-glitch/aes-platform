@@ -119,6 +119,23 @@ export async function viewCommand(jobId: string): Promise<void> {
       const testStr = `${r.test_results.filter(t => t.passed).length}/${r.test_results.length} tests`;
       const fileCount = r.files_created.length + r.files_modified.length;
       console.log(`  ${statusIcon} ${featureSlug.padEnd(24)} ${(r.builder_model || "").padEnd(14)} ${r.status.padEnd(18)} ${String(r.duration_ms).padStart(4)}ms   ${fileCount} files   ${testStr}`);
+      if (r.branch) {
+        console.log(`    ${chalk.gray("Branch:")}     ${r.branch}`);
+      }
+      if (r.workspace_id) {
+        console.log(`    ${chalk.gray("Workspace:")}  ${r.workspace_id}`);
+      }
+      const createdCount = r.files_created.length;
+      const modifiedCount = r.files_modified.length;
+      if (r.workspace_id) {
+        console.log(`    ${chalk.gray("Files:")}      ${createdCount} created, ${modifiedCount} modified`);
+      }
+      const passedTests = r.test_results.filter(t => t.passed).length;
+      const totalTests = r.test_results.length;
+      if (r.workspace_id) {
+        console.log(`    ${chalk.gray("Tests:")}      ${passedTests}/${totalTests} passed`);
+        console.log(`    ${chalk.gray("Verified:")}   ${r.verification_passed ? "PASSED" : "REJECTED"}`);
+      }
     }
     console.log();
   }

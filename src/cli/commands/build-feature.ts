@@ -2,14 +2,14 @@
  * aes build-feature <job-id> <feature-id>
  *
  * Builds a single feature from a completed pipeline run.
- * Consumes the BuilderPackage, runs the template builder, verifies output, persists results.
+ * Consumes the BuilderPackage, runs the code builder, verifies output, persists results.
  */
 import { getJobStore } from "../../store.js";
 import { compileBuilderPackage } from "../../builder-artifact.js";
-import { TemplateBuilder, hashPackage } from "../../builder/builder-engine.js";
+import { CodeBuilder } from "../../builder/code-builder.js";
 import { verifyBuild } from "../../builder/build-verifier.js";
 
-export async function buildFeatureCommand(jobId: string, featureId: string) {
+export async function buildFeatureCommand(jobId: string, featureId: string, options?: { approveMerge?: boolean }) {
   const store = getJobStore();
 
   // 1. Load job from Postgres
@@ -43,8 +43,8 @@ export async function buildFeatureCommand(jobId: string, featureId: string) {
   console.log(`  Required tests: ${pkg.required_tests.length}`);
   console.log();
 
-  const builder = new TemplateBuilder();
-  const run = await builder.build(jobId, pkg);
+  const builder = new CodeBuilder();
+  const { run, workspace, prSummary } = await builder.build(jobId, pkg);
 
   // 5. Persist initial run record
   const persistence = store.getPersistence();
@@ -90,6 +90,12 @@ export async function buildFeatureCommand(jobId: string, featureId: string) {
         failure_reason: run.failure_reason,
         completed_at: run.completed_at || undefined,
         duration_ms: run.duration_ms,
+        workspace_id: run.workspace_id,
+        branch: run.branch,
+        base_commit: run.base_commit,
+        final_commit: run.final_commit,
+        diff_summary: run.diff_summary,
+        pr_summary: run.pr_summary,
       });
     } catch (err: any) {
       console.error(`Warning: Failed to update builder run: ${err.message}`);
@@ -121,12 +127,37 @@ export async function buildFeatureCommand(jobId: string, featureId: string) {
   if (run.failure_reason) console.log(`Failure:      ${run.failure_reason}`);
   console.log();
 
+  // 10. Show workspace info
+  console.log(`=== Workspace ===`);
+  console.log(`Workspace ID: ${workspace.workspace_id}`);
+  console.log(`Branch:       ${workspace.branch}`);
+  console.log(`Path:         ${workspace.path}`);
+  console.log(`Base commit:  ${workspace.base_commit}`);
+  if (run.final_commit) console.log(`Final commit: ${run.final_commit}`);
+  console.log();
+
   if (run.files_created.length > 0) {
-    console.log(`Files that would be created:`);
+    console.log(`Files created:`);
     for (const f of run.files_created) console.log(`  + ${f}`);
   }
   if (run.files_modified.length > 0) {
-    console.log(`Files that would be modified:`);
+    console.log(`Files modified:`);
     for (const f of run.files_modified) console.log(`  ~ ${f}`);
+  }
+
+  // 11. Show PR summary
+  console.log();
+  console.log(`=== PR Summary ===`);
+  console.log(prSummary);
+
+  // 12. Merge gate
+  if (options?.approveMerge) {
+    console.log();
+    console.log(`--approve-merge flag set. Merge approval recorded.`);
+    console.log(`Note: Actual merge to main requires external CI/CD integration.`);
+  } else {
+    console.log();
+    console.log(`To approve merge, re-run with --approve-merge flag.`);
+    console.log(`Inspect generated code at: ${workspace.path}`);
   }
 }

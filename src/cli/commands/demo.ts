@@ -21,9 +21,10 @@ import {
 import { runGraph } from "../../graph.js";
 import { getJobStore } from "../../store.js";
 import { compileBuilderPackage } from "../../builder-artifact.js";
-import { TemplateBuilder } from "../../builder/builder-engine.js";
+import { CodeBuilder } from "../../builder/code-builder.js";
 import { verifyBuild } from "../../builder/build-verifier.js";
 import { viewCommand } from "./view.js";
+import type { BuilderPackage } from "../../builder-artifact.js";
 
 export async function demoCommand(): Promise<void> {
   const intent = "internal approval portal for leave requests";
@@ -136,7 +137,7 @@ async function runBuildPhase(
   jobId: string,
   job: any,
   featureId: string,
-  pkg: any,
+  pkg: BuilderPackage,
   store: any
 ): Promise<void> {
   logKeyValue("Feature", pkg.feature_name);
@@ -145,9 +146,9 @@ async function runBuildPhase(
   logKeyValue("Required tests", String(pkg.required_tests.length));
   console.log();
 
-  // Run template builder
-  const builder = new TemplateBuilder();
-  const run = await builder.build(jobId, pkg);
+  // Run code builder
+  const builder = new CodeBuilder();
+  const { run, workspace, prSummary } = await builder.build(jobId, pkg);
 
   // Persist if possible
   const persistence = store.getPersistence();
@@ -185,6 +186,12 @@ async function runBuildPhase(
         failure_reason: run.failure_reason,
         completed_at: run.completed_at || undefined,
         duration_ms: run.duration_ms,
+        workspace_id: run.workspace_id,
+        branch: run.branch,
+        base_commit: run.base_commit,
+        final_commit: run.final_commit,
+        diff_summary: run.diff_summary,
+        pr_summary: run.pr_summary,
       });
     } catch (_err: any) {
       // Non-fatal
@@ -221,11 +228,22 @@ async function runBuildPhase(
     logFail(`Feature build rejected: ${run.failure_reason}`);
   }
 
+  // Workspace info
+  console.log();
+  logKeyValue("Workspace", workspace.workspace_id);
+  logKeyValue("Branch", workspace.branch);
+  logKeyValue("Path", workspace.path);
+
   if (run.files_created.length > 0) {
     console.log();
-    logStep("Files that would be created:");
+    logStep("Files created:");
     for (const f of run.files_created) {
       console.log(`  + ${f}`);
     }
   }
+
+  // PR Summary
+  console.log();
+  logStep("PR Summary:");
+  console.log(prSummary);
 }

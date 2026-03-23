@@ -433,15 +433,18 @@ export class PersistenceLayer {
         input_package_hash, builder_package, files_created, files_modified,
         files_deleted, test_results, acceptance_coverage, scope_violations,
         constraint_violations, verification_passed, failure_reason,
-        builder_model, duration_ms, schema_version
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        builder_model, duration_ms, schema_version,
+        workspace_id, branch, base_commit, final_commit, diff_summary, pr_summary
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
       [
         run.run_id, run.job_id, run.bridge_id, run.feature_id, run.feature_name,
         run.status, run.input_package_hash, JSON.stringify(run.builder_package),
         run.files_created, run.files_modified, run.files_deleted,
         JSON.stringify(run.test_results), JSON.stringify(run.acceptance_coverage),
         run.scope_violations, run.constraint_violations, run.verification_passed,
-        run.failure_reason, run.builder_model, run.duration_ms, run.schema_version
+        run.failure_reason, run.builder_model, run.duration_ms, run.schema_version,
+        run.workspace_id || null, run.branch || null, run.base_commit || null,
+        run.final_commit || null, run.diff_summary || null, run.pr_summary || null
       ]
     );
   }
@@ -462,6 +465,12 @@ export class PersistenceLayer {
     if (updates.failure_reason) { sets.push(`failure_reason = $${idx}`); params.push(updates.failure_reason); idx++; }
     if (updates.duration_ms) { sets.push(`duration_ms = $${idx}`); params.push(updates.duration_ms); idx++; }
     if (updates.completed_at) { sets.push(`completed_at = $${idx}`); params.push(updates.completed_at); idx++; }
+    if (updates.workspace_id) { sets.push(`workspace_id = $${idx}`); params.push(updates.workspace_id); idx++; }
+    if (updates.branch) { sets.push(`branch = $${idx}`); params.push(updates.branch); idx++; }
+    if (updates.base_commit) { sets.push(`base_commit = $${idx}`); params.push(updates.base_commit); idx++; }
+    if (updates.final_commit) { sets.push(`final_commit = $${idx}`); params.push(updates.final_commit); idx++; }
+    if (updates.diff_summary) { sets.push(`diff_summary = $${idx}`); params.push(updates.diff_summary); idx++; }
+    if (updates.pr_summary) { sets.push(`pr_summary = $${idx}`); params.push(updates.pr_summary); idx++; }
 
     await this.pool.query(
       `UPDATE builder_runs SET ${sets.join(", ")} WHERE run_id = $1`,
@@ -497,6 +506,12 @@ export class PersistenceLayer {
       schema_version: r.schema_version,
       created_at: r.created_at?.toISOString(),
       completed_at: r.completed_at?.toISOString() || null,
+      workspace_id: r.workspace_id || null,
+      branch: r.branch || null,
+      base_commit: r.base_commit || null,
+      final_commit: r.final_commit || null,
+      diff_summary: r.diff_summary || null,
+      pr_summary: r.pr_summary || null,
     }));
   }
 

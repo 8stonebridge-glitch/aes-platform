@@ -171,6 +171,31 @@ CREATE INDEX IF NOT EXISTS idx_builder_runs_job_id ON builder_runs(job_id);
 CREATE INDEX IF NOT EXISTS idx_builder_runs_status ON builder_runs(status);
 CREATE INDEX IF NOT EXISTS idx_builder_runs_feature_id ON builder_runs(feature_id);
 
+-- Workspace columns for code-builder
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS branch TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS base_commit TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS final_commit TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS diff_summary TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE builder_runs ADD COLUMN IF NOT EXISTS pr_summary TEXT;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
 -- ─── Schema version migration for pre-existing tables ──────────────────
 -- These are safe no-ops if the column already exists (Postgres 11+).
 

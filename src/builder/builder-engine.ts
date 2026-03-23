@@ -42,6 +42,12 @@ export class TemplateBuilder {
       schema_version: CURRENT_SCHEMA_VERSION,
       created_at: new Date().toISOString(),
       completed_at: null,
+      workspace_id: null,
+      branch: null,
+      base_commit: null,
+      final_commit: null,
+      diff_summary: null,
+      pr_summary: null,
     };
 
     try {

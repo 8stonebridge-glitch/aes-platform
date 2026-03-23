@@ -88,7 +88,10 @@ program
   .description("Build a single feature from a completed pipeline run")
   .argument("<job-id>", "Job ID")
   .argument("<feature-id>", "Feature ID to build")
-  .action(buildFeatureCommand);
+  .option("--approve-merge", "Approve merge (requires explicit human approval)")
+  .action((jobId: string, featureId: string, opts: { approveMerge?: boolean }) => {
+    return buildFeatureCommand(jobId, featureId, opts);
+  });
 
 program
   .command("demo")
