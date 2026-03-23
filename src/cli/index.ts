@@ -13,6 +13,7 @@ import { exportCommand } from "./commands/export.js";
 import { buildFeatureCommand } from "./commands/build-feature.js";
 import { demoCommand } from "./commands/demo.js";
 import { approveBuildCommand } from "./commands/approve-build.js";
+import { deployFeatureCommand } from "./commands/deploy-feature.js";
 
 const program = new Command();
 
@@ -101,6 +102,15 @@ program
   .argument("<feature-id>", "Feature ID to approve")
   .action((jobId: string, featureId: string) => {
     return approveBuildCommand(jobId, featureId);
+  });
+
+program
+  .command("deploy-feature")
+  .description("Full governed deployment: scaffold + build + validate + prepare deploy")
+  .argument("<job-id>", "Job ID")
+  .argument("<feature-id>", "Feature ID to deploy")
+  .action((jobId: string, featureId: string) => {
+    return deployFeatureCommand(jobId, featureId);
   });
 
 program
