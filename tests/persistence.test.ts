@@ -32,7 +32,7 @@ describe("GateErrorCode", () => {
     const g2Codes = Object.values(GateErrorCode).filter((c) =>
       c.startsWith("G2_")
     );
-    expect(g2Codes.length).toBe(12);
+    expect(g2Codes.length).toBe(13);
     for (const code of g2Codes) {
       expect(code).toMatch(/^G2_/);
     }

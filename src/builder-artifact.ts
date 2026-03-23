@@ -9,6 +9,7 @@ import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 import type { FeatureBridge } from "./types/artifacts.js";
 import type { JobRecord } from "./store.js";
 import { CATALOG_ENFORCEMENT_RULES } from "./builder/code-builder.js";
+import type { PatternRequirement } from "./types/pattern-requirements.js";
 
 export interface BuilderPackage {
   package_id: string;
@@ -33,6 +34,9 @@ export interface BuilderPackage {
   // Reuse
   reuse_assets: { name: string; source_path: string; description: string }[];
   reuse_requirements: { package: string; components: string[] }[];
+
+  // Pattern requirements (Layer 4 — composition validator expectations)
+  pattern_requirements: PatternRequirement[];
 
   // Catalog enforcement rules (builder instructions)
   catalog_enforcement_rules: string;
@@ -123,6 +127,7 @@ export function compileBuilderPackage(
       package: r.package,
       components: r.components,
     })),
+    pattern_requirements: ((bridge as any).pattern_requirements || []) as PatternRequirement[],
     catalog_enforcement_rules: CATALOG_ENFORCEMENT_RULES,
     rules,
     required_tests: requiredTests,

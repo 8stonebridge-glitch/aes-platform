@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { GateErrorCode, CURRENT_SCHEMA_VERSION, type ValidationResult, type FeatureBridge, type FixTrailEntry } from "../types/artifacts.js";
+import { FEATURE_TO_PATTERN, PAGE_PATTERNS, type PatternRequirement } from "../types/pattern-requirements.js";
 
 // ─── Reuse Requirements ──────────────────────────────────────────────────
 
@@ -74,6 +75,30 @@ export function resolveReuseRequirements(feature: any): ReuseRequirement[] {
   });
 
   return deduplicateRequirements(requirements);
+}
+
+/**
+ * Resolve which page-level pattern requirements apply to a feature.
+ * Maps feature names to pattern IDs using FEATURE_TO_PATTERN, then
+ * returns the full PatternRequirement objects for the builder.
+ */
+export function resolvePatternRequirements(feature: any): PatternRequirement[] {
+  const patterns: PatternRequirement[] = [];
+  const seen = new Set<string>();
+  const nameLower = (feature.name || "").toLowerCase();
+
+  for (const [keyword, patternIds] of Object.entries(FEATURE_TO_PATTERN)) {
+    if (nameLower.includes(keyword)) {
+      for (const pid of patternIds) {
+        if (!seen.has(pid) && PAGE_PATTERNS[pid]) {
+          seen.add(pid);
+          patterns.push(PAGE_PATTERNS[pid]);
+        }
+      }
+    }
+  }
+
+  return patterns;
 }
 
 function deduplicateRequirements(reqs: ReuseRequirement[]): ReuseRequirement[] {
@@ -213,6 +238,9 @@ function compileBridge(
   // Resolve catalog reuse requirements for this feature
   const reuseRequirements = resolveReuseRequirements(feature);
 
+  // Resolve pattern requirements for this feature (Layer 4)
+  const patternRequirements = resolvePatternRequirements(feature);
+
   return {
     bridge_id: randomUUID(),
     app_id: appSpec.app_id,
@@ -246,6 +274,7 @@ function compileBridge(
     reuse_candidates: catalogMatches || [],
     selected_reuse_assets: selectedAssets,
     reuse_requirements: reuseRequirements,
+    pattern_requirements: patternRequirements,
     applied_rules: rules,
     required_tests: relevantTests,
     dependencies: deps,

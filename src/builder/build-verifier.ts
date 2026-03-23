@@ -3,6 +3,7 @@ import type { BuilderRunRecord, FixTrailEntry } from "../types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION, GateErrorCode } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
 import { validateCatalogUsage, type CatalogValidatorResult } from "../validators/catalog-usage-validator.js";
+import { validateComposition, type CompositionValidatorResult } from "../validators/composition-validator.js";
 
 export interface VerificationResult {
   passed: boolean;
@@ -11,6 +12,7 @@ export interface VerificationResult {
   test_coverage_met: boolean;
   fix_trail_entries: FixTrailEntry[];
   catalog_validation?: CatalogValidatorResult;
+  composition_validation?: CompositionValidatorResult;
 }
 
 export function verifyBuild(
@@ -144,6 +146,24 @@ export function verifyBuild(
     }
   }
 
+  // 7. Composition validation — check built pages conform to expected patterns (Layer 4)
+  let compositionResult: CompositionValidatorResult | undefined;
+  const patternRequirements = (pkg as any).pattern_requirements || [];
+
+  if (builtFiles.length > 0 && patternRequirements.length > 0) {
+    compositionResult = validateComposition(builtFiles, [pkg.feature_name]);
+
+    if (compositionResult.verdict === "FAIL") {
+      for (const v of compositionResult.violations) {
+        if (v.severity === "error") {
+          constraintViolations.push(
+            `${GateErrorCode.G2_PATTERN_CONFORMANCE_FAIL}: [${v.pattern}] ${v.category}/${v.check} — ${v.description} in ${v.file}`
+          );
+        }
+      }
+    }
+  }
+
   const testCoverageMet = missingTests.length === 0 && failedTests.length === 0;
   const passed = scopeViolations.length === 0 && constraintViolations.length === 0 && testCoverageMet;
 
@@ -189,6 +209,7 @@ export function verifyBuild(
     test_coverage_met: testCoverageMet,
     fix_trail_entries: fixEntries,
     catalog_validation: catalogResult,
+    composition_validation: compositionResult,
   };
 }
 

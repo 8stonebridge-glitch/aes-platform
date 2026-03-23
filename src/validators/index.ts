@@ -6,3 +6,9 @@ export {
   type CatalogViolation,
   type CatalogValidatorResult,
 } from "./catalog-usage-validator.js";
+
+export {
+  validateComposition,
+  type CompositionViolation,
+  type CompositionValidatorResult,
+} from "./composition-validator.js";
