@@ -447,6 +447,192 @@ export const SEED_REQUIREMENTS: SeedRequirement[] = [
   })),
 ];
 
+// ─── Feature-to-Test Audit Map ───────────────────────────────────────
+
+export interface FeatureAudit {
+  feature_id: string;
+  name: string;
+  user_expectation: string;
+  mapped_tests: string[];
+  audit_gate: number; // number of tests that must pass
+}
+
+export const FEATURE_AUDIT_MAP: FeatureAudit[] = [
+  {
+    feature_id: "feat-task-management",
+    name: "Task Management",
+    user_expectation: "Create, assign, track, and complete tasks with status transitions",
+    mapped_tests: [
+      "ct-task-create", "ct-task-status", "ct-task-note", "ct-task-nochange",
+      "rv-tasks-admin", "rv-tasks-subadmin", "rv-tasks-employee",
+      "rv-task-create-admin", "rv-task-create-subadmin", "rv-task-create-employee",
+      "sm-happy-path", "sm-audit-trail",
+    ],
+    audit_gate: 12,
+  },
+  {
+    feature_id: "feat-approval-workflow",
+    name: "Approval Workflow",
+    user_expectation: "Pending tasks require admin/subadmin approval. Submitted tasks require verification. Self-approval is blocked.",
+    mapped_tests: [
+      "ct-task-approve", "ct-task-verify", "ct-task-rework",
+      "rv-approve-subadmin-scope", "rv-approve-employee-blocked",
+      "sm-employee-cannot-approve", "sm-employee-cannot-verify",
+      "sm-rework-cycle", "sm-rework-escalation",
+      "sm-invalid-open-to-verified", "sm-invalid-pending-to-submitted",
+    ],
+    audit_gate: 11,
+  },
+  {
+    feature_id: "feat-delegation",
+    name: "Task Delegation",
+    user_expectation: "Admin/subadmin can reassign tasks. Subadmin cannot delegate outside their teams.",
+    mapped_tests: [
+      "ct-task-delegate",
+      "sm-delegation", "sm-delegation-scope", "sm-non-assignee-cannot-submit",
+    ],
+    audit_gate: 4,
+  },
+  {
+    feature_id: "feat-availability",
+    name: "Availability / Leave Management",
+    user_expectation: "Employees request leave. Admins approve or reject. Each role sees only their scope.",
+    mapped_tests: [
+      "ct-avail-create", "ct-avail-approve", "ct-avail-reject",
+      "rv-avail-admin", "rv-avail-subadmin", "rv-avail-employee",
+    ],
+    audit_gate: 6,
+  },
+  {
+    feature_id: "feat-handoffs",
+    name: "Daily Handoffs",
+    user_expectation: "Employees complete daily handoffs summarizing their work.",
+    mapped_tests: ["ct-handoff-complete"],
+    audit_gate: 1,
+  },
+  {
+    feature_id: "feat-people-management",
+    name: "People Management",
+    user_expectation: "Admin provisions, updates, and removes employees. Non-admins cannot access.",
+    mapped_tests: [
+      "ct-people-create", "ct-people-update", "ct-people-delete",
+      "rv-people-admin-only",
+    ],
+    audit_gate: 4,
+  },
+  {
+    feature_id: "feat-reporting",
+    name: "Reporting / Metrics",
+    user_expectation: "Admin sees org-wide metrics. Subadmin sees team-scoped. Employee cannot access.",
+    mapped_tests: ["rv-metrics-admin", "rv-metrics-subadmin"],
+    audit_gate: 2,
+  },
+  {
+    feature_id: "feat-export",
+    name: "Data Export",
+    user_expectation: "Admin exports tasks and audit logs as CSV. Non-admins cannot access.",
+    mapped_tests: ["ct-export-tasks", "ct-export-audit", "rv-export-admin-only"],
+    audit_gate: 3,
+  },
+  {
+    feature_id: "feat-auth",
+    name: "Authentication",
+    user_expectation: "Unauthenticated users are rejected. Wrong roles are blocked from restricted endpoints.",
+    mapped_tests: ["ct-auth-no-session", "ct-auth-wrong-role"],
+    audit_gate: 2,
+  },
+  {
+    feature_id: "feat-notifications",
+    name: "Notifications",
+    user_expectation: "Users receive notifications for task events. Notifications are scoped to the recipient.",
+    mapped_tests: ["sm-rework-cycle", "sm-rework-escalation"],
+    audit_gate: 2,
+  },
+  {
+    feature_id: "feat-messaging",
+    name: "Messaging",
+    user_expectation: "Users can send and receive messages within their conversations.",
+    mapped_tests: [], // Contract tests pending — E2E messaging.spec.ts covers this for now
+    audit_gate: 0,
+  },
+];
+
+/**
+ * Run a feature-level audit. Returns pass/fail per feature based on test results.
+ */
+export interface FeatureAuditResult {
+  feature_id: string;
+  name: string;
+  passed: boolean;
+  tests_passed: number;
+  tests_failed: number;
+  tests_total: number;
+  failed_test_ids: string[];
+  coverage_percent: number;
+}
+
+export function runFeatureAudit(
+  testResults: Record<string, { passed: boolean }>
+): FeatureAuditResult[] {
+  return FEATURE_AUDIT_MAP.map(feature => {
+    const results = feature.mapped_tests.map(testId => ({
+      testId,
+      passed: testResults[testId]?.passed ?? false,
+    }));
+
+    const passed = results.filter(r => r.passed).length;
+    const failed = results.filter(r => !r.passed).length;
+    const failedIds = results.filter(r => !r.passed).map(r => r.testId);
+
+    // Feature with zero mapped tests is BLOCKED (not passed)
+    const featurePassed = feature.mapped_tests.length > 0
+      ? failed === 0
+      : false;
+
+    return {
+      feature_id: feature.feature_id,
+      name: feature.name,
+      passed: featurePassed,
+      tests_passed: passed,
+      tests_failed: failed,
+      tests_total: feature.mapped_tests.length,
+      failed_test_ids: failedIds,
+      coverage_percent: feature.mapped_tests.length > 0
+        ? Math.round((passed / feature.mapped_tests.length) * 100)
+        : 0,
+    };
+  });
+}
+
+/**
+ * Get the overall audit summary across all features.
+ */
+export function getAuditSummary(
+  auditResults: FeatureAuditResult[]
+): {
+  total_features: number;
+  features_passed: number;
+  features_failed: number;
+  features_blocked: number;
+  overall_passed: boolean;
+  failed_features: string[];
+  blocked_features: string[];
+} {
+  const passed = auditResults.filter(r => r.passed);
+  const failed = auditResults.filter(r => !r.passed && r.tests_total > 0);
+  const blocked = auditResults.filter(r => r.tests_total === 0);
+
+  return {
+    total_features: auditResults.length,
+    features_passed: passed.length,
+    features_failed: failed.length,
+    features_blocked: blocked.length,
+    overall_passed: failed.length === 0 && blocked.length === 0,
+    failed_features: failed.map(r => r.name),
+    blocked_features: blocked.map(r => r.name),
+  };
+}
+
 // ─── Summary Statistics ──────────────────────────────────────────────
 
 export const CONTRACT_TEST_SUMMARY = {
@@ -454,5 +640,6 @@ export const CONTRACT_TEST_SUMMARY = {
   api_routes: API_ROUTE_TESTS.length,
   role_visibility: ROLE_VISIBILITY_TESTS.length,
   state_machine: STATE_MACHINE_TESTS.length,
+  features: FEATURE_AUDIT_MAP.length,
   categories: ["api_routes", "role_visibility", "state_machine"] as const,
 };
