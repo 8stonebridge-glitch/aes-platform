@@ -361,6 +361,59 @@ export interface FixTrailEntry {
 
 // ─── Catalog Match ─────────────────────────────────────────────────────
 
+// ─── Builder Run Types ────────────────────────────────────────────────
+
+export type BuilderRunStatus =
+  | "ready_for_build"
+  | "building"
+  | "build_failed"
+  | "build_succeeded"
+  | "build_rejected";
+
+export interface BuilderRunRecord {
+  run_id: string;
+  job_id: string;
+  bridge_id: string;
+  feature_id: string;
+  feature_name: string;
+
+  status: BuilderRunStatus;
+
+  // Input tracking
+  input_package_hash: string;
+  builder_package: any; // The full BuilderPackage JSON
+
+  // Output tracking
+  files_created: string[];
+  files_modified: string[];
+  files_deleted: string[];
+
+  // Test results
+  test_results: { test_id: string; passed: boolean; output?: string }[];
+  acceptance_coverage: {
+    total_required: number;
+    covered: number;
+    missing: string[];
+  };
+
+  // Verification
+  scope_violations: string[];
+  constraint_violations: string[];
+  verification_passed: boolean;
+
+  // Failure info
+  failure_reason: string | null;
+
+  // Metadata
+  builder_model: string;
+  duration_ms: number;
+  schema_version: number;
+  created_at: string;
+  completed_at: string | null;
+}
+
+// ─── Catalog Match ─────────────────────────────────────────────────────
+
 export interface CatalogMatch {
   candidate_id: string;
   asset_type: string;

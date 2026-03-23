@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { getJobStore } from "../../store.js";
 import { CURRENT_SCHEMA_VERSION } from "../../types/artifacts.js";
-import type { FeatureBridge, VetoResult, FixTrailEntry } from "../../types/artifacts.js";
+import type { FeatureBridge, VetoResult, FixTrailEntry, BuilderRunRecord } from "../../types/artifacts.js";
 
 function box(title: string): string {
   const inner = `  AES Run Viewer -- ${title}  `;
@@ -102,6 +102,23 @@ export async function viewCommand(jobId: string): Promise<void> {
         console.log(`  ${chalk.red("x")} ${v.code}: ${chalk.red(v.reason)}`);
       }
       console.log(`  ${chalk.red(`${triggered.length} veto(es) triggered`)}`);
+    }
+    console.log();
+  }
+
+  // ─── BUILDER RUNS ──────────────────────────────────────────
+  const runs = (job.builderRuns || []) as BuilderRunRecord[];
+  if (runs.length > 0) {
+    console.log(chalk.bold.white(`BUILDER RUNS (${runs.length} run${runs.length !== 1 ? "s" : ""})`));
+    for (const r of runs) {
+      const statusIcon = r.status === "build_succeeded" ? chalk.green("+") :
+        r.status === "build_rejected" ? chalk.red("x") :
+        r.status === "build_failed" ? chalk.red("!") :
+        chalk.yellow("~");
+      const featureSlug = r.feature_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 22);
+      const testStr = `${r.test_results.filter(t => t.passed).length}/${r.test_results.length} tests`;
+      const fileCount = r.files_created.length + r.files_modified.length;
+      console.log(`  ${statusIcon} ${featureSlug.padEnd(24)} ${(r.builder_model || "").padEnd(14)} ${r.status.padEnd(18)} ${String(r.duration_ms).padStart(4)}ms   ${fileCount} files   ${testStr}`);
     }
     console.log();
   }

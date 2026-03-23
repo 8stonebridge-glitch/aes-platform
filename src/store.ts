@@ -13,6 +13,7 @@ import type {
   VetoResult,
   LogEntry,
   FixTrailEntry,
+  BuilderRunRecord,
 } from "./types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
@@ -39,6 +40,7 @@ export interface JobRecord {
   validatorResults?: Record<string, unknown>;
   vetoResults?: VetoResult[];
   fixTrailEntries?: FixTrailEntry[];
+  builderRuns?: BuilderRunRecord[];
   deploymentUrl?: string | null;
   errorMessage?: string | null;
 }
@@ -209,6 +211,12 @@ export class JobStore {
     const fixTrails = await this.persistence.loadFixTrails(jobId);
     if (fixTrails.length > 0) {
       job.fixTrailEntries = fixTrails;
+    }
+
+    // Load builder runs
+    const builderRuns = await this.persistence.loadBuilderRuns(jobId);
+    if (builderRuns.length > 0) {
+      job.builderRuns = builderRuns;
     }
 
     // Cache it

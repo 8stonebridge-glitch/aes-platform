@@ -10,6 +10,8 @@ import { replayCommand } from "./commands/replay.js";
 import { viewCommand, summaryCommand } from "./commands/view.js";
 import { resumeCommand } from "./commands/resume.js";
 import { exportCommand } from "./commands/export.js";
+import { buildFeatureCommand } from "./commands/build-feature.js";
+import { demoCommand } from "./commands/demo.js";
 
 const program = new Command();
 
@@ -80,5 +82,17 @@ program
   .argument("<job-id>", "Job ID")
   .argument("[feature-id]", "Feature ID (required if multiple features)")
   .action(exportCommand);
+
+program
+  .command("build-feature")
+  .description("Build a single feature from a completed pipeline run")
+  .argument("<job-id>", "Job ID")
+  .argument("<feature-id>", "Feature ID to build")
+  .action(buildFeatureCommand);
+
+program
+  .command("demo")
+  .description("End-to-end demo: pipeline + first feature build")
+  .action(demoCommand);
 
 program.parse();

@@ -48,6 +48,7 @@ import type {
   ApprovalRecord,
   LogEntry,
   FixTrailEntry,
+  BuilderRunRecord,
 } from "./types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
@@ -420,6 +421,82 @@ export class PersistenceLayer {
       job_id: r.job_id,
       raw_request: r.raw_request,
       created_at: r.created_at?.toISOString(),
+    }));
+  }
+
+  // ─── Builder Runs ────────────────────────────────────────────────
+
+  async persistBuilderRun(run: BuilderRunRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO builder_runs (
+        run_id, job_id, bridge_id, feature_id, feature_name, status,
+        input_package_hash, builder_package, files_created, files_modified,
+        files_deleted, test_results, acceptance_coverage, scope_violations,
+        constraint_violations, verification_passed, failure_reason,
+        builder_model, duration_ms, schema_version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      [
+        run.run_id, run.job_id, run.bridge_id, run.feature_id, run.feature_name,
+        run.status, run.input_package_hash, JSON.stringify(run.builder_package),
+        run.files_created, run.files_modified, run.files_deleted,
+        JSON.stringify(run.test_results), JSON.stringify(run.acceptance_coverage),
+        run.scope_violations, run.constraint_violations, run.verification_passed,
+        run.failure_reason, run.builder_model, run.duration_ms, run.schema_version
+      ]
+    );
+  }
+
+  async updateBuilderRunStatus(runId: string, status: string, updates: Partial<BuilderRunRecord>): Promise<void> {
+    const sets: string[] = [`status = $2`];
+    const params: any[] = [runId, status];
+    let idx = 3;
+
+    if (updates.files_created) { sets.push(`files_created = $${idx}`); params.push(updates.files_created); idx++; }
+    if (updates.files_modified) { sets.push(`files_modified = $${idx}`); params.push(updates.files_modified); idx++; }
+    if (updates.files_deleted) { sets.push(`files_deleted = $${idx}`); params.push(updates.files_deleted); idx++; }
+    if (updates.test_results) { sets.push(`test_results = $${idx}`); params.push(JSON.stringify(updates.test_results)); idx++; }
+    if (updates.acceptance_coverage) { sets.push(`acceptance_coverage = $${idx}`); params.push(JSON.stringify(updates.acceptance_coverage)); idx++; }
+    if (updates.scope_violations) { sets.push(`scope_violations = $${idx}`); params.push(updates.scope_violations); idx++; }
+    if (updates.constraint_violations) { sets.push(`constraint_violations = $${idx}`); params.push(updates.constraint_violations); idx++; }
+    if (updates.verification_passed !== undefined) { sets.push(`verification_passed = $${idx}`); params.push(updates.verification_passed); idx++; }
+    if (updates.failure_reason) { sets.push(`failure_reason = $${idx}`); params.push(updates.failure_reason); idx++; }
+    if (updates.duration_ms) { sets.push(`duration_ms = $${idx}`); params.push(updates.duration_ms); idx++; }
+    if (updates.completed_at) { sets.push(`completed_at = $${idx}`); params.push(updates.completed_at); idx++; }
+
+    await this.pool.query(
+      `UPDATE builder_runs SET ${sets.join(", ")} WHERE run_id = $1`,
+      params
+    );
+  }
+
+  async loadBuilderRuns(jobId: string): Promise<BuilderRunRecord[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM builder_runs WHERE job_id = $1 ORDER BY created_at ASC`,
+      [jobId]
+    );
+    return res.rows.map(r => ({
+      run_id: r.run_id,
+      job_id: r.job_id,
+      bridge_id: r.bridge_id,
+      feature_id: r.feature_id,
+      feature_name: r.feature_name,
+      status: r.status,
+      input_package_hash: r.input_package_hash,
+      builder_package: r.builder_package,
+      files_created: r.files_created || [],
+      files_modified: r.files_modified || [],
+      files_deleted: r.files_deleted || [],
+      test_results: r.test_results || [],
+      acceptance_coverage: r.acceptance_coverage || {},
+      scope_violations: r.scope_violations || [],
+      constraint_violations: r.constraint_violations || [],
+      verification_passed: r.verification_passed,
+      failure_reason: r.failure_reason,
+      builder_model: r.builder_model,
+      duration_ms: r.duration_ms,
+      schema_version: r.schema_version,
+      created_at: r.created_at?.toISOString(),
+      completed_at: r.completed_at?.toISOString() || null,
     }));
   }
 

@@ -140,6 +140,37 @@ CREATE INDEX IF NOT EXISTS idx_fix_trails_job_id ON fix_trails(job_id);
 CREATE INDEX IF NOT EXISTS idx_fix_trails_error_code ON fix_trails(error_code);
 CREATE INDEX IF NOT EXISTS idx_fix_trails_status ON fix_trails(status);
 
+-- ─── Builder Runs ─────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS builder_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  bridge_id TEXT NOT NULL,
+  feature_id TEXT NOT NULL,
+  feature_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ready_for_build',
+  input_package_hash TEXT NOT NULL,
+  builder_package JSONB NOT NULL,
+  files_created TEXT[] DEFAULT '{}',
+  files_modified TEXT[] DEFAULT '{}',
+  files_deleted TEXT[] DEFAULT '{}',
+  test_results JSONB DEFAULT '[]',
+  acceptance_coverage JSONB DEFAULT '{}',
+  scope_violations TEXT[] DEFAULT '{}',
+  constraint_violations TEXT[] DEFAULT '{}',
+  verification_passed BOOLEAN DEFAULT false,
+  failure_reason TEXT,
+  builder_model TEXT,
+  duration_ms INTEGER DEFAULT 0,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_builder_runs_job_id ON builder_runs(job_id);
+CREATE INDEX IF NOT EXISTS idx_builder_runs_status ON builder_runs(status);
+CREATE INDEX IF NOT EXISTS idx_builder_runs_feature_id ON builder_runs(feature_id);
+
 -- ─── Schema version migration for pre-existing tables ──────────────────
 -- These are safe no-ops if the column already exists (Postgres 11+).
 
