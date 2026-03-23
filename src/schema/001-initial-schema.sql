@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS intent_briefs (
   assumptions TEXT[],
   confirmation_statement TEXT,
   confirmation_status TEXT NOT NULL DEFAULT 'pending',
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS app_specs (
   spec_data JSONB NOT NULL,
   confidence_overall NUMERIC,
   version INTEGER NOT NULL DEFAULT 1,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -60,6 +62,7 @@ CREATE TABLE IF NOT EXISTS feature_bridges (
   bridge_data JSONB NOT NULL,
   confidence_overall NUMERIC,
   version INTEGER NOT NULL DEFAULT 1,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -76,6 +79,7 @@ CREATE TABLE IF NOT EXISTS veto_results (
   any_triggered BOOLEAN NOT NULL DEFAULT false,
   triggered_codes TEXT[],
   result_data JSONB NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -91,6 +95,7 @@ CREATE TABLE IF NOT EXISTS user_approvals (
   approved BOOLEAN NOT NULL,
   user_comment TEXT,
   presented_data JSONB,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -106,8 +111,58 @@ CREATE TABLE IF NOT EXISTS build_logs (
   message TEXT NOT NULL,
   level TEXT NOT NULL DEFAULT 'info',
   error_code TEXT,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_build_logs_job_id ON build_logs(job_id);
 CREATE INDEX IF NOT EXISTS idx_build_logs_gate ON build_logs(job_id, gate);
+
+-- ─── Fix Trails ─────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS fix_trails (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fix_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  gate TEXT NOT NULL,
+  error_code TEXT NOT NULL,
+  issue_summary TEXT NOT NULL,
+  root_cause TEXT NOT NULL,
+  repair_action TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'detected',
+  related_artifact_ids TEXT[] DEFAULT '{}',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_fix_trails_job_id ON fix_trails(job_id);
+CREATE INDEX IF NOT EXISTS idx_fix_trails_error_code ON fix_trails(error_code);
+CREATE INDEX IF NOT EXISTS idx_fix_trails_status ON fix_trails(status);
+
+-- ─── Schema version migration for pre-existing tables ──────────────────
+-- These are safe no-ops if the column already exists (Postgres 11+).
+
+DO $$ BEGIN
+  ALTER TABLE intent_briefs ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE app_specs ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE feature_bridges ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE veto_results ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE user_approvals ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE build_logs ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
+EXCEPTION WHEN OTHERS THEN NULL; END $$;

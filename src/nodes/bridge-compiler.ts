@@ -2,7 +2,7 @@ import type { AESStateType } from "../state.js";
 import { randomUUID } from "node:crypto";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { GateErrorCode, type ValidationResult, type FeatureBridge } from "../types/artifacts.js";
+import { GateErrorCode, CURRENT_SCHEMA_VERSION, type ValidationResult, type FeatureBridge, type FixTrailEntry } from "../types/artifacts.js";
 
 /**
  * Bridge Compiler — compiles one FeatureBridge per feature from:
@@ -325,6 +325,22 @@ export async function bridgeCompiler(
           feature_id: feature.feature_id,
           message: `G2 FAIL — ${f.code}: ${f.reason || ""}`,
         });
+        // Create FixTrail entry for G2 failure
+        const fixEntry: FixTrailEntry = {
+          fix_id: `fix-${randomUUID().slice(0, 8)}`,
+          job_id: state.jobId,
+          gate: "gate_2",
+          error_code: String(f.code),
+          issue_summary: `Bridge compilation check failed: ${f.code}`,
+          root_cause: f.reason || "Unknown",
+          repair_action: "Fix bridge compilation issue and recompile",
+          status: "detected",
+          related_artifact_ids: [bridge.bridge_id, feature.feature_id],
+          schema_version: CURRENT_SCHEMA_VERSION,
+          created_at: new Date().toISOString(),
+          resolved_at: null,
+        };
+        store.addFixTrail(state.jobId, fixEntry);
       }
     }
 

@@ -12,7 +12,9 @@ import type {
   ValidationResult,
   VetoResult,
   LogEntry,
+  FixTrailEntry,
 } from "./types/artifacts.js";
+import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
 export type DurabilityStatus = "confirmed" | "partial" | "memory_only";
 
@@ -36,6 +38,7 @@ export interface JobRecord {
   buildResults?: Record<string, unknown>;
   validatorResults?: Record<string, unknown>;
   vetoResults?: VetoResult[];
+  fixTrailEntries?: FixTrailEntry[];
   deploymentUrl?: string | null;
   errorMessage?: string | null;
 }
@@ -52,6 +55,10 @@ export class JobStore {
 
   hasPersistence(): boolean {
     return this.persistence !== null;
+  }
+
+  getPersistence(): PersistenceLayer | null {
+    return this.persistence;
   }
 
   create(job: JobRecord): void {
@@ -100,6 +107,7 @@ export class JobStore {
       ...entry,
       timestamp: new Date().toISOString(),
       level: "info",
+      schema_version: CURRENT_SCHEMA_VERSION,
     };
     const logs = this.logs.get(jobId);
     if (logs) logs.push(full);
@@ -107,6 +115,20 @@ export class JobStore {
     if (this.persistence) {
       this.persistence.persistLog(jobId, full).catch((err) => {
         console.error(`[persistence] Log write failed for ${jobId}:`, err.message);
+      });
+    }
+  }
+
+  addFixTrail(jobId: string, entry: FixTrailEntry): void {
+    const job = this.jobs.get(jobId);
+    if (job) {
+      if (!job.fixTrailEntries) job.fixTrailEntries = [];
+      job.fixTrailEntries.push(entry);
+    }
+
+    if (this.persistence) {
+      this.persistence.persistFixTrail(entry).catch((err) => {
+        console.error(`[persistence] FixTrail write failed for ${jobId}:`, err.message);
       });
     }
   }
@@ -183,6 +205,12 @@ export class JobStore {
       job.specValidationResults = validationResults;
     }
 
+    // Load fix trails
+    const fixTrails = await this.persistence.loadFixTrails(jobId);
+    if (fixTrails.length > 0) {
+      job.fixTrailEntries = fixTrails;
+    }
+
     // Cache it
     this.jobs.set(jobId, job);
 
@@ -249,6 +277,7 @@ export class JobStore {
           app_spec_id: appSpecDbId,
           approval_type: "app_plan_approval",
           approved: updates.userApproved,
+          schema_version: CURRENT_SCHEMA_VERSION,
           created_at: new Date().toISOString(),
         });
       }
@@ -268,6 +297,13 @@ export class JobStore {
     // Veto results
     if (updates.vetoResults && after.featureBridges) {
       await p.persistVetoResults(jobId, after.featureBridges as Record<string, FeatureBridge>);
+    }
+
+    // FixTrail entries
+    if (updates.fixTrailEntries) {
+      for (const entry of updates.fixTrailEntries) {
+        await p.persistFixTrail(entry);
+      }
     }
   }
 }

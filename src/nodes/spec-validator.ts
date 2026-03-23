@@ -1,8 +1,9 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { GateErrorCode } from "../types/artifacts.js";
-import type { ValidationResult } from "../types/artifacts.js";
+import { GateErrorCode, CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
+import type { ValidationResult, FixTrailEntry } from "../types/artifacts.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Spec Validator — runs Gate 1 validation rules against the AppSpec.
@@ -208,6 +209,26 @@ export async function specValidator(
 
     if (retryCount >= 3) {
       cb?.onFail("Max retries exceeded — spec blocked");
+
+      // Create FixTrail entries for unresolvable failures
+      for (const f of failed) {
+        const fixEntry: FixTrailEntry = {
+          fix_id: `fix-${randomUUID().slice(0, 8)}`,
+          job_id: state.jobId,
+          gate: "gate_1",
+          error_code: String(f.code),
+          issue_summary: `Validation rule ${f.code} failed after ${retryCount} retries`,
+          root_cause: f.reason || "Unknown",
+          repair_action: "Manual spec repair required",
+          status: "detected",
+          related_artifact_ids: state.appSpec?.app_id ? [state.appSpec.app_id] : [],
+          schema_version: CURRENT_SCHEMA_VERSION,
+          created_at: new Date().toISOString(),
+          resolved_at: null,
+        };
+        store.addFixTrail(state.jobId, fixEntry);
+      }
+
       return {
         specValidationResults: results,
         specRetryCount: retryCount,

@@ -4,6 +4,10 @@
  * Every field is concrete — no `any`.
  */
 
+// ─── Schema Version ──────────────────────────────────────────────────
+
+export const CURRENT_SCHEMA_VERSION = 1;
+
 // ─── Gate Error Codes ──────────────────────────────────────────────────
 // Prefixed by gate number to preserve semantic distinction:
 //   G1_ = validation failure (spec needs repair)
@@ -67,6 +71,7 @@ export interface IntentBrief {
   assumptions: string[];
   confirmation_statement: string;
   confirmation_status: "pending" | "confirmed" | "rejected" | "auto_confirmed_low_ambiguity";
+  schema_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -185,6 +190,7 @@ export interface AppSpec {
   dependency_graph: DependencyEdge[];
   risks: unknown[];
   confidence: Confidence;
+  schema_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -195,6 +201,7 @@ export interface ValidationResult {
   code: GateErrorCode | string;
   passed: boolean;
   reason?: string;
+  schema_version?: number;
 }
 
 // ─── FeatureBridge sub-types ───────────────────────────────────────────
@@ -295,6 +302,7 @@ export interface FeatureBridge {
     validation_requirements: string[];
   };
   confidence: ConfidenceBreakdown;
+  schema_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -307,6 +315,7 @@ export interface VetoResult {
   reason: string;
   required_fix: string;
   blocking_feature_ids: string[];
+  schema_version?: number;
 }
 
 // ─── Approval Record ───────────────────────────────────────────────────
@@ -317,6 +326,7 @@ export interface ApprovalRecord {
   approval_type: "intent_confirmation" | "app_plan_approval";
   approved: boolean;
   user_comment?: string;
+  schema_version: number;
   created_at: string;
 }
 
@@ -329,29 +339,22 @@ export interface LogEntry {
   message: string;
   level: "info" | "warn" | "error" | "success";
   error_code?: GateErrorCode | string;
+  schema_version?: number;
 }
 
 // ─── FixTrail Entry ────────────────────────────────────────────────────
 
 export interface FixTrailEntry {
-  failure_id: string;
-  app_id: string;
-  feature_id: string;
-  build_id: string;
-  stage: string;
-  failure_type: string;
-  root_cause_category: string;
-  symptom: string;
-  affected_surface: string;
-  severity: string;
-  first_detector: string;
-  resolution_action: string;
-  resolution_detail: string;
-  reused_fix_pattern: boolean;
-  validation_after_fix: "passed" | "failed" | "partial";
-  promoted_to_catalog_candidate: boolean;
-  prevented_by_existing_rule: boolean;
-  similar_past_failures: string[];
+  fix_id: string;
+  job_id: string;
+  gate: string;
+  error_code: string;
+  issue_summary: string;
+  root_cause: string;
+  repair_action: string;
+  status: "detected" | "repairing" | "repaired" | "unresolved" | "escalated";
+  related_artifact_ids: string[];
+  schema_version: number;
   created_at: string;
   resolved_at: string | null;
 }

@@ -1,7 +1,9 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { GateErrorCode } from "../types/artifacts.js";
+import { GateErrorCode, CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
+import type { FixTrailEntry } from "../types/artifacts.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Veto Checker — Gate 3.
@@ -198,6 +200,22 @@ export async function vetoChecker(
 
       for (const v of triggered) {
         cb?.onFail(`${bridge.feature_name}: ${v.code} — ${v.reason}`);
+        // Create FixTrail entry for each triggered veto
+        const fixEntry: FixTrailEntry = {
+          fix_id: `fix-${randomUUID().slice(0, 8)}`,
+          job_id: state.jobId,
+          gate: "gate_3",
+          error_code: String(v.code),
+          issue_summary: `Hard veto triggered: ${v.code}`,
+          root_cause: v.reason,
+          repair_action: v.required_fix,
+          status: "detected",
+          related_artifact_ids: [bridge.bridge_id, featureId],
+          schema_version: CURRENT_SCHEMA_VERSION,
+          created_at: new Date().toISOString(),
+          resolved_at: null,
+        };
+        store.addFixTrail(state.jobId, fixEntry);
       }
       cb?.onFeatureStatus(featureId, bridge.feature_name, "blocked");
     } else {

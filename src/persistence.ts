@@ -47,7 +47,9 @@ import type {
   VetoResult,
   ApprovalRecord,
   LogEntry,
+  FixTrailEntry,
 } from "./types/artifacts.js";
+import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
 export class PersistenceLayer {
   private pool: pg.Pool;
@@ -65,7 +67,7 @@ export class PersistenceLayer {
   }
 
   async initialize(): Promise<void> {
-    // Run full schema migration (all 6 tables, idempotent with IF NOT EXISTS)
+    // Run full schema migration (all tables, idempotent with IF NOT EXISTS)
     try {
       const __dirname = dirname(fileURLToPath(import.meta.url));
       const sql = readFileSync(join(__dirname, "schema", "001-initial-schema.sql"), "utf-8");
@@ -86,8 +88,9 @@ export class PersistenceLayer {
         request_id, raw_request, inferred_app_class, inferred_primary_users,
         inferred_core_outcome, inferred_platforms, inferred_risk_class,
         inferred_integrations, explicit_inclusions, explicit_exclusions,
-        ambiguity_flags, assumptions, confirmation_statement, confirmation_status
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ambiguity_flags, assumptions, confirmation_statement, confirmation_status,
+        schema_version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
       ON CONFLICT DO NOTHING
       RETURNING id`,
       [
@@ -97,6 +100,7 @@ export class PersistenceLayer {
         brief.inferred_integrations, brief.explicit_inclusions,
         brief.explicit_exclusions, brief.ambiguity_flags, brief.assumptions,
         brief.confirmation_statement, brief.confirmation_status,
+        brief.schema_version ?? CURRENT_SCHEMA_VERSION,
       ]
     );
     if (result.rows[0]?.id) {
@@ -123,13 +127,15 @@ export class PersistenceLayer {
     const rows = await this.pool.query<{ id: string }>(
       `INSERT INTO app_specs (
         app_id, request_id, intent_brief_id, title, summary,
-        app_class, risk_class, spec_data, confidence_overall, version
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        app_class, risk_class, spec_data, confidence_overall, version,
+        schema_version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       RETURNING id`,
       [
         appId, requestId, intentBriefId,
         spec.title, spec.summary, spec.app_class, spec.risk_class,
         JSON.stringify(spec), spec.confidence.overall, 1,
+        spec.schema_version ?? CURRENT_SCHEMA_VERSION,
       ]
     );
     return rows.rows[0].id;
@@ -148,14 +154,15 @@ export class PersistenceLayer {
     // which has an FK to feature_bridges.
     for (const r of results) {
       await this.pool.query(
-        `INSERT INTO build_logs (job_id, gate, message, level, error_code)
-         VALUES ($1, $2, $3, $4, $5)`,
+        `INSERT INTO build_logs (job_id, gate, message, level, error_code, schema_version)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
         [
           jobId,
           "gate_1",
           r.passed ? `${r.code}: PASS` : `${r.code}: FAIL — ${r.reason || ""}`,
           r.passed ? "info" : "error",
           r.passed ? null : r.code,
+          CURRENT_SCHEMA_VERSION,
         ]
       );
     }
@@ -175,14 +182,15 @@ export class PersistenceLayer {
       const result = await this.pool.query<{ id: string }>(
         `INSERT INTO feature_bridges (
           bridge_id, app_id, app_spec_id, feature_id, feature_name,
-          status, bridge_data, confidence_overall, version
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          status, bridge_data, confidence_overall, version, schema_version
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
         ON CONFLICT DO NOTHING
         RETURNING id`,
         [
           ensureUUID(bridge.bridge_id), ensureUUID(bridge.app_id), appSpecId, bridge.feature_id,
           bridge.feature_name, bridge.status, JSON.stringify(bridge),
           bridge.confidence?.overall || 0, 1,
+          bridge.schema_version ?? CURRENT_SCHEMA_VERSION,
         ]
       );
       if (result.rows[0]?.id) {
@@ -205,13 +213,14 @@ export class PersistenceLayer {
       if (!dbId) continue; // Can't persist without a valid FK
       await this.pool.query(
         `INSERT INTO veto_results (
-          bridge_id, any_triggered, triggered_codes, result_data
-        ) VALUES ($1,$2,$3,$4)`,
+          bridge_id, any_triggered, triggered_codes, result_data, schema_version
+        ) VALUES ($1,$2,$3,$4,$5)`,
         [
           dbId,
           triggered.length > 0,
           triggered.map((v: VetoResult) => v.code),
           JSON.stringify(bridge.hard_vetoes),
+          CURRENT_SCHEMA_VERSION,
         ]
       );
     }
@@ -222,8 +231,8 @@ export class PersistenceLayer {
   async persistApproval(approval: ApprovalRecord): Promise<void> {
     await this.pool.query(
       `INSERT INTO user_approvals (
-        app_id, app_spec_id, approval_type, approved, user_comment, presented_data
-      ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        app_id, app_spec_id, approval_type, approved, user_comment, presented_data, schema_version
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [
         ensureUUID(approval.job_id),
         approval.app_spec_id,  // Already a DB UUID from persistAppSpec
@@ -231,6 +240,7 @@ export class PersistenceLayer {
         approval.approved,
         approval.user_comment || null,
         JSON.stringify({ approval_type: approval.approval_type }),
+        approval.schema_version ?? CURRENT_SCHEMA_VERSION,
       ]
     );
   }
@@ -239,13 +249,48 @@ export class PersistenceLayer {
 
   async persistLog(jobId: string, entry: LogEntry): Promise<void> {
     await this.pool.query(
-      `INSERT INTO build_logs (job_id, gate, feature_id, message, level, error_code)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+      `INSERT INTO build_logs (job_id, gate, feature_id, message, level, error_code, schema_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [
         jobId, entry.gate || null, entry.feature_id || null,
         entry.message, entry.level || "info", entry.error_code || null,
+        entry.schema_version ?? CURRENT_SCHEMA_VERSION,
       ]
     );
+  }
+
+  // ─── FixTrail ─────────────────────────────────────────────────────
+
+  async persistFixTrail(entry: FixTrailEntry): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO fix_trails (fix_id, job_id, gate, error_code, issue_summary,
+       root_cause, repair_action, status, related_artifact_ids, schema_version)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [entry.fix_id, entry.job_id, entry.gate, entry.error_code,
+       entry.issue_summary, entry.root_cause, entry.repair_action,
+       entry.status, entry.related_artifact_ids, entry.schema_version]
+    );
+  }
+
+  async loadFixTrails(jobId: string): Promise<FixTrailEntry[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM fix_trails WHERE job_id = $1 ORDER BY created_at ASC`,
+      [jobId]
+    );
+    return res.rows.map(r => ({
+      fix_id: r.fix_id,
+      job_id: r.job_id,
+      gate: r.gate,
+      error_code: r.error_code,
+      issue_summary: r.issue_summary,
+      root_cause: r.root_cause,
+      repair_action: r.repair_action,
+      status: r.status,
+      related_artifact_ids: r.related_artifact_ids || [],
+      schema_version: r.schema_version,
+      created_at: r.created_at?.toISOString(),
+      resolved_at: r.resolved_at?.toISOString() || null,
+    }));
   }
 
   // ─── Load / Reconstruct ────────────────────────────────────────────
@@ -345,6 +390,7 @@ export class PersistenceLayer {
       approval_type: row.approval_type,
       approved: row.approved,
       user_comment: row.user_comment,
+      schema_version: row.schema_version ?? CURRENT_SCHEMA_VERSION,
       created_at: row.created_at?.toISOString(),
     };
   }
@@ -361,6 +407,7 @@ export class PersistenceLayer {
       message: r.message,
       level: r.level,
       error_code: r.error_code,
+      schema_version: r.schema_version ?? CURRENT_SCHEMA_VERSION,
     }));
   }
 

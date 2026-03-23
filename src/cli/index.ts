@@ -7,6 +7,9 @@ import { approveCommand } from "./commands/approve.js";
 import { logsCommand } from "./commands/logs.js";
 import { abortCommand } from "./commands/abort.js";
 import { replayCommand } from "./commands/replay.js";
+import { viewCommand, summaryCommand } from "./commands/view.js";
+import { resumeCommand } from "./commands/resume.js";
+import { exportCommand } from "./commands/export.js";
 
 const program = new Command();
 
@@ -53,5 +56,29 @@ program
   .description("Replay a prior run from Postgres (no re-execution)")
   .argument("<job-id>", "Job ID to replay")
   .action(replayCommand);
+
+program
+  .command("view")
+  .description("Show rich terminal summary for a job")
+  .argument("<job-id>", "Job ID to view")
+  .action(viewCommand);
+
+program
+  .command("summary")
+  .description("Show table of all recent jobs")
+  .action(summaryCommand);
+
+program
+  .command("resume")
+  .description("Resume a job from its last durable checkpoint")
+  .argument("<job-id>", "Job ID to resume")
+  .action(resumeCommand);
+
+program
+  .command("export")
+  .description("Export builder-ready artifact as JSON")
+  .argument("<job-id>", "Job ID")
+  .argument("[feature-id]", "Feature ID (required if multiple features)")
+  .action(exportCommand);
 
 program.parse();
