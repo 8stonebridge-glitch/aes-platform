@@ -1,0 +1,50 @@
+name: aes-verify
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Working directory for install and verify commands
+        required: false
+        default: .
+        type: string
+      node-version:
+        description: Node.js version to use during verification
+        required: false
+        default: '20'
+        type: string
+      install-command:
+        description: Command used to install dependencies
+        required: false
+        default: npm ci
+        type: string
+      verify-command:
+        description: Command used to execute the repository verification gate
+        required: false
+        default: npm run verify
+        type: string
+
+jobs:
+  aes-verify:
+    name: aes-verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: AES Verify
+        run: ${{ inputs.verify-command }}
