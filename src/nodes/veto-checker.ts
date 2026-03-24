@@ -290,12 +290,22 @@ export async function vetoChecker(
     cb?.onSuccess(`Vetoes: 0/${totalChecks} triggered | Math: CLEAR`);
   }
 
+  // Partial progression: if some features are blocked but others are clear,
+  // proceed with the clear ones. Only fail if ALL features are blocked.
+  const clearedFeatures = Object.values(bridges).filter((b: any) => b.status === "validated");
+  const blockedFeatures = Object.values(bridges).filter((b: any) => b.status === "blocked");
+  const allBlocked = clearedFeatures.length === 0 && blockedFeatures.length > 0;
+
+  if (blockedFeatures.length > 0 && clearedFeatures.length > 0) {
+    cb?.onWarn(`${blockedFeatures.length} features blocked, ${clearedFeatures.length} features clear — proceeding with clear features`);
+  }
+
   return {
     featureBridges: bridges,
     vetoResults: allVetoResults,
-    currentGate: anyBlocked ? ("failed" as const) : ("gate_3" as const),
-    errorMessage: anyBlocked
-      ? `Hard vetoes triggered: ${allVetoResults.filter((v) => v.triggered).map((v) => v.code).join(", ")}`
+    currentGate: allBlocked ? ("failed" as const) : ("gate_3" as const),
+    errorMessage: allBlocked
+      ? `All features blocked by vetoes: ${allVetoResults.filter((v) => v.triggered).map((v) => v.code).join(", ")}`
       : null,
   };
 }
