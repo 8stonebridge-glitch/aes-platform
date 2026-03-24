@@ -4,6 +4,7 @@ import { getJobStore } from "../store.js";
 import { GateErrorCode, CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import type { FixTrailEntry } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
+import { evaluateVetoes, type VetoInput } from "@aes/math";
 
 /**
  * Veto Checker — Gate 3.
@@ -193,14 +194,61 @@ export async function vetoChecker(
     bridge.hard_vetoes = vetoes;
     allVetoResults.push(...vetoes);
 
-    if (triggered.length > 0) {
+    // ─── Math Layer: augmented veto evaluation ───
+    const mathConf = bridge.math?.confidence_score ?? 0.5;
+    const mathDims = bridge.math ? {
+      evidence_coverage: 0.5,
+      dependency_completeness: bridge.math.dependency_score ?? 1.0,
+      pattern_match_quality: 0.5,
+      test_coverage: 0.5,
+      freshness: bridge.math.freshness_score ?? 1.0,
+      contradiction_penalty: 1.0,
+    } : {};
+
+    const mathVetoInput: VetoInput = {
+      confidence_composite: mathConf,
+      confidence_dimensions: mathDims as Record<string, number>,
+      has_critical_contradictions: false,
+      contradiction_count: 0,
+      bridge_age_days: 0,
+      max_bridge_age_days: 7,
+      unresolved_dependencies: (bridge.dependencies || []).filter(
+        (d: any) => d.status !== "satisfied" && d.status !== "blocked"
+      ).length,
+      scope_violations: [],
+      missing_acceptance_tests: 0,
+      total_acceptance_tests: (bridge.required_tests || []).length,
+      validator_failures: [],
+      auth_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_AUTH_NOT_DEFINED)?.triggered,
+      role_boundary_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_ROLE_BOUNDARY_NOT_DEFINED)?.triggered,
+      tenancy_boundary_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_TENANCY_BOUNDARY_NOT_DEFINED)?.triggered,
+      destructive_actions_scoped: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_DESTRUCTIVE_ACTION_WITHOUT_SCOPE)?.triggered,
+      payment_reconciliation_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_PAYMENT_WITHOUT_RECONCILIATION)?.triggered,
+      admin_role_bounded: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_ADMIN_WITHOUT_ROLE_BOUNDARY)?.triggered,
+      external_api_fallback_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_EXTERNAL_API_WITHOUT_FALLBACK)?.triggered,
+      realtime_offline_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_REAL_TIME_WITHOUT_OFFLINE_STATE)?.triggered,
+      auditable_actions_logged: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_AUDITABLE_ACTION_WITHOUT_AUDIT_LOG)?.triggered,
+      data_mutation_ownership_defined: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_DATA_MUTATION_WITHOUT_OWNERSHIP_RULE)?.triggered,
+      all_feature_deps_exist: !vetoes.find((v: VetoResult) => v.code === GateErrorCode.G3_FEATURE_DEPENDS_ON_UNDEFINED_FEATURE)?.triggered,
+    };
+
+    const mathVetoResult = evaluateVetoes(mathVetoInput);
+    bridge.math_vetoes = mathVetoResult;
+
+    // Merge: any triggered from either the existing veto system or math layer
+    const combinedTriggered = triggered.length > 0 || mathVetoResult.any_triggered;
+
+    if (combinedTriggered) {
       bridge.status = "blocked";
-      bridge.blocked_reason = triggered.map((v) => `${v.code}: ${v.reason}`).join("; ");
+      const allReasons = [
+        ...triggered.map((v) => `${v.code}: ${v.reason}`),
+        ...mathVetoResult.blocking_codes.map((c) => `MATH:${c}`),
+      ];
+      bridge.blocked_reason = allReasons.join("; ");
       anyBlocked = true;
 
       for (const v of triggered) {
         cb?.onFail(`${bridge.feature_name}: ${v.code} — ${v.reason}`);
-        // Create FixTrail entry for each triggered veto
         const fixEntry: FixTrailEntry = {
           fix_id: `fix-${randomUUID().slice(0, 8)}`,
           job_id: state.jobId,
@@ -217,10 +265,13 @@ export async function vetoChecker(
         };
         store.addFixTrail(state.jobId, fixEntry);
       }
+      if (mathVetoResult.any_triggered) {
+        cb?.onFail(`${bridge.feature_name}: Math vetoes: ${mathVetoResult.blocking_codes.join(", ")}`);
+      }
       cb?.onFeatureStatus(featureId, bridge.feature_name, "blocked");
     } else {
       bridge.status = "validated";
-      cb?.onSuccess(`${bridge.feature_name}: 0 vetoes triggered`);
+      cb?.onSuccess(`${bridge.feature_name}: Vetoes: 0/${vetoes.length + mathVetoResult.results.length} triggered | Math: CLEAR`);
       cb?.onFeatureStatus(featureId, bridge.feature_name, "validated");
     }
   }
@@ -234,9 +285,9 @@ export async function vetoChecker(
   });
 
   if (anyBlocked) {
-    cb?.onWarn(`${triggeredCount} vetoes triggered — blocked features cannot proceed`);
+    cb?.onWarn(`Vetoes: ${triggeredCount}/${totalChecks} triggered — blocked features cannot proceed`);
   } else {
-    cb?.onSuccess(`All bridges passed veto checks`);
+    cb?.onSuccess(`Vetoes: 0/${totalChecks} triggered | Math: CLEAR`);
   }
 
   return {

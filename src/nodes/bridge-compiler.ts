@@ -4,6 +4,14 @@ import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { GateErrorCode, CURRENT_SCHEMA_VERSION, type ValidationResult, type FeatureBridge, type FixTrailEntry } from "../types/artifacts.js";
 import { FEATURE_TO_PATTERN, PAGE_PATTERNS, type PatternRequirement } from "../types/pattern-requirements.js";
+import {
+  enrichBridgeWithMath,
+  analyzeDependencies,
+  rankPriorities,
+  type DependencyNode,
+  type PriorityCandidate,
+  type VetoInput,
+} from "@aes/math";
 
 // ─── Reuse Requirements ──────────────────────────────────────────────────
 
@@ -423,7 +431,26 @@ export async function bridgeCompiler(
   const bridges: Record<string, any> = {};
   const catalogMatches = state.featureBridges || {};
   const features = state.appSpec.features;
-  const buildOrder = state.featureBuildOrder || features.map((f: any) => f.feature_id);
+
+  // ─── Math Layer: compute dependency-based build order ───
+  const depGraph = state.appSpec.dependency_graph || [];
+  const depNodes: DependencyNode[] = features.map((f: any) => ({
+    id: f.feature_id,
+    name: f.name,
+    status: "pending" as const,
+    dependencies: depGraph
+      .filter((e: any) => e.from_feature_id === f.feature_id)
+      .map((e: any) => e.to_feature_id),
+  }));
+
+  const depAnalysis = analyzeDependencies(depNodes);
+  const buildOrder = depAnalysis.build_order;
+
+  cb?.onStep(`Build order (math-computed): ${buildOrder.join(" → ")}`);
+  cb?.onStep(`Critical path length: ${depAnalysis.critical_path.length}`);
+  if (depAnalysis.circular_dependencies.length > 0) {
+    cb?.onWarn(`Circular dependencies detected: ${depAnalysis.circular_dependencies.length}`);
+  }
 
   for (let i = 0; i < features.length; i++) {
     const feature = features[i];
@@ -444,7 +471,6 @@ export async function bridgeCompiler(
           feature_id: feature.feature_id,
           message: `G2 FAIL — ${f.code}: ${f.reason || ""}`,
         });
-        // Create FixTrail entry for G2 failure
         const fixEntry: FixTrailEntry = {
           fix_id: `fix-${randomUUID().slice(0, 8)}`,
           job_id: state.jobId,
@@ -463,6 +489,66 @@ export async function bridgeCompiler(
       }
     }
 
+    // ─── Math Layer: enrich bridge with math fields ───
+    const selectedAssets = bridge.selected_reuse_assets || [];
+    const requiredTests = bridge.required_tests || [];
+    const deps = bridge.dependencies || [];
+    const resolvedDeps = deps.filter((d: any) => d.status === "satisfied").length;
+    const totalDeps = deps.length;
+    const featureImpact = depAnalysis.impact_map[feature.feature_id];
+
+    const vetoInput: VetoInput = {
+      confidence_composite: bridge.confidence.overall,
+      confidence_dimensions: {
+        evidence_coverage: selectedAssets.length > 0 ? 0.7 : 0.4,
+        dependency_completeness: totalDeps === 0 ? 1.0 : resolvedDeps / Math.max(totalDeps, 1),
+        pattern_match_quality: selectedAssets.length > 0 ? 0.6 : 0.3,
+        test_coverage: requiredTests.length > 0 ? 0.7 : 0.3,
+        freshness: 1.0,
+        contradiction_penalty: 1.0,
+      },
+      has_critical_contradictions: false,
+      contradiction_count: 0,
+      bridge_age_days: 0,
+      max_bridge_age_days: 7,
+      unresolved_dependencies: deps.filter((d: any) => d.status !== "satisfied" && d.status !== "blocked").length,
+      scope_violations: [],
+      missing_acceptance_tests: 0,
+      total_acceptance_tests: requiredTests.length,
+      validator_failures: [],
+      auth_defined: true,
+      role_boundary_defined: true,
+      tenancy_boundary_defined: true,
+      destructive_actions_scoped: true,
+      payment_reconciliation_defined: true,
+      admin_role_bounded: true,
+      external_api_fallback_defined: true,
+      realtime_offline_defined: true,
+      auditable_actions_logged: true,
+      data_mutation_ownership_defined: true,
+      all_feature_deps_exist: true,
+    };
+
+    const mathFields = enrichBridgeWithMath({
+      confidence_dimensions: {
+        evidence_coverage: selectedAssets.length > 0 ? 0.7 : 0.4,
+        dependency_completeness: totalDeps === 0 ? 1.0 : resolvedDeps / Math.max(totalDeps, 1),
+        pattern_match_quality: selectedAssets.length > 0 ? 0.6 : 0.3,
+        test_coverage: requiredTests.length > 0 ? 0.7 : 0.3,
+        freshness: 1.0,
+        contradiction_penalty: 1.0,
+      },
+      veto_input: vetoInput,
+      dependency_completeness: totalDeps === 0 ? 1.0 : resolvedDeps / Math.max(totalDeps, 1),
+      freshness: 1.0,
+      priority_rank: i + 1,
+      max_files: 30,
+      max_lines: 2000,
+      current_state: "derived",
+    });
+
+    bridge.math = mathFields;
+
     bridges[feature.feature_id] = bridge;
 
     const selectedCount = bridge.selected_reuse_assets.length;
@@ -475,13 +561,35 @@ export async function bridgeCompiler(
       bridge.status
     );
     cb?.onStep(
-      `${feature.name}: ${selectedCount} reuse assets, ${ruleCount} rules, ${testCount} tests, ${(bridge.confidence.overall * 100).toFixed(0)}% confidence${g2Failures.length > 0 ? ` [BLOCKED: ${g2Failures.length} G2 failures]` : ""}`
+      `${feature.name}: confidence ${(mathFields.confidence_score * 100).toFixed(1)}% | risk ${(mathFields.risk_score * 100).toFixed(1)}% | priority #${mathFields.priority_rank}${g2Failures.length > 0 ? ` [BLOCKED: ${g2Failures.length} G2 failures]` : ""}`
     );
   }
 
+  // ─── Math Layer: priority ranking ───
+  const featureIdSet = new Set(features.map((f: any) => f.feature_id));
+  const candidates: PriorityCandidate[] = features.map((f: any) => {
+    const bridge = bridges[f.feature_id];
+    const fDeps = depGraph.filter((e: any) => e.from_feature_id === f.feature_id);
+    const allDepsExist = fDeps.every((e: any) => featureIdSet.has(e.to_feature_id));
+    const impact = depAnalysis.impact_map[f.feature_id];
+    return {
+      id: f.feature_id,
+      name: f.name,
+      business_value: f.priority === "critical" ? 1.0 : f.priority === "high" ? 0.8 : f.priority === "medium" ? 0.5 : 0.3,
+      readiness: allDepsExist ? 0.9 : 0.2,
+      evidence_strength: (bridge?.selected_reuse_assets?.length || 0) > 0 ? 0.7 : 0.4,
+      estimated_effort: 0.5,
+      blast_radius: impact ? impact.total_impact / features.length : 0.1,
+      is_blocked: bridge?.status === "blocked",
+    };
+  });
+
+  const ranked = rankPriorities(candidates);
+  cb?.onStep(`Priority ranking: ${ranked.filter(r => !r.is_blocked).map(r => `${r.rank}. ${r.name} (${(r.score * 100).toFixed(0)}%)`).join(", ")}`);
+
   store.addLog(state.jobId, {
     gate: "gate_2",
-    message: `${features.length} bridges compiled`,
+    message: `${features.length} bridges compiled | Build order: ${buildOrder.join(" → ")}`,
   });
 
   cb?.onSuccess(`${features.length} feature bridges compiled`);

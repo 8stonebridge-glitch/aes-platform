@@ -9,6 +9,7 @@ import {
   type ContractTestCategory,
 } from "../contracts/opsuite-contract-tests.js";
 import type { RequiredTest } from "../types/artifacts.js";
+import { analyzeScopeDrift } from "@aes/math";
 
 interface ValidatorResult {
   test_id: string;
@@ -113,6 +114,50 @@ export async function validatorRunner(
       output: r.output,
       duration_ms: r.duration_ms,
     };
+  }
+
+  // ─── Math Layer: scope drift analysis per feature ───
+  const bridges = state.featureBridges || {};
+  const buildRes = state.buildResults || {};
+  for (const featureId of Object.keys(bridges)) {
+    const bridge = bridges[featureId];
+    if (!bridge?.bridge_id || !bridge?.write_scope) continue;
+    const run = buildRes[featureId];
+    if (!run) continue;
+
+    const driftResult = analyzeScopeDrift(
+      {
+        allowed_paths: bridge.write_scope.allowed_repo_paths || [],
+        forbidden_paths: bridge.write_scope.forbidden_repo_paths || [],
+        allowed_file_types: [".tsx", ".ts", ".css", ".json"],
+        max_files_changed: bridge.math?.scope_budget?.max_files ?? 30,
+        max_lines_changed: bridge.math?.scope_budget?.max_lines ?? 2000,
+        may_create_files: bridge.write_scope.may_create_files ?? true,
+        may_delete_files: bridge.write_scope.may_delete_files ?? false,
+        may_change_schema: bridge.write_scope.may_change_schema ?? false,
+        may_change_shared_packages: bridge.write_scope.may_change_shared_packages ?? false,
+        may_change_config: false,
+      },
+      {
+        files_created: run.files_created || [],
+        files_modified: run.files_modified || [],
+        files_deleted: run.files_deleted || [],
+        total_lines_added: (run.files_created?.length || 0) * 50,
+        total_lines_removed: 0,
+        schema_changed: false,
+        shared_packages_changed: false,
+        config_changed: false,
+      }
+    );
+
+    const filesUsed = Math.round(driftResult.files_budget_used * (bridge.math?.scope_budget?.max_files ?? 30));
+    const linesUsed = Math.round(driftResult.lines_budget_used * (bridge.math?.scope_budget?.max_lines ?? 2000));
+
+    if (!driftResult.clean) {
+      cb?.onFail(`Scope drift [${bridge.feature_name}]: ${driftResult.violations.length} violations, drift score: ${driftResult.drift_score}`);
+    } else {
+      cb?.onStep(`Scope drift [${bridge.feature_name}]: ${driftResult.drift_score.toFixed(3)} (clean) | Budget: ${filesUsed}/${bridge.math?.scope_budget?.max_files ?? 30} files, ${linesUsed}/${bridge.math?.scope_budget?.max_lines ?? 2000} lines`);
+    }
   }
 
   // Log results

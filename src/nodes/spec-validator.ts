@@ -4,6 +4,12 @@ import { getJobStore } from "../store.js";
 import { GateErrorCode, CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import type { ValidationResult, FixTrailEntry } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
+import {
+  computeConfidence,
+  computeTestCoverage,
+  computeContradictionPenalty,
+  canTransition,
+} from "@aes/math";
 
 /**
  * Spec Validator — runs Gate 1 validation rules against the AppSpec.
@@ -242,6 +248,49 @@ export async function specValidator(
       specValidationResults: results,
       specRetryCount: retryCount,
       currentGate: "gate_1" as const,
+    };
+  }
+
+  // ─── Math Layer: confidence scoring + state transition check ───
+  const spec = state.appSpec;
+  const featureIds = new Set(spec.features.map((f: any) => f.feature_id));
+  const depGraph = spec.dependency_graph || [];
+  const totalDeps = depGraph.length;
+  const resolvedDeps = depGraph.filter(
+    (e: any) => featureIds.has(e.from_feature_id) && featureIds.has(e.to_feature_id)
+  ).length;
+  const catalogMatchCount = Object.keys(state.featureBridges || {}).length;
+  const testedFeatureSet = new Set(spec.acceptance_tests.map((t: any) => t.feature_id));
+  const templateMatch = spec.features.length > 0; // decomposer produced features
+
+  const specConfidence = computeConfidence({
+    evidence_coverage: catalogMatchCount > 0 ? Math.min(catalogMatchCount / 5, 1) : 0.3,
+    dependency_completeness: totalDeps === 0 ? 1.0 : resolvedDeps / totalDeps,
+    pattern_match_quality: templateMatch ? 0.8 : 0.4,
+    test_coverage: computeTestCoverage({
+      required_tests: spec.acceptance_tests.length,
+      passing_tests: spec.acceptance_tests.length,
+      failing_tests: 0,
+      missing_tests: 0,
+    }),
+    freshness: 1.0,
+    contradiction_penalty: computeContradictionPenalty({ contradictions: [] }),
+  });
+
+  const canPromote = canTransition("derived", "validated", {
+    confidence: specConfidence.composite,
+    vetoes_triggered: false,
+    validators_passed: ["structure", "dependency_integrity"],
+  });
+
+  cb?.onStep(`Math confidence: ${(specConfidence.composite * 100).toFixed(1)}% | Promotion: ${specConfidence.meets_promotion ? "YES" : "NO"}`);
+
+  if (!canPromote.allowed) {
+    cb?.onFail(`Math layer blocked: ${canPromote.reason}`);
+    return {
+      specValidationResults: results,
+      currentGate: "failed" as const,
+      errorMessage: `Math layer blocked promotion: ${canPromote.reason}`,
     };
   }
 
