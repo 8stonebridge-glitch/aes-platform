@@ -9,6 +9,8 @@ import { userApproval } from "./nodes/user-approval.js";
 import { catalogSearcher } from "./nodes/catalog-searcher.js";
 import { bridgeCompiler } from "./nodes/bridge-compiler.js";
 import { vetoChecker } from "./nodes/veto-checker.js";
+import { builderDispatcher } from "./nodes/builder-dispatcher.js";
+import { validatorRunner } from "./nodes/validator-runner.js";
 import { getJobStore } from "./store.js";
 
 // @ts-nocheck — LangGraph's generic types for addNode/addEdge are strict about
@@ -79,7 +81,17 @@ function routeAfterUserApproval(state: AESStateType): string {
 
 function routeAfterVetoChecker(state: AESStateType): string {
   if (state.errorMessage) return "__end__";
-  return "__end__"; // Will wire to builder_dispatcher when ready
+  return "builder_dispatcher";
+}
+
+function routeAfterBuilderDispatcher(state: AESStateType): string {
+  if (state.errorMessage) return "__end__";
+  return "validator_runner";
+}
+
+function routeAfterValidatorRunner(state: AESStateType): string {
+  if (state.errorMessage) return "__end__";
+  return "__end__"; // Will wire to deployment_handler in next phase
 }
 
 export function buildAESGraph() {
@@ -100,6 +112,10 @@ export function buildAESGraph() {
   graph.addNode("bridge_compiler", bridgeCompiler);
   graph.addNode("veto_checker", vetoChecker);
 
+  // Gate 4 + 5 nodes (build + validate)
+  graph.addNode("builder_dispatcher", builderDispatcher);
+  graph.addNode("validator_runner", validatorRunner);
+
   // Entry
   graph.addEdge("__start__", "intake");
 
@@ -117,6 +133,10 @@ export function buildAESGraph() {
   graph.addEdge("catalog_searcher", "bridge_compiler");
   graph.addEdge("bridge_compiler", "veto_checker");
   graph.addConditionalEdges("veto_checker", routeAfterVetoChecker);
+
+  // Gate 4 + 5 routing (build → validate → end)
+  graph.addConditionalEdges("builder_dispatcher", routeAfterBuilderDispatcher);
+  graph.addConditionalEdges("validator_runner", routeAfterValidatorRunner);
 
   return graph.compile();
 }
