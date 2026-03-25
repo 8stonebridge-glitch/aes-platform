@@ -11,6 +11,7 @@ import { bridgeCompiler } from "./nodes/bridge-compiler.js";
 import { vetoChecker } from "./nodes/veto-checker.js";
 import { builderDispatcher } from "./nodes/builder-dispatcher.js";
 import { validatorRunner } from "./nodes/validator-runner.js";
+import { deploymentHandler } from "./nodes/deployment-handler.js";
 import { getJobStore } from "./store.js";
 
 // @ts-nocheck — LangGraph's generic types for addNode/addEdge are strict about
@@ -91,7 +92,11 @@ function routeAfterBuilderDispatcher(state: AESStateType): string {
 
 function routeAfterValidatorRunner(state: AESStateType): string {
   if (state.errorMessage) return "__end__";
-  return "__end__"; // Will wire to deployment_handler in next phase
+  return "deployment_handler";
+}
+
+function routeAfterDeploymentHandler(_state: AESStateType): string {
+  return "__end__"; // Always end — deploy failures don't retry
 }
 
 export function buildAESGraph() {
@@ -116,6 +121,9 @@ export function buildAESGraph() {
   graph.addNode("builder_dispatcher", builderDispatcher);
   graph.addNode("validator_runner", validatorRunner);
 
+  // Gate 6: Deployment
+  graph.addNode("deployment_handler", deploymentHandler);
+
   // Entry
   graph.addEdge("__start__", "intake");
 
@@ -134,9 +142,10 @@ export function buildAESGraph() {
   graph.addEdge("bridge_compiler", "veto_checker");
   graph.addConditionalEdges("veto_checker", routeAfterVetoChecker);
 
-  // Gate 4 + 5 routing (build → validate → end)
+  // Gate 4 + 5 + 6 routing (build → validate → deploy → end)
   graph.addConditionalEdges("builder_dispatcher", routeAfterBuilderDispatcher);
   graph.addConditionalEdges("validator_runner", routeAfterValidatorRunner);
+  graph.addConditionalEdges("deployment_handler", routeAfterDeploymentHandler);
 
   return graph.compile();
 }
