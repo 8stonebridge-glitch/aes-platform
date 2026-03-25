@@ -1,18 +1,19 @@
 /**
- * Builder Dispatcher — orchestrates feature builds for all features in build order.
+ * Builder Dispatcher — orchestrates a complete application build.
  *
- * Iterates through `state.featureBuildOrder`, compiles a BuilderPackage for each
- * feature, generates code via CodeBuilder (LLM-first with template fallback),
- * verifies the output, and stores results.
+ * Uses AppBuilder to produce a single workspace containing the entire app:
+ * - Scaffolds the base project (package.json, tsconfig, Next.js config, etc.)
+ * - Generates app-level files (layout, sidebar, dashboard, unified schema)
+ * - Builds each feature into the shared workspace
+ * - Commits everything as one atomic git commit
  *
- * Error handling: if an individual feature fails, the failure is recorded and
- * the dispatcher continues to the next feature. The pipeline only fails entirely
- * if ALL features fail.
+ * Falls back to per-feature builds if AppBuilder encounters a fatal error.
  */
 
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { AppBuilder } from "../builder/app-builder.js";
 import { compileBuilderPackage, type BuilderPackage } from "../builder-artifact.js";
 import { CodeBuilder, type BuilderContext } from "../builder/code-builder.js";
 import { verifyBuild } from "../builder/build-verifier.js";
@@ -25,10 +26,10 @@ export async function builderDispatcher(
   const cb = getCallbacks();
   const store = getJobStore();
 
-  cb?.onGate("building", "Starting feature builds...");
+  cb?.onGate("building", "Building complete application...");
   store.addLog(state.jobId, {
     gate: "building",
-    message: `Building ${(state.featureBuildOrder || []).length} features`,
+    message: `Building complete application with ${(state.featureBuildOrder || []).length} features`,
   });
 
   const buildResults: Record<string, any> = { ...(state.buildResults || {}) };
@@ -44,14 +45,87 @@ export async function builderDispatcher(
     };
   }
 
+  const appBuilder = new AppBuilder();
+
+  try {
+    const result = await appBuilder.buildApp(
+      state.jobId,
+      state.appSpec,
+      state.featureBridges,
+      state.featureBuildOrder,
+      cb,
+    );
+
+    // Store the app-level build as a special entry
+    buildResults["__app__"] = result.run;
+
+    // Store per-feature results
+    for (const [featureId, featureRun] of Object.entries(result.featureResults)) {
+      buildResults[featureId] = featureRun;
+    }
+
+    const successCount = Object.values(result.featureResults).filter(
+      (r) => r.status === "build_succeeded",
+    ).length;
+    const failCount = Object.values(result.featureResults).filter(
+      (r) => r.status === "build_failed",
+    ).length;
+    const total = featureBuildOrder.length;
+
+    const summary = `Application built: ${successCount}/${total} features succeeded${failCount > 0 ? `, ${failCount} failed` : ""}`;
+
+    store.addLog(state.jobId, { gate: "building", message: summary });
+
+    if (successCount === 0 && failCount > 0) {
+      cb?.onFail(`All ${failCount} feature builds failed`);
+      return {
+        currentGate: "failed" as any,
+        buildResults,
+        fixTrailEntries,
+        errorMessage: `All ${failCount} feature builds failed`,
+      };
+    }
+
+    cb?.onSuccess(summary);
+
+    return {
+      currentGate: "building" as any,
+      buildResults,
+      fixTrailEntries,
+    };
+  } catch (err: any) {
+    cb?.onFail(`Application build failed: ${err.message}`);
+    store.addLog(state.jobId, {
+      gate: "building",
+      message: `Application build FAILED: ${err.message}`,
+    });
+
+    // Fall back to per-feature builds
+    cb?.onWarn("Falling back to per-feature builds...");
+    return await perFeatureFallback(state, buildResults, fixTrailEntries);
+  }
+}
+
+/**
+ * Fallback: build features individually (original behavior).
+ * Used when AppBuilder encounters a fatal error.
+ */
+async function perFeatureFallback(
+  state: AESStateType,
+  buildResults: Record<string, any>,
+  fixTrailEntries: FixTrailEntry[],
+): Promise<Partial<AESStateType>> {
+  const cb = getCallbacks();
+  const store = getJobStore();
   const codeBuilder = new CodeBuilder();
+  const featureBuildOrder = state.featureBuildOrder || [];
+
   let successCount = 0;
   let failCount = 0;
 
   for (let i = 0; i < featureBuildOrder.length; i++) {
     const featureId = featureBuildOrder[i];
 
-    // Look up feature details from AppSpec
     const appSpec = state.appSpec;
     const features = appSpec?.features || [];
     const feature = features.find((f: any) => f.feature_id === featureId);
@@ -60,7 +134,6 @@ export async function builderDispatcher(
     cb?.onStep(`Building feature ${i + 1}/${featureBuildOrder.length}: ${featureName}`);
     cb?.onFeatureStatus(featureId, featureName, "building");
 
-    // Construct a JobRecord-like object for compileBuilderPackage
     const jobRecord: JobRecord = {
       jobId: state.jobId,
       requestId: state.requestId,
@@ -76,7 +149,6 @@ export async function builderDispatcher(
       buildResults,
     };
 
-    // Compile BuilderPackage from bridge
     let pkg: BuilderPackage | null = null;
     try {
       pkg = compileBuilderPackage(jobRecord, featureId);
@@ -87,14 +159,9 @@ export async function builderDispatcher(
     if (!pkg) {
       cb?.onWarn(`Skipping ${featureName} — bridge not ready or blocked`);
       cb?.onFeatureStatus(featureId, featureName, "skipped");
-      store.addLog(state.jobId, {
-        gate: "building",
-        message: `Skipped ${featureName}: bridge not ready`,
-      });
       continue;
     }
 
-    // Prepare LLM context from AppSpec
     const builderContext: BuilderContext = {};
     if (feature) {
       builderContext.feature = {
@@ -119,57 +186,41 @@ export async function builderDispatcher(
     }
 
     try {
-      // Build the feature
       const { run, workspace } = await codeBuilder.build(
         state.jobId,
         pkg,
-        undefined, // repoUrl — not used in pipeline yet
+        undefined,
         builderContext,
       );
 
-      // Verify the build
       const verification = verifyBuild(state.jobId, pkg, run);
       run.verification_passed = verification.passed;
       run.scope_violations = verification.scope_violations;
       run.constraint_violations = verification.constraint_violations;
       fixTrailEntries.push(...verification.fix_trail_entries);
 
-      // Store result
       buildResults[featureId] = run;
 
       if (run.status === "build_succeeded") {
         successCount++;
         cb?.onFeatureStatus(featureId, featureName, "built");
         cb?.onSuccess(`${featureName}: build succeeded (${run.files_created.length} files created)`);
-
-        if (!verification.passed) {
-          cb?.onWarn(
-            `${featureName}: verification issues — ${verification.scope_violations.length} scope, ${verification.constraint_violations.length} constraint violations`,
-          );
-        }
       } else {
         failCount++;
         cb?.onFeatureStatus(featureId, featureName, "failed");
         cb?.onFail(`${featureName}: build failed — ${run.failure_reason}`);
       }
 
-      // Cleanup workspace
       try {
         codeBuilder["workspaceManager"].cleanup(workspace);
       } catch {
         // Best-effort cleanup
       }
-
-      store.addLog(state.jobId, {
-        gate: "building",
-        message: `${featureName}: ${run.status} (${run.duration_ms}ms, ${run.files_created.length} files)`,
-      });
     } catch (err: any) {
       failCount++;
       cb?.onFeatureStatus(featureId, featureName, "failed");
       cb?.onFail(`${featureName}: unhandled build error — ${err.message}`);
 
-      // Store a minimal failure record
       buildResults[featureId] = {
         run_id: `br-error-${featureId}`,
         job_id: state.jobId,
@@ -188,17 +239,11 @@ export async function builderDispatcher(
         created_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
       };
-
-      store.addLog(state.jobId, {
-        gate: "building",
-        message: `${featureName}: FAILED — ${err.message}`,
-      });
     }
   }
 
-  // Final summary
   const total = featureBuildOrder.length;
-  const summary = `Build complete: ${successCount}/${total} succeeded, ${failCount} failed`;
+  const summary = `Build complete (fallback): ${successCount}/${total} succeeded, ${failCount} failed`;
 
   store.addLog(state.jobId, { gate: "building", message: summary });
 
