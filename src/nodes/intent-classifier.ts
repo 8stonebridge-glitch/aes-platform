@@ -2,9 +2,11 @@ import type { AESStateType } from "../state.js";
 import { randomUUID } from "node:crypto";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { getLLM, isLLMAvailable } from "../llm/provider.js";
+import { IntentBriefSchema } from "../llm/schemas.js";
+import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 
-// Keyword-based classification — no LLM needed for now.
-// Will be replaced with LLM classification later.
+// ─── Keyword-based classification (fallback) ───────────────────────────
 
 const APP_CLASS_KEYWORDS: Record<string, string[]> = {
   internal_ops_tool: ["internal", "ops", "admin", "backoffice", "back office", "dashboard", "management tool"],
@@ -160,15 +162,10 @@ function inferPrimaryUsers(appClass: string): string[] {
   return users[appClass] || ["users"];
 }
 
-export async function intentClassifier(
-  state: AESStateType
-): Promise<Partial<AESStateType>> {
-  const cb = getCallbacks();
-  const store = getJobStore();
-  const input = state.rawRequest;
+// ─── Keyword-based classifier (original, now used as fallback) ──────────
 
-  cb?.onGate("gate_0", "Classifying intent...");
-
+export function keywordClassifyIntent(rawRequest: string, requestId: string): any {
+  const input = rawRequest;
   const appClass = classifyAppClass(input);
   const riskClass = classifyRisk(input, appClass);
   const platforms = classifyPlatforms(input);
@@ -177,10 +174,8 @@ export async function intentClassifier(
   const coreOutcome = inferCoreOutcome(input, appClass);
   const primaryUsers = inferPrimaryUsers(appClass);
 
-  // Build confirmation statement
   const confirmationStatement = `You want a ${appClass.replace(/_/g, " ")} for ${primaryUsers.join(" and ")}, focused on ${coreOutcome}, delivered as ${platforms.join(" + ")}${integrations.length > 0 ? `, with ${integrations.join(", ")}` : ""} — correct?`;
 
-  // Determine confirmation status
   let confirmationStatus: string;
   if (ambiguityFlags.length === 0 && riskClass === "low") {
     confirmationStatus = "auto_confirmed_low_ambiguity";
@@ -188,8 +183,8 @@ export async function intentClassifier(
     confirmationStatus = "pending";
   }
 
-  const intentBrief = {
-    request_id: state.requestId,
+  return {
+    request_id: requestId,
     raw_request: input,
     inferred_app_class: appClass,
     inferred_primary_users: primaryUsers,
@@ -203,32 +198,131 @@ export async function intentClassifier(
     assumptions: [],
     confirmation_statement: confirmationStatement,
     confirmation_status: confirmationStatus,
+    schema_version: CURRENT_SCHEMA_VERSION,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+}
 
-  cb?.onStep(`App class: ${appClass}`);
-  cb?.onStep(`Risk: ${riskClass}`);
-  cb?.onStep(`Platforms: ${platforms.join(", ")}`);
-  if (integrations.length > 0) cb?.onStep(`Integrations: ${integrations.join(", ")}`);
-  if (ambiguityFlags.length > 0) cb?.onWarn(`Ambiguity flags: ${ambiguityFlags.join(", ")}`);
+// ─── LLM-powered classifier ────────────────────────────────────────────
 
-  store.addLog(state.jobId, {
-    gate: "gate_0",
-    message: `Classified as ${appClass} (${riskClass} risk), status: ${confirmationStatus}`,
-  });
+const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an intent classifier for a governed software factory. Given a natural-language app description, classify it into a structured intent brief.
 
-  if (confirmationStatus === "auto_confirmed_low_ambiguity") {
-    cb?.onSuccess("Auto-confirmed — low ambiguity, low risk");
-    return {
-      intentBrief,
-      intentConfirmed: true,
-    };
+App class categories:
+- internal_ops_tool: Internal dashboards, admin panels, back-office tools
+- customer_portal: Customer-facing self-service portals
+- fintech_wallet: Money transfer, payment, wallet apps
+- digital_banking_portal: Retail/digital banking interfaces
+- banking_operations_system: Core banking, operations systems
+- marketplace: Two-sided marketplaces, e-commerce
+- workflow_approval_system: Approval workflows, request management
+- property_management_system: Real estate, tenant, rental management
+- logistics_operations_system: Shipping, delivery, fleet tracking
+- compliance_case_management: Compliance, audit, regulatory case management
+- other: If none of the above clearly match
+
+Risk classification:
+- regulated: Anything involving money, banking, financial transactions, compliance
+- high: Enterprise systems, security-sensitive apps
+- medium: Customer-facing, marketplace, external-facing apps
+- low: Internal tools, dashboards, simple approval workflows
+
+Be precise. Extract explicit requirements vs inferences. Flag genuine ambiguities — don't flag things that are clearly implied. Generate a natural confirmation statement.
+
+Platforms must always include "web". Add "pwa" if mobile/offline is mentioned. Add "admin_console" if admin management is needed.`;
+
+async function llmClassifyIntent(rawRequest: string, requestId: string): Promise<any> {
+  const llm = getLLM()!;
+  const structured = llm.withStructuredOutput(IntentBriefSchema);
+
+  const result = await structured.invoke([
+    {
+      role: "system",
+      content: INTENT_CLASSIFIER_SYSTEM_PROMPT,
+    },
+    {
+      role: "user",
+      content: rawRequest,
+    },
+  ]);
+
+  // Ensure "web" is always in platforms
+  if (!result.inferred_platforms.includes("web")) {
+    result.inferred_platforms.unshift("web");
   }
 
-  cb?.onStep("Needs confirmation");
+  // Build full IntentBrief with fields the LLM doesn't generate
+  const now = new Date().toISOString();
+
+  // Determine confirmation status using same logic as keyword classifier
+  let confirmationStatus: string;
+  if (result.ambiguity_flags.length === 0 && result.inferred_risk_class === "low") {
+    confirmationStatus = "auto_confirmed_low_ambiguity";
+  } else {
+    confirmationStatus = "pending";
+  }
+
   return {
-    intentBrief,
-    intentConfirmed: false,
+    request_id: requestId,
+    raw_request: rawRequest,
+    ...result,
+    confirmation_status: confirmationStatus,
+    schema_version: CURRENT_SCHEMA_VERSION,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+// ─── Main intent classifier (LLM with keyword fallback) ────────────────
+
+export async function intentClassifier(
+  state: AESStateType
+): Promise<Partial<AESStateType>> {
+  const cb = getCallbacks();
+  const store = getJobStore();
+  const { rawRequest, requestId, jobId } = state;
+
+  cb?.onGate("gate_0", "Classifying intent...");
+
+  let brief: any;
+  let usedLLM = false;
+
+  if (isLLMAvailable()) {
+    try {
+      cb?.onStep("Using LLM for intent classification...");
+      brief = await llmClassifyIntent(rawRequest, requestId);
+      usedLLM = true;
+      cb?.onSuccess("LLM classification complete");
+    } catch (err: any) {
+      cb?.onWarn(`LLM classification failed (${err.message}), falling back to keyword classifier`);
+      brief = keywordClassifyIntent(rawRequest, requestId);
+    }
+  } else {
+    cb?.onStep("No LLM configured, using keyword classifier");
+    brief = keywordClassifyIntent(rawRequest, requestId);
+  }
+
+  cb?.onStep(`App class: ${brief.inferred_app_class}`);
+  cb?.onStep(`Risk: ${brief.inferred_risk_class}`);
+  cb?.onStep(`Platforms: ${brief.inferred_platforms.join(", ")}`);
+  if (brief.inferred_integrations.length > 0) cb?.onStep(`Integrations: ${brief.inferred_integrations.join(", ")}`);
+  if (brief.ambiguity_flags.length > 0) cb?.onWarn(`Ambiguity flags: ${brief.ambiguity_flags.join(", ")}`);
+
+  store.addLog(jobId, {
+    gate: "gate_0",
+    message: `Classified as ${brief.inferred_app_class} (${brief.inferred_risk_class} risk), method: ${usedLLM ? "llm" : "keyword"}, status: ${brief.confirmation_status}`,
+  });
+
+  const intentConfirmed = brief.confirmation_status === "auto_confirmed_low_ambiguity";
+
+  if (intentConfirmed) {
+    cb?.onSuccess(`Auto-confirmed: ${brief.inferred_app_class} (${usedLLM ? "LLM" : "keyword"})`);
+  } else {
+    cb?.onStep("Needs confirmation");
+  }
+
+  return {
+    intentBrief: brief,
+    intentConfirmed,
   };
 }

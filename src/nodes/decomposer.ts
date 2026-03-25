@@ -5,8 +5,11 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { getLLM, isLLMAvailable } from "../llm/provider.js";
+import { AppSpecSchema } from "../llm/schemas.js";
+import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 
-// Templates directory — reads from aes-templates repo
+// ─── Templates directory ────────────────────────────────────────────────
 const TEMPLATES_DIR = "/tmp/aes-templates/apps";
 
 interface TemplateData {
@@ -33,6 +36,35 @@ function loadTemplate(appClass: string): TemplateData | null {
 
   return null;
 }
+
+// ─── Shared: Topological Sort ──────────────────────────────────────────
+
+export function topologicalSort(features: any[], edges: any[]): string[] {
+  const ids = features.map((f) => f.feature_id);
+  const deps = new Map<string, Set<string>>();
+
+  for (const id of ids) deps.set(id, new Set());
+  for (const e of edges) {
+    deps.get(e.from_feature_id)?.add(e.to_feature_id);
+  }
+
+  const sorted: string[] = [];
+  const visited = new Set<string>();
+
+  function visit(id: string) {
+    if (visited.has(id)) return;
+    visited.add(id);
+    for (const dep of deps.get(id) || []) {
+      visit(dep);
+    }
+    sorted.push(id);
+  }
+
+  for (const id of ids) visit(id);
+  return sorted;
+}
+
+// ─── Template-based decomposer (fallback) ──────────────────────────────
 
 // Map a feature description string into a typed feature object
 function featureFromDescription(
@@ -159,32 +191,6 @@ function buildDependencyGraph(features: any[]): any[] {
   return edges;
 }
 
-// Build topological feature order from dependency edges
-function topologicalSort(features: any[], edges: any[]): string[] {
-  const ids = features.map((f) => f.feature_id);
-  const deps = new Map<string, Set<string>>();
-
-  for (const id of ids) deps.set(id, new Set());
-  for (const e of edges) {
-    deps.get(e.from_feature_id)?.add(e.to_feature_id);
-  }
-
-  const sorted: string[] = [];
-  const visited = new Set<string>();
-
-  function visit(id: string) {
-    if (visited.has(id)) return;
-    visited.add(id);
-    for (const dep of deps.get(id) || []) {
-      visit(dep);
-    }
-    sorted.push(id);
-  }
-
-  for (const id of ids) visit(id);
-  return sorted;
-}
-
 // Derive roles from app class
 function deriveRoles(appClass: string): any[] {
   const rolesByClass: Record<string, any[]> = {
@@ -299,34 +305,19 @@ function deriveAcceptanceTests(features: any[]): any[] {
   return tests;
 }
 
-export async function decomposer(
-  state: AESStateType
-): Promise<Partial<AESStateType>> {
-  const cb = getCallbacks();
-  const store = getJobStore();
-
-  if (!state.intentBrief || !state.intentConfirmed) {
-    cb?.onFail("Cannot decompose — intent not confirmed");
-    return {
-      currentGate: "failed" as const,
-      errorMessage: "Intent not confirmed before decomposition",
-    };
-  }
-
+/**
+ * Template-based decomposition — the original logic, now used as fallback
+ * when no LLM API key is configured or the LLM call fails.
+ */
+export function templateDecompose(state: AESStateType): { appSpec: any; featureBuildOrder: string[] } {
   const brief = state.intentBrief;
   const appClass = brief.inferred_app_class;
-
-  cb?.onGate("gate_1", "Decomposing AppSpec...");
-  store.addLog(state.jobId, { gate: "gate_1", message: `Decomposing ${appClass}` });
+  const cb = getCallbacks();
 
   // Load template
   const template = loadTemplate(appClass);
   if (!template) {
     cb?.onWarn(`No template found for ${appClass} — using minimal defaults`);
-    store.addLog(state.jobId, {
-      gate: "gate_1",
-      message: `No template for ${appClass}, using defaults`,
-    });
   }
 
   // Derive features from template or defaults
@@ -340,19 +331,12 @@ export async function decomposer(
     featureFromDescription(desc, i, appClass)
   );
 
-  cb?.onStep(`${features.length} features derived`);
-
   // Derive roles, permissions, tests, dependencies
   const roles = deriveRoles(appClass);
   const permissions = derivePermissions(roles, features);
   const dependencyGraph = buildDependencyGraph(features);
   const acceptanceTests = deriveAcceptanceTests(features);
   const buildOrder = topologicalSort(features, dependencyGraph);
-
-  cb?.onStep(`${roles.length} roles`);
-  cb?.onStep(`${permissions.length} permissions`);
-  cb?.onStep(`${dependencyGraph.length} dependency edges`);
-  cb?.onStep(`${acceptanceTests.length} acceptance tests`);
 
   // Build actors from roles
   const actors = roles.map((r) => ({
@@ -369,7 +353,7 @@ export async function decomposer(
   // Confidence scoring
   const confidence = {
     overall: template ? 0.85 : 0.6,
-    intent_clarity: state.intentBrief.ambiguity_flags.length === 0 ? 0.95 : 0.7,
+    intent_clarity: brief.ambiguity_flags.length === 0 ? 0.95 : 0.7,
     scope_completeness: template ? 0.85 : 0.5,
     dependency_clarity: 0.9,
     integration_clarity: brief.inferred_integrations.length > 0 ? 0.8 : 0.95,
@@ -390,7 +374,7 @@ export async function decomposer(
     target_users: brief.inferred_primary_users,
     platforms: brief.inferred_platforms,
     actors,
-    domain_entities: [], // Will be populated by a more detailed decomposer later
+    domain_entities: [],
     roles,
     permissions,
     features,
@@ -411,27 +395,177 @@ export async function decomposer(
     dependency_graph: dependencyGraph,
     risks: [],
     confidence,
+    schema_version: CURRENT_SCHEMA_VERSION,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
-  store.addLog(state.jobId, {
-    gate: "gate_1",
-    message: `AppSpec generated: ${features.length} features, ${roles.length} roles, confidence ${(confidence.overall * 100).toFixed(0)}%`,
-  });
+  return { appSpec, featureBuildOrder: buildOrder };
+}
+
+// ─── LLM-powered decomposer ──────────────────────────────────────────
+
+const DECOMPOSER_SYSTEM_PROMPT = `You are a software architect for a governed software factory. Given a classified intent, decompose it into a complete application specification.
+
+CRITICAL VALIDATION RULES — your output MUST satisfy all of these:
+1. Every feature must have actor_ids with at least one entry referencing a declared actor_id
+2. Every feature must have a non-empty "outcome" string
+3. Every permission role_id must reference a declared role's role_id
+4. Every permission "resource" field must be a valid feature_id from the features array
+5. All dependency_graph from_feature_id and to_feature_id must exist in features
+6. Every feature with priority "critical" or "high" must have at least one acceptance_test targeting it (by feature_id)
+7. All integrations must have fallback_defined: true
+8. All actor_ids used in features must match a declared actor's actor_id (except "end_user" and "system" which are exempt)
+
+ID CONVENTIONS:
+- feature_id: "f_" prefix, snake_case (e.g., "f_dashboard", "f_role_management")
+- role_id: snake_case (e.g., "admin", "submitter", "reviewer")
+- actor_id: snake_case matching role_ids (e.g., "admin", "submitter")
+- permission_id: "p_" prefix (e.g., "p_admin_read_dashboard")
+- integration_id: "int_" prefix (e.g., "int_email")
+- test_id: "t_" prefix (e.g., "t_dashboard_happy_path")
+
+Generate a complete, production-quality application specification. Include:
+- Realistic features that fully address the user's intent
+- Proper role hierarchy with appropriate scopes
+- Granular permissions (at minimum, every role gets allow on every feature; admins get additional manage-level allow)
+- Meaningful acceptance tests for all critical/high features
+- A valid dependency graph (auth/RBAC features should be dependencies for features that need them)
+- Accurate confidence scores (be honest about uncertainty)
+
+All features must have status "proposed".`;
+
+async function llmDecompose(
+  intentBrief: any,
+  retryCount: number,
+  previousFailures: any[]
+): Promise<{ appSpec: any; featureBuildOrder: string[] }> {
+  const llm = getLLM()!;
+  const structured = llm.withStructuredOutput(AppSpecSchema);
+
+  let retryContext = "";
+  if (retryCount > 0 && previousFailures.length > 0) {
+    const failures = previousFailures.filter((r: any) => !r.passed);
+    retryContext = `\n\nIMPORTANT — RETRY ATTEMPT ${retryCount}/3:
+The previous spec failed validation with these errors:
+${failures.map((r: any) => `- ${r.code}: ${r.reason}`).join("\n")}
+
+You MUST fix all of these issues.`;
+  }
+
+  const result = await structured.invoke([
+    {
+      role: "system",
+      content: DECOMPOSER_SYSTEM_PROMPT + retryContext,
+    },
+    {
+      role: "user",
+      content: `Classified intent:
+App Class: ${intentBrief.inferred_app_class}
+Core Outcome: ${intentBrief.inferred_core_outcome}
+Primary Users: ${intentBrief.inferred_primary_users.join(", ")}
+Platforms: ${intentBrief.inferred_platforms.join(", ")}
+Risk Class: ${intentBrief.inferred_risk_class}
+Integrations: ${intentBrief.inferred_integrations.join(", ") || "none"}
+Explicit Inclusions: ${intentBrief.explicit_inclusions?.join(", ") || "none"}
+Explicit Exclusions: ${intentBrief.explicit_exclusions?.join(", ") || "none"}
+Assumptions: ${intentBrief.assumptions?.join(", ") || "none"}
+Original Request: ${intentBrief.raw_request}`,
+    },
+  ]);
+
+  // Add system-level fields the LLM doesn't generate
+  const now = new Date().toISOString();
+  const appSpec = {
+    app_id: randomUUID(),
+    request_id: intentBrief.request_id,
+    intent_brief_id: intentBrief.request_id,
+    ...result,
+    domain_entities: [],
+    workflows: [],
+    non_functional_requirements: [],
+    compliance_requirements: [],
+    design_constraints: [],
+    risks: [],
+    schema_version: CURRENT_SCHEMA_VERSION,
+    created_at: now,
+    updated_at: now,
+  };
+
+  // Build feature order via topological sort of dependency_graph
+  const featureBuildOrder = topologicalSort(result.features, result.dependency_graph);
+
+  return { appSpec, featureBuildOrder };
+}
+
+// ─── Main decomposer (LLM with template fallback) ──────────────────────
+
+export async function decomposer(
+  state: AESStateType
+): Promise<Partial<AESStateType>> {
+  const cb = getCallbacks();
+  const store = getJobStore();
+
+  if (!state.intentBrief || !state.intentConfirmed) {
+    cb?.onFail("Cannot decompose — intent not confirmed");
+    return {
+      currentGate: "failed" as const,
+      errorMessage: "Intent not confirmed before decomposition",
+    };
+  }
+
+  cb?.onGate("gate_1", "Decomposing AppSpec...");
+
+  let appSpec: any;
+  let featureBuildOrder: string[];
+  let usedLLM = false;
+
+  if (isLLMAvailable()) {
+    try {
+      cb?.onStep(
+        state.specRetryCount > 0
+          ? `LLM retry ${state.specRetryCount}/3 — fixing validation failures...`
+          : "Using LLM for application decomposition..."
+      );
+      const result = await llmDecompose(
+        state.intentBrief,
+        state.specRetryCount,
+        state.specValidationResults
+      );
+      appSpec = result.appSpec;
+      featureBuildOrder = result.featureBuildOrder;
+      usedLLM = true;
+      cb?.onSuccess(`LLM decomposition complete — ${appSpec.features.length} features`);
+    } catch (err: any) {
+      cb?.onWarn(`LLM decomposition failed (${err.message}), falling back to template decomposer`);
+      const result = templateDecompose(state);
+      appSpec = result.appSpec;
+      featureBuildOrder = result.featureBuildOrder;
+    }
+  } else {
+    cb?.onStep("No LLM configured, using template decomposer");
+    const result = templateDecompose(state);
+    appSpec = result.appSpec;
+    featureBuildOrder = result.featureBuildOrder;
+  }
 
   // Report features
-  for (const f of features) {
+  for (const f of appSpec.features) {
     cb?.onFeatureStatus(f.feature_id, f.name, f.status);
   }
 
+  store.addLog(state.jobId, {
+    gate: "gate_1",
+    message: `AppSpec generated: ${appSpec.features.length} features, ${appSpec.roles.length} roles, method: ${usedLLM ? "llm" : "template"}, confidence ${((appSpec.confidence?.overall ?? 0) * 100).toFixed(0)}%`,
+  });
+
   cb?.onSuccess(
-    `AppSpec: ${features.length} features, ${roles.length} roles, ${acceptanceTests.length} tests, ${(confidence.overall * 100).toFixed(0)}% confidence`
+    `AppSpec: ${appSpec.features.length} features, ${appSpec.roles.length} roles, ${appSpec.acceptance_tests.length} tests, ${((appSpec.confidence?.overall ?? 0) * 100).toFixed(0)}% confidence (${usedLLM ? "LLM" : "template"})`
   );
 
   return {
     appSpec,
     currentGate: "gate_1" as const,
-    featureBuildOrder: buildOrder,
+    featureBuildOrder,
   };
 }
