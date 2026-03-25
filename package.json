@@ -13,7 +13,8 @@
     "aes": "node dist/cli/index.js",
     "start:api": "node dist/api/index.js",
     "test": "vitest run",
-    "verify": "tsc --noEmit"
+    "verify": "tsc --noEmit",
+    "paperclip": "tsx paperclip/aes-agent.ts"
   },
   "dependencies": {
     "@aes/math": "file:./packages/math",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "tsx": "^4.21.0",
     "vitest": "^4.1.1"
   }
 }
