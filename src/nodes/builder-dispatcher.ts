@@ -57,6 +57,8 @@ export async function builderDispatcher(
     );
 
     // Store the app-level build as a special entry
+    // Attach workspace path so deployment-handler can push to GitHub
+    (result.run as any).workspace_path = result.workspace.path;
     buildResults["__app__"] = result.run;
 
     // Store per-feature results
