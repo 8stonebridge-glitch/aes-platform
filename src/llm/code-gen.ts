@@ -1,0 +1,266 @@
+/**
+ * LLM-powered code generation for AES features.
+ *
+ * Each function tries the LLM first; returns null when the model is
+ * unavailable so the caller can fall back to its template path.
+ */
+
+import { getLLM, isLLMAvailable } from "./provider.js";
+
+// ─── Shared helpers ──────────────────────────────────────────────────
+
+interface FeatureContext {
+  name: string;
+  description: string;
+  summary?: string;
+  outcome: string;
+  actor_ids?: string[];
+  destructive_actions?: { action_name: string; reversible: boolean; confirmation_required: boolean; audit_logged: boolean }[];
+  audit_required?: boolean;
+}
+
+interface AppContext {
+  title: string;
+  summary: string;
+  roles?: { role_id: string; name: string; description: string }[];
+  permissions?: { role_id: string; resource: string; effect: string }[];
+}
+
+async function callLLM(systemPrompt: string, userPrompt: string): Promise<string | null> {
+  if (!isLLMAvailable()) return null;
+
+  const llm = getLLM();
+  if (!llm) return null;
+
+  try {
+    const response = await llm.invoke([
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ]);
+    const text = typeof response.content === "string"
+      ? response.content
+      : String(response.content);
+
+    // Strip markdown fences if present
+    return text
+      .replace(/^```(?:typescript|tsx|ts|jsx)?\n?/m, "")
+      .replace(/\n?```\s*$/m, "")
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
+const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.`;
+
+const AES_UI_RULES = `
+CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
+- Use <Button> from "@aes/ui" instead of <button>
+- Use <Input> from "@aes/ui" instead of <input>
+- Use <Textarea> from "@aes/ui" instead of <textarea>
+- Use <Table>, <TableHeader>, <TableBody>, <TableRow>, <TableCell> from "@aes/ui" instead of <table>/<thead>/<tbody>/<tr>/<td>/<th>
+- Use <Card>, <CardHeader>, <CardContent> from "@aes/ui" instead of raw <div> containers
+- Use <Badge> from "@aes/ui" instead of custom <span> badges
+- Use <Label> from "@aes/ui" instead of <label>
+- Use <Select> from "@aes/ui" instead of <select>
+- Use <Dialog> from "@aes/ui" for confirmation dialogs
+
+Import from "@aes/ui": { Button, Input, Textarea, Table, TableHeader, TableBody, TableRow, TableCell, Card, CardHeader, CardContent, Badge, Label, Select, Dialog }
+`;
+
+// ─── Public generators ───────────────────────────────────────────────
+
+export async function generateConvexSchema(
+  feature: FeatureContext,
+  appSpec: AppContext,
+): Promise<string | null> {
+  const system = `${STACK_PREAMBLE}
+
+You are generating a Convex schema file for a feature.
+
+Feature: ${feature.name}
+Description: ${feature.description}
+Outcome: ${feature.outcome}
+App: ${appSpec.title} — ${appSpec.summary}
+
+Generate a TypeScript file that exports a Convex table definition using defineTable().
+The schema should have fields specific to this feature, not generic placeholders.
+Include proper field types (v.string(), v.number(), v.boolean(), v.id(), v.optional(), etc.).
+Always include: createdBy (v.string()), orgId (v.string()), createdAt (v.number()), updatedAt (v.number()).
+Add indexes for orgId, status (if present), and createdAt.
+
+Output ONLY the TypeScript code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate the Convex schema for the "${feature.name}" feature.`);
+}
+
+export async function generateConvexQueries(
+  feature: FeatureContext,
+  appSpec: AppContext,
+  schemaContent: string,
+): Promise<string | null> {
+  const system = `${STACK_PREAMBLE}
+
+You are generating Convex query functions for a feature.
+
+Feature: ${feature.name}
+Description: ${feature.description}
+Outcome: ${feature.outcome}
+App: ${appSpec.title} — ${appSpec.summary}
+
+Here is the Convex schema these queries will read from:
+\`\`\`typescript
+${schemaContent}
+\`\`\`
+
+Generate query functions that:
+1. Always filter by orgId for tenant isolation
+2. Include a "list" query and a "get" (by id) query
+3. Add any additional queries that make sense for this feature
+4. Use proper Convex query patterns (ctx.db.query, withIndex, etc.)
+
+Output ONLY the TypeScript code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate Convex queries for "${feature.name}".`);
+}
+
+export async function generateConvexMutations(
+  feature: FeatureContext,
+  appSpec: AppContext,
+  schemaContent: string,
+): Promise<string | null> {
+  const destructiveNote = feature.destructive_actions?.length
+    ? `\nThis feature has destructive actions: ${feature.destructive_actions.map(a => a.action_name).join(", ")}. Generate mutations for these with proper guards.`
+    : "";
+  const auditNote = feature.audit_required
+    ? "\nThis feature requires audit logging — add audit trail entries in mutations."
+    : "";
+
+  const system = `${STACK_PREAMBLE}
+
+You are generating Convex mutation functions for a feature.
+
+Feature: ${feature.name}
+Description: ${feature.description}
+Outcome: ${feature.outcome}
+App: ${appSpec.title} — ${appSpec.summary}
+${destructiveNote}${auditNote}
+
+Here is the Convex schema these mutations will write to:
+\`\`\`typescript
+${schemaContent}
+\`\`\`
+
+Generate mutation functions that:
+1. Always verify orgId ownership before writes
+2. Include "create" and at least one update mutation
+3. Include mutations for any feature-specific workflows
+4. Use proper Convex mutation patterns
+
+Output ONLY the TypeScript code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate Convex mutations for "${feature.name}".`);
+}
+
+export async function generatePage(
+  feature: FeatureContext,
+  appSpec: AppContext,
+  capability: string,
+  pageType: "form" | "list" | "detail",
+): Promise<string | null> {
+  const typeInstructions: Record<string, string> = {
+    form: `Generate a form page with:
+- useMutation() hook for submission
+- Proper form validation and error handling
+- Loading state during submission
+- Success redirect after submission
+- All form fields use @aes/ui components (Input, Textarea, Select, Label, Button)
+- Wrap the form in a Card with CardHeader and CardContent`,
+
+    list: `Generate a list/table page with:
+- useQuery() hook for data fetching
+- A Table component from @aes/ui with TableHeader, TableBody, TableRow, TableCell
+- Loading skeleton state
+- Empty state when no data
+- Status badges using Badge from @aes/ui
+- Clickable rows or action buttons`,
+
+    detail: `Generate a detail view page with:
+- useQuery() hook for fetching a single item by ID
+- useParams() for route parameter
+- Back navigation button using Button from @aes/ui
+- Status display using Badge from @aes/ui
+- All content wrapped in Card from @aes/ui
+- Not found state handling`,
+  };
+
+  const system = `${STACK_PREAMBLE}
+${AES_UI_RULES}
+
+You are generating a React page component (Next.js "use client").
+
+Feature: ${feature.name}
+Description: ${feature.description}
+Capability: ${capability}
+Page type: ${pageType}
+App: ${appSpec.title} — ${appSpec.summary}
+
+${typeInstructions[pageType]}
+
+The page should use:
+- useAuth() from @clerk/nextjs for orgId/userId
+- Convex hooks (useQuery/useMutation) from convex/react
+- Feature-specific field names derived from the feature description (NOT generic "title"/"description")
+
+Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`);
+}
+
+export async function generateComponent(
+  feature: FeatureContext,
+  appSpec: AppContext,
+  componentType: string,
+): Promise<string | null> {
+  const system = `${STACK_PREAMBLE}
+${AES_UI_RULES}
+
+You are generating a React component.
+
+Feature: ${feature.name}
+Description: ${feature.description}
+Component type: ${componentType}
+App: ${appSpec.title} — ${appSpec.summary}
+
+Generate a reusable component that:
+- Uses @aes/ui components (Badge for status, Card for containers, etc.)
+- Has proper TypeScript props interface
+- Is well-documented with JSDoc
+
+Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate a ${componentType} component for "${feature.name}".`);
+}
+
+export async function generateTest(
+  feature: FeatureContext,
+  testDef: { name: string; pass_condition: string },
+): Promise<string | null> {
+  const system = `${STACK_PREAMBLE}
+
+You are generating a Vitest test file.
+
+Feature: ${feature.name}
+Test name: ${testDef.name}
+Pass condition: ${testDef.pass_condition}
+
+Generate a test file that:
+- Uses describe/it/expect from vitest
+- Has meaningful test assertions based on the pass condition
+- Mocks Convex queries/mutations as needed
+- Tests the described behavior (not just expect(true).toBe(true))
+
+Output ONLY the TypeScript code, no markdown fences, no explanation.`;
+
+  return callLLM(system, `Generate a test for "${testDef.name}" with pass condition: "${testDef.pass_condition}".`);
+}

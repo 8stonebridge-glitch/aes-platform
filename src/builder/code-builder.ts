@@ -1,11 +1,19 @@
-import { writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { join, dirname, relative } from "node:path";
 import type { BuilderPackage } from "../builder-artifact.js";
 import type { BuilderRunRecord } from "../types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { WorkspaceManager, type Workspace } from "./workspace-manager.js";
+import {
+  generateConvexSchema,
+  generateConvexQueries,
+  generateConvexMutations,
+  generatePage,
+  generateComponent,
+  generateTest,
+} from "../llm/code-gen.js";
 
 // ─── Catalog Enforcement Rules ──────────────────────────────────────────
 
@@ -44,12 +52,41 @@ function hashPackage(pkg: BuilderPackage): string {
   return createHash("sha256").update(JSON.stringify(pkg)).digest("hex").substring(0, 16);
 }
 
+/**
+ * Context for LLM code generation — enriches BuilderPackage with AppSpec data.
+ */
+export interface BuilderContext {
+  feature?: {
+    name: string;
+    description: string;
+    summary?: string;
+    outcome: string;
+    actor_ids?: string[];
+    destructive_actions?: { action_name: string; reversible: boolean; confirmation_required: boolean; audit_logged: boolean }[];
+    audit_required?: boolean;
+  };
+  appSpec?: {
+    title: string;
+    summary: string;
+    roles?: { role_id: string; name: string; description: string }[];
+    permissions?: { role_id: string; resource: string; effect: string }[];
+  };
+}
+
 export class CodeBuilder {
   private workspaceManager = new WorkspaceManager();
 
-  async build(jobId: string, pkg: BuilderPackage, repoUrl?: string): Promise<{ run: BuilderRunRecord; workspace: Workspace; prSummary: string }> {
+  async build(
+    jobId: string,
+    pkg: BuilderPackage,
+    repoUrl?: string,
+    context?: BuilderContext,
+  ): Promise<{ run: BuilderRunRecord; workspace: Workspace; prSummary: string }> {
     const runId = `br-${randomUUID().substring(0, 8)}`;
     const startTime = Date.now();
+
+    // Track all generated file contents for the verifier
+    const fileContents: Record<string, string> = {};
 
     // 1. Create isolated workspace (clone from repo if URL provided)
     const workspace = repoUrl
@@ -90,21 +127,26 @@ export class CodeBuilder {
 
     try {
       const featureSlug = pkg.feature_name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const feature = context?.feature;
+      const appSpec = context?.appSpec;
 
       // 2. Generate Convex schema for this feature
-      this.writeConvexSchema(workspace.path, featureSlug, pkg);
+      const schemaContent = await this.writeConvexSchema(workspace.path, featureSlug, pkg, feature, appSpec);
+      this.trackFile(fileContents, workspace.path, join("convex", featureSlug, "schema.ts"));
 
       // 3. Generate Convex server functions
-      this.writeConvexFunctions(workspace.path, featureSlug, pkg);
+      await this.writeConvexFunctions(workspace.path, featureSlug, pkg, feature, appSpec, schemaContent);
+      this.trackFile(fileContents, workspace.path, join("convex", featureSlug, "queries.ts"));
+      this.trackFile(fileContents, workspace.path, join("convex", featureSlug, "mutations.ts"));
 
       // 4. Generate UI pages
-      this.writePages(workspace.path, featureSlug, pkg);
+      await this.writePages(workspace.path, featureSlug, pkg, feature, appSpec, fileContents);
 
       // 5. Generate UI components
-      this.writeComponents(workspace.path, featureSlug, pkg);
+      await this.writeComponents(workspace.path, featureSlug, pkg, feature, appSpec, fileContents);
 
       // 6. Generate test files
-      this.writeTests(workspace.path, featureSlug, pkg);
+      await this.writeTests(workspace.path, featureSlug, pkg, feature, fileContents);
 
       // 7. Commit all changes
       const commitMsg = `[AES] feat(${featureSlug}): ${pkg.objective}\n\nBridge: ${pkg.bridge_id}\nFeature: ${pkg.feature_id}\nJob: ${jobId}`;
@@ -146,6 +188,9 @@ export class CodeBuilder {
       run.completed_at = new Date().toISOString();
     }
 
+    // Attach file_contents for the verifier
+    (run as any).file_contents = fileContents;
+
     const prSummary = this.workspaceManager.generatePRSummary(workspace, pkg.feature_name, pkg.objective);
     run.pr_summary = prSummary;
 
@@ -156,13 +201,51 @@ export class CodeBuilder {
     mkdirSync(dirname(filePath), { recursive: true });
   }
 
-  private writeConvexSchema(basePath: string, featureSlug: string, pkg: BuilderPackage) {
+  /** Read a written file's content and store it in the tracking map */
+  private trackFile(fileContents: Record<string, string>, basePath: string, relPath: string): void {
+    try {
+      const absPath = join(basePath, relPath);
+      fileContents[relPath] = readFileSync(absPath, "utf-8");
+    } catch {
+      // File may not exist yet; skip tracking
+    }
+  }
+
+  /** Helper to write a file and track its content simultaneously */
+  private writeAndTrack(
+    filePath: string,
+    content: string,
+    fileContents: Record<string, string>,
+    basePath: string,
+  ): void {
+    this.ensureDir(filePath);
+    writeFileSync(filePath, content);
+    const relPath = relative(basePath, filePath);
+    fileContents[relPath] = content;
+  }
+
+  // ─── Convex Schema ──────────────────────────────────────────────────
+
+  private async writeConvexSchema(
+    basePath: string,
+    featureSlug: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+  ): Promise<string> {
     const schemaPath = join(basePath, "convex", featureSlug, "schema.ts");
     this.ensureDir(schemaPath);
 
-    // Generate a real Convex schema based on the feature
-    const tableName = featureSlug.replace(/-/g, "_");
-    writeFileSync(schemaPath, `import { defineSchema, defineTable } from "convex/server";
+    // Try LLM first
+    let content: string | null = null;
+    if (feature && appSpec) {
+      content = await generateConvexSchema(feature, appSpec);
+    }
+
+    // Fallback to template
+    if (!content) {
+      const tableName = featureSlug.replace(/-/g, "_");
+      content = `import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 /**
@@ -187,16 +270,35 @@ export const ${tableName}Table = defineTable({
   .index("by_org", ["orgId"])
   .index("by_status", ["status"])
   .index("by_created", ["createdAt"]);
-`);
+`;
+    }
+
+    writeFileSync(schemaPath, content);
+    return content;
   }
 
-  private writeConvexFunctions(basePath: string, featureSlug: string, pkg: BuilderPackage) {
+  // ─── Convex Functions ──────────────────────────────────────────────
+
+  private async writeConvexFunctions(
+    basePath: string,
+    featureSlug: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    schemaContent?: string,
+  ): Promise<void> {
     const tableName = featureSlug.replace(/-/g, "_");
 
-    // Query: list items
+    // ── Queries ──
     const queryPath = join(basePath, "convex", featureSlug, "queries.ts");
     this.ensureDir(queryPath);
-    writeFileSync(queryPath, `import { query } from "../_generated/server";
+
+    let queryContent: string | null = null;
+    if (feature && appSpec && schemaContent) {
+      queryContent = await generateConvexQueries(feature, appSpec, schemaContent);
+    }
+    if (!queryContent) {
+      queryContent = `import { query } from "../_generated/server";
 import { v } from "convex/values";
 
 /**
@@ -238,12 +340,20 @@ export const get = query({
     return item;
   },
 });
-`);
+`;
+    }
+    writeFileSync(queryPath, queryContent);
 
-    // Mutation: create item
+    // ── Mutations ──
     const mutationPath = join(basePath, "convex", featureSlug, "mutations.ts");
     this.ensureDir(mutationPath);
-    writeFileSync(mutationPath, `import { mutation } from "../_generated/server";
+
+    let mutationContent: string | null = null;
+    if (feature && appSpec && schemaContent) {
+      mutationContent = await generateConvexMutations(feature, appSpec, schemaContent);
+    }
+    if (!mutationContent) {
+      mutationContent = `import { mutation } from "../_generated/server";
 import { v } from "convex/values";
 
 /**
@@ -295,29 +405,58 @@ export const updateStatus = mutation({
     });
   },
 });
-`);
+`;
+    }
+    writeFileSync(mutationPath, mutationContent);
   }
 
-  private writePages(basePath: string, featureSlug: string, pkg: BuilderPackage) {
+  // ─── Pages ──────────────────────────────────────────────────────────
+
+  private async writePages(
+    basePath: string,
+    featureSlug: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     for (const cap of pkg.included_capabilities) {
       const capSlug = cap.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
       if (cap.toLowerCase().includes("form") || cap.toLowerCase().includes("submit") || cap.toLowerCase().includes("create")) {
-        this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg);
+        await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
       } else if (cap.toLowerCase().includes("list") || cap.toLowerCase().includes("queue") || cap.toLowerCase().includes("table") || cap.toLowerCase().includes("history")) {
-        this.writeListPage(basePath, featureSlug, capSlug, cap, pkg);
+        await this.writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
       } else if (cap.toLowerCase().includes("detail") || cap.toLowerCase().includes("view") || cap.toLowerCase().includes("review")) {
-        this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg);
+        await this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
       }
     }
   }
 
-  private writeFormPage(basePath: string, featureSlug: string, capSlug: string, cap: string, pkg: BuilderPackage) {
+  private async writeFormPage(
+    basePath: string,
+    featureSlug: string,
+    capSlug: string,
+    cap: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     const pagePath = join(basePath, "app", featureSlug, capSlug, "page.tsx");
     this.ensureDir(pagePath);
-    const pascalName = this.toPascalCase(capSlug);
-    const tableName = featureSlug.replace(/-/g, "_");
-    writeFileSync(pagePath, `"use client";
+
+    // Try LLM first
+    let content: string | null = null;
+    if (feature && appSpec) {
+      content = await generatePage(feature, appSpec, cap, "form");
+    }
+
+    // Fallback to template
+    if (!content) {
+      const pascalName = this.toPascalCase(capSlug);
+      const tableName = featureSlug.replace(/-/g, "_");
+      content = `"use client";
 
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -407,15 +546,40 @@ export default function ${pascalName}Page() {
     </div>
   );
 }
-`);
+`;
+    }
+
+    writeFileSync(pagePath, content);
+    if (fileContents) {
+      const relPath = relative(basePath, pagePath);
+      fileContents[relPath] = content;
+    }
   }
 
-  private writeListPage(basePath: string, featureSlug: string, capSlug: string, cap: string, pkg: BuilderPackage) {
+  private async writeListPage(
+    basePath: string,
+    featureSlug: string,
+    capSlug: string,
+    cap: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     const pagePath = join(basePath, "app", featureSlug, capSlug, "page.tsx");
     this.ensureDir(pagePath);
-    const pascalName = this.toPascalCase(capSlug);
-    const tableName = featureSlug.replace(/-/g, "_");
-    writeFileSync(pagePath, `"use client";
+
+    // Try LLM first
+    let content: string | null = null;
+    if (feature && appSpec) {
+      content = await generatePage(feature, appSpec, cap, "list");
+    }
+
+    // Fallback to template
+    if (!content) {
+      const pascalName = this.toPascalCase(capSlug);
+      const tableName = featureSlug.replace(/-/g, "_");
+      content = `"use client";
 
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -492,15 +656,40 @@ export default function ${pascalName}Page() {
     </div>
   );
 }
-`);
+`;
+    }
+
+    writeFileSync(pagePath, content);
+    if (fileContents) {
+      const relPath = relative(basePath, pagePath);
+      fileContents[relPath] = content;
+    }
   }
 
-  private writeDetailPage(basePath: string, featureSlug: string, capSlug: string, cap: string, pkg: BuilderPackage) {
+  private async writeDetailPage(
+    basePath: string,
+    featureSlug: string,
+    capSlug: string,
+    cap: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     const pagePath = join(basePath, "app", featureSlug, "[id]", "page.tsx");
     this.ensureDir(pagePath);
-    const pascalName = this.toPascalCase(capSlug);
-    const tableName = featureSlug.replace(/-/g, "_");
-    writeFileSync(pagePath, `"use client";
+
+    // Try LLM first
+    let content: string | null = null;
+    if (feature && appSpec) {
+      content = await generatePage(feature, appSpec, cap, "detail");
+    }
+
+    // Fallback to template
+    if (!content) {
+      const pascalName = this.toPascalCase(capSlug);
+      const tableName = featureSlug.replace(/-/g, "_");
+      content = `"use client";
 
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -573,14 +762,38 @@ export default function ${pascalName}DetailPage() {
     </div>
   );
 }
-`);
+`;
+    }
+
+    writeFileSync(pagePath, content);
+    if (fileContents) {
+      const relPath = relative(basePath, pagePath);
+      fileContents[relPath] = content;
+    }
   }
 
-  private writeComponents(basePath: string, featureSlug: string, pkg: BuilderPackage) {
-    // Status badge component
+  // ─── Components ──────────────────────────────────────────────────────
+
+  private async writeComponents(
+    basePath: string,
+    featureSlug: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    appSpec?: BuilderContext["appSpec"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     const badgePath = join(basePath, "components", featureSlug, "status-badge.tsx");
     this.ensureDir(badgePath);
-    writeFileSync(badgePath, `/**
+
+    // Try LLM first
+    let content: string | null = null;
+    if (feature && appSpec) {
+      content = await generateComponent(feature, appSpec, "status-badge");
+    }
+
+    // Fallback to template
+    if (!content) {
+      content = `/**
  * Status badge for ${pkg.feature_name}
  * Generated by AES v12 Code Builder
  */
@@ -608,16 +821,39 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     </span>
   );
 }
-`);
+`;
+    }
+
+    writeFileSync(badgePath, content);
+    if (fileContents) {
+      const relPath = relative(basePath, badgePath);
+      fileContents[relPath] = content;
+    }
   }
 
-  private writeTests(basePath: string, featureSlug: string, pkg: BuilderPackage) {
+  // ─── Tests ──────────────────────────────────────────────────────────
+
+  private async writeTests(
+    basePath: string,
+    featureSlug: string,
+    pkg: BuilderPackage,
+    feature?: BuilderContext["feature"],
+    fileContents?: Record<string, string>,
+  ): Promise<void> {
     for (const test of pkg.required_tests || []) {
       const testSlug = test.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const testPath = join(basePath, "tests", featureSlug, `${testSlug}.test.ts`);
       this.ensureDir(testPath);
 
-      writeFileSync(testPath, `import { describe, it, expect } from "vitest";
+      // Try LLM first
+      let content: string | null = null;
+      if (feature) {
+        content = await generateTest(feature, test);
+      }
+
+      // Fallback to template
+      if (!content) {
+        content = `import { describe, it, expect } from "vitest";
 
 /**
  * Test: ${test.name}
@@ -632,7 +868,14 @@ describe("${test.name}", () => {
     expect(true).toBe(true);
   });
 });
-`);
+`;
+      }
+
+      writeFileSync(testPath, content);
+      if (fileContents) {
+        const relPath = relative(basePath, testPath);
+        fileContents[relPath] = content;
+      }
     }
   }
 
