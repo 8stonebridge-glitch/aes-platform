@@ -11,7 +11,15 @@ app.use(express.json());
 // Active job streams (Server-Sent Events)
 const jobStreams = new Map<string, express.Response[]>();
 
+// Event buffer — stores events so clients connecting late get a full replay
+const jobEventBuffer = new Map<string, { event: string; data: any }[]>();
+
 function broadcastToJob(jobId: string, event: string, data: any) {
+  // Buffer the event for late-connecting clients
+  if (!jobEventBuffer.has(jobId)) jobEventBuffer.set(jobId, []);
+  jobEventBuffer.get(jobId)!.push({ event, data });
+
+  // Send to currently connected clients
   const clients = jobStreams.get(jobId) || [];
   for (const res of clients) {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -104,6 +112,12 @@ app.get("/api/jobs/:id/stream", (req, res) => {
 
   // Send initial connected event
   res.write(`event: connected\ndata: ${JSON.stringify({ jobId })}\n\n`);
+
+  // Replay any buffered events the client missed
+  const buffered = jobEventBuffer.get(jobId) || [];
+  for (const { event, data } of buffered) {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
 
   req.on("close", () => {
     const clients = jobStreams.get(jobId) || [];
