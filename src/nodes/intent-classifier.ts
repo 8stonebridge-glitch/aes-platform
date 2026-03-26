@@ -284,6 +284,18 @@ export async function intentClassifier(
 
   cb?.onGate("gate_0", "Classifying intent...");
 
+  // Check graph context for prior knowledge
+  const graphCtx = state.graphContext;
+  const hasPriorKnowledge =
+    (graphCtx?.priorBuilds?.length || 0) > 0 ||
+    (graphCtx?.similarFeatures?.length || 0) > 0;
+
+  if (hasPriorKnowledge) {
+    cb?.onStep(
+      `Graph context: ${graphCtx.priorBuilds.length} prior builds, ${graphCtx.similarFeatures.length} similar features inform classification`
+    );
+  }
+
   let brief: any;
   let usedLLM = false;
 
@@ -300,6 +312,45 @@ export async function intentClassifier(
   } else {
     cb?.onStep("No LLM configured, using keyword classifier");
     brief = keywordClassifyIntent(rawRequest, requestId);
+  }
+
+  // Enrich brief with graph context — if we've built similar apps before,
+  // reduce ambiguity and carry forward learned patterns
+  if (hasPriorKnowledge) {
+    // If prior builds exist for this app class, clear ambiguity flags
+    // that the system has already resolved in past runs
+    const priorAppClasses = graphCtx.priorBuilds
+      .map((b: any) => b.name?.toLowerCase() || "")
+      .filter(Boolean);
+    const classLower = brief.inferred_app_class.replace(/_/g, " ");
+
+    if (priorAppClasses.some((p: string) => p.includes(classLower) || classLower.includes(p))) {
+      const cleared = brief.ambiguity_flags.length;
+      brief.ambiguity_flags = [];
+      if (cleared > 0) {
+        cb?.onStep(`Cleared ${cleared} ambiguity flags — system has built this app class before`);
+        brief.assumptions = [
+          ...(brief.assumptions || []),
+          `Ambiguity resolved via prior build knowledge (${graphCtx.priorBuilds.length} prior builds)`,
+        ];
+      }
+    }
+
+    // Carry forward known integrations from similar prior builds
+    const priorDescriptions = [
+      ...graphCtx.priorBuilds.map((b: any) => b.description || ""),
+      ...graphCtx.similarFeatures.map((f: any) => f.description || ""),
+    ].join(" ").toLowerCase();
+
+    for (const [type, keywords] of Object.entries(INTEGRATION_KEYWORDS)) {
+      if (
+        !brief.inferred_integrations.includes(type) &&
+        keywords.some((kw: string) => priorDescriptions.includes(kw))
+      ) {
+        brief.inferred_integrations.push(type);
+        cb?.onStep(`Added integration '${type}' from prior build knowledge`);
+      }
+    }
   }
 
   cb?.onStep(`App class: ${brief.inferred_app_class}`);

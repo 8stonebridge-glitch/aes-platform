@@ -12,7 +12,10 @@ import { vetoChecker } from "./nodes/veto-checker.js";
 import { builderDispatcher } from "./nodes/builder-dispatcher.js";
 import { validatorRunner } from "./nodes/validator-runner.js";
 import { deploymentHandler } from "./nodes/deployment-handler.js";
+import { graphUpdater } from "./nodes/graph-updater.js";
+import { graphReader } from "./nodes/graph-reader.js";
 import { getJobStore } from "./store.js";
+import { getNeo4jService } from "./services/neo4j-service.js";
 
 // @ts-nocheck — LangGraph's generic types for addNode/addEdge are strict about
 // literal string unions. We use `as any` on graph builder methods since the
@@ -39,7 +42,7 @@ export function getCallbacks(): GraphCallbacks | null {
 
 function routeAfterIntake(state: AESStateType): string {
   if (state.errorMessage) return "__end__";
-  return "intent_classifier";
+  return "graph_reader";
 }
 
 function routeAfterClassifier(state: AESStateType): string {
@@ -82,7 +85,7 @@ function routeAfterUserApproval(state: AESStateType): string {
 
 function routeAfterVetoChecker(state: AESStateType): string {
   if (state.errorMessage) return "__end__";
-  return "builder_dispatcher";
+  return "graph_updater_pre_build";
 }
 
 function routeAfterBuilderDispatcher(state: AESStateType): string {
@@ -96,7 +99,7 @@ function routeAfterValidatorRunner(state: AESStateType): string {
 }
 
 function routeAfterDeploymentHandler(_state: AESStateType): string {
-  return "__end__"; // Always end — deploy failures don't retry
+  return "graph_updater_post_deploy"; // Write build record to Neo4j, then end
 }
 
 export function buildAESGraph() {
@@ -104,6 +107,7 @@ export function buildAESGraph() {
 
   // Gate 0 nodes
   graph.addNode("intake", intake);
+  graph.addNode("graph_reader", graphReader);
   graph.addNode("intent_classifier", intentClassifier);
   graph.addNode("intent_confirmer", intentConfirmer);
 
@@ -124,11 +128,16 @@ export function buildAESGraph() {
   // Gate 6: Deployment
   graph.addNode("deployment_handler", deploymentHandler);
 
+  // Graph updater nodes (Neo4j side-effect — never blocks pipeline)
+  graph.addNode("graph_updater_pre_build", graphUpdater);
+  graph.addNode("graph_updater_post_deploy", graphUpdater);
+
   // Entry
   graph.addEdge("__start__", "intake");
 
   // Gate 0 routing
   graph.addConditionalEdges("intake", routeAfterIntake);
+  graph.addEdge("graph_reader", "intent_classifier");
   graph.addConditionalEdges("intent_classifier", routeAfterClassifier);
   graph.addConditionalEdges("intent_confirmer", routeAfterConfirmer);
 
@@ -142,10 +151,16 @@ export function buildAESGraph() {
   graph.addEdge("bridge_compiler", "veto_checker");
   graph.addConditionalEdges("veto_checker", routeAfterVetoChecker);
 
-  // Gate 4 + 5 + 6 routing (build → validate → deploy → end)
+  // Graph updater (pre-build): gates 0-3 results → then builder
+  graph.addEdge("graph_updater_pre_build", "builder_dispatcher");
+
+  // Gate 4 + 5 + 6 routing (build → validate → deploy → graph update → end)
   graph.addConditionalEdges("builder_dispatcher", routeAfterBuilderDispatcher);
   graph.addConditionalEdges("validator_runner", routeAfterValidatorRunner);
   graph.addConditionalEdges("deployment_handler", routeAfterDeploymentHandler);
+
+  // Graph updater (post-deploy): build record → end
+  graph.addEdge("graph_updater_post_deploy", "__end__");
 
   return graph.compile();
 }
@@ -200,6 +215,12 @@ export async function runGraph(
 
   // Update store with final state
   store.update(input.jobId, result);
+
+  // Clean up Neo4j connection
+  const neo4jSvc = getNeo4jService();
+  if (neo4jSvc.isConnected()) {
+    await neo4jSvc.close().catch(() => {});
+  }
 
   _callbacks = null;
   return result;

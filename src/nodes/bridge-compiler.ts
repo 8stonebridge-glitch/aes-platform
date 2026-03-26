@@ -432,6 +432,18 @@ export async function bridgeCompiler(
   const catalogMatches = state.featureBridges || {};
   const features = state.appSpec.features;
 
+  // Graph context: reusable bridges from prior builds
+  const graphCtx = state.graphContext;
+  const reusableBridges = graphCtx?.reusableBridges || [];
+  const priorFeatures = graphCtx?.similarFeatures || [];
+
+  if (reusableBridges.length > 0) {
+    cb?.onStep(`Graph context: ${reusableBridges.length} reusable bridges from prior builds`);
+  }
+  if (priorFeatures.length > 0) {
+    cb?.onStep(`Graph context: ${priorFeatures.length} prior feature specs available`);
+  }
+
   // ─── Math Layer: compute dependency-based build order ───
   const depGraph = state.appSpec.dependency_graph || [];
   const depNodes: DependencyNode[] = features.map((f: any) => ({
@@ -548,6 +560,50 @@ export async function bridgeCompiler(
     });
 
     bridge.math = mathFields;
+
+    // Boost confidence if graph has a reusable bridge for this feature
+    const featureNameLower = feature.name.toLowerCase();
+    const featureWords = featureNameLower.split(/[\s-_]+/).filter((w: string) => w.length > 2);
+    const matchingPriorBridge = reusableBridges.find((rb: any) => {
+      const rbName = (rb.feature_name || "").toLowerCase();
+      return featureWords.some((w: string) => rbName.includes(w));
+    });
+
+    if (matchingPriorBridge) {
+      bridge.prior_bridge_id = matchingPriorBridge.bridge_id;
+      bridge.confidence.notes.push(
+        `Boosted by prior bridge: ${matchingPriorBridge.feature_name}`
+      );
+      bridge.confidence.reuse_fit = Math.min(bridge.confidence.reuse_fit + 0.2, 1.0);
+      bridge.confidence.overall = (
+        bridge.confidence.scope_clarity +
+        bridge.confidence.reuse_fit +
+        bridge.confidence.dependency_clarity +
+        bridge.confidence.rule_coverage +
+        bridge.confidence.test_coverage
+      ) / 5;
+    }
+
+    // Check if prior feature spec exists — reduces scope uncertainty
+    const matchingPriorFeature = priorFeatures.find((pf: any) => {
+      const pfName = (pf.name || "").toLowerCase();
+      return featureWords.some((w: string) => pfName.includes(w));
+    });
+
+    if (matchingPriorFeature) {
+      bridge.prior_feature_id = matchingPriorFeature.id;
+      bridge.confidence.notes.push(
+        `Informed by prior feature spec: ${matchingPriorFeature.name} (v${matchingPriorFeature.version || 1})`
+      );
+      bridge.confidence.scope_clarity = Math.min(bridge.confidence.scope_clarity + 0.1, 1.0);
+      bridge.confidence.overall = (
+        bridge.confidence.scope_clarity +
+        bridge.confidence.reuse_fit +
+        bridge.confidence.dependency_clarity +
+        bridge.confidence.rule_coverage +
+        bridge.confidence.test_coverage
+      ) / 5;
+    }
 
     bridges[feature.feature_id] = bridge;
 

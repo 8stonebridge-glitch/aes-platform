@@ -99,12 +99,25 @@ export async function catalogSearcher(
   const catalog = loadCatalog();
   cb?.onStep(`${catalog.length} catalog entries loaded`);
 
+  // Enrich with graph context if available
+  const graphCtx = state.graphContext;
+  const graphPatterns = graphCtx?.knownPatterns || [];
+  const graphFeatures = graphCtx?.similarFeatures || [];
+  const graphBridges = graphCtx?.reusableBridges || [];
+
+  if (graphPatterns.length > 0 || graphFeatures.length > 0 || graphBridges.length > 0) {
+    cb?.onStep(
+      `Graph context: ${graphPatterns.length} patterns, ${graphFeatures.length} prior features, ${graphBridges.length} reusable bridges`
+    );
+  }
+
   const featureMatches: Record<string, any[]> = {};
   let totalMatches = 0;
 
   for (const feature of state.appSpec.features) {
+    // 1. Search YAML catalog (existing)
     const matches = matchFeatureToCatalog(feature, catalog);
-    featureMatches[feature.feature_id] = matches.map((m) => ({
+    const candidates = matches.map((m) => ({
       candidate_id: m.entry.id,
       asset_type: m.entry.type,
       source_repo: m.entry.repo,
@@ -113,13 +126,61 @@ export async function catalogSearcher(
       description: m.entry.description,
       fit_reason: m.reason,
       constraints: [],
-      selected: m.score > 0.5, // Auto-select high-confidence matches
+      selected: m.score > 0.5,
     }));
-    totalMatches += matches.length;
 
-    if (matches.length > 0) {
+    // 2. Search graph for matching patterns/packages
+    const featureLower = feature.name.toLowerCase();
+    const featureWords = featureLower.split(/[\s-_]+/).filter((w: string) => w.length > 2);
+
+    for (const pattern of graphPatterns) {
+      const nameLower = (pattern.name || "").toLowerCase();
+      const wordOverlap = featureWords.filter((w: string) => nameLower.includes(w));
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `graph-${pattern.type}-${pattern.name}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: pattern.type || "Pattern",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: pattern.name,
+          description: pattern.description || "",
+          fit_reason: `Graph match: ${wordOverlap.join(", ")} (${pattern.type})`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 3. Search graph for reusable bridges from prior builds
+    for (const bridge of graphBridges) {
+      const featNameLower = (bridge.feature_name || "").toLowerCase();
+      const wordOverlap = featureWords.filter((w: string) => featNameLower.includes(w));
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: bridge.bridge_id,
+          asset_type: "PriorBridge",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: `Prior bridge: ${bridge.feature_name}`,
+          description: bridge.bridge_description || "",
+          fit_reason: `Reusable bridge from prior build: ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    featureMatches[feature.feature_id] = candidates;
+    totalMatches += candidates.length;
+
+    if (candidates.length > 0) {
+      const best = matches[0];
+      const graphCount = candidates.length - matches.length;
+      const bestLabel = best
+        ? `best: ${best.entry.name} @ ${(best.score * 100).toFixed(0)}%`
+        : `${graphCount} from graph`;
       cb?.onStep(
-        `${feature.name}: ${matches.length} candidates (best: ${matches[0].entry.name} @ ${(matches[0].score * 100).toFixed(0)}%)`
+        `${feature.name}: ${candidates.length} candidates (${bestLabel})`
       );
     }
   }

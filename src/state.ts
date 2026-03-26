@@ -102,6 +102,24 @@ export const AESState = Annotation.Root({
     default: () => null,
   }),
 
+  // Graph context — prior knowledge from Neo4j loaded at start
+  graphContext: Annotation<{
+    priorBuilds: any[];
+    similarFeatures: any[];
+    knownPatterns: any[];
+    failureHistory: any[];
+    reusableBridges: any[];
+  }>({
+    value: lastValue,
+    default: () => ({
+      priorBuilds: [],
+      similarFeatures: [],
+      knownPatterns: [],
+      failureHistory: [],
+      reusableBridges: [],
+    }),
+  }),
+
   // Control
   errorMessage: Annotation<string | null>({
     value: lastValue,

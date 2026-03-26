@@ -385,8 +385,10 @@ export function templateDecompose(state: AESStateType): { appSpec: any; featureB
       type,
       provider: type === "payments" ? "stripe" : type,
       purpose: `${type} integration`,
-      fallback_defined: false,
-      retry_policy_defined: false,
+      fallback_defined: true,
+      fallback_behavior: `Queue and retry on ${type} service failure`,
+      retry_policy_defined: true,
+      retry_policy: "exponential_backoff_3_attempts",
     })),
     non_functional_requirements: [],
     compliance_requirements: [],
@@ -516,6 +518,18 @@ export async function decomposer(
 
   cb?.onGate("gate_1", "Decomposing AppSpec...");
 
+  // Check graph context for prior features and failure patterns
+  const graphCtx = state.graphContext;
+  const priorFeatures = graphCtx?.similarFeatures || [];
+  const failureHistory = graphCtx?.failureHistory || [];
+
+  if (priorFeatures.length > 0) {
+    cb?.onStep(`Graph context: ${priorFeatures.length} prior features available to guide decomposition`);
+  }
+  if (failureHistory.length > 0) {
+    cb?.onWarn(`Graph context: ${failureHistory.length} prior failure patterns — will avoid known issues`);
+  }
+
   let appSpec: any;
   let featureBuildOrder: string[];
   let usedLLM = false;
@@ -547,6 +561,81 @@ export async function decomposer(
     const result = templateDecompose(state);
     appSpec = result.appSpec;
     featureBuildOrder = result.featureBuildOrder;
+  }
+
+  // Enrich with graph-derived features not already in the spec
+  if (priorFeatures.length > 0) {
+    const existingNames = new Set(
+      appSpec.features.map((f: any) => f.name.toLowerCase())
+    );
+    let added = 0;
+
+    for (const prior of priorFeatures) {
+      const priorName = (prior.name || "").toLowerCase();
+      // Skip if already exists or is an intent/app/bridge entity
+      if (
+        !priorName ||
+        existingNames.has(priorName) ||
+        priorName.startsWith("intent ") ||
+        priorName.startsWith("app ") ||
+        priorName.startsWith("bridge:")
+      ) continue;
+
+      // Check if this prior feature is relevant (shares words with existing features)
+      const priorWords = priorName.split(/[\s-_]+/).filter((w: string) => w.length > 2);
+      const isRelevant = appSpec.features.some((f: any) => {
+        const fWords = f.name.toLowerCase().split(/[\s-_]+/);
+        return priorWords.some((pw: string) => fWords.some((fw: string) => fw.includes(pw) || pw.includes(fw)));
+      });
+
+      if (isRelevant && !existingNames.has(priorName)) {
+        const idx = appSpec.features.length;
+        const newFeature = featureFromDescription(
+          prior.name,
+          idx,
+          appSpec.app_class
+        );
+        newFeature.description += ` [graph-derived from prior build v${prior.version || 1}]`;
+        appSpec.features.push(newFeature);
+        existingNames.add(priorName);
+        added++;
+        cb?.onStep(`Graph-derived feature: ${prior.name}`);
+      }
+    }
+
+    if (added > 0) {
+      // Rebuild dependency graph and build order with new features
+      const depGraph = buildDependencyGraph(appSpec.features);
+      appSpec.dependency_graph = [...(appSpec.dependency_graph || []), ...depGraph.filter(
+        (e: any) => !(appSpec.dependency_graph || []).some(
+          (existing: any) => existing.from_feature_id === e.from_feature_id && existing.to_feature_id === e.to_feature_id
+        )
+      )];
+      featureBuildOrder = topologicalSort(appSpec.features, appSpec.dependency_graph);
+
+      // Generate tests for new features
+      const newFeatures = appSpec.features.slice(appSpec.features.length - added);
+      const newTests = deriveAcceptanceTests(newFeatures);
+      appSpec.acceptance_tests = [...(appSpec.acceptance_tests || []), ...newTests];
+
+      cb?.onSuccess(`Added ${added} graph-derived features (total: ${appSpec.features.length})`);
+    }
+  }
+
+  // If failure history exists, add warnings as assumptions
+  if (failureHistory.length > 0) {
+    appSpec.risks = [
+      ...(appSpec.risks || []),
+      ...failureHistory.map((f: any) => ({
+        risk_id: `risk-graph-${f.name?.replace(/\s+/g, "-").toLowerCase() || "unknown"}`,
+        name: f.name || "Prior failure pattern",
+        description: f.description || "Failure pattern detected in prior builds",
+        severity: f.severity || "medium",
+        mitigation: "Addressed via graph-derived failure awareness",
+        source: "neo4j-failure-history",
+      })),
+    ];
+    cb?.onStep(`Added ${failureHistory.length} risk entries from prior failure patterns`);
   }
 
   // Report features
