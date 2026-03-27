@@ -78,13 +78,13 @@ export async function designer(
 
     cb?.onPause(
       `Design brief ready — ${brief.screens.length} screens, ${brief.directions.length} directions. ` +
-      `Open Paper, create the designs, then extract with: npx tsx src/tools/design-extract.ts --paper --persist`
+      `Copy the claude_prompt from the design brief and paste it into Claude Code with Paper open.`
     );
 
     return {
       designBrief: brief,
       needsUserInput: true,
-      userInputPrompt: "Design brief is ready. Create designs in Paper MCP, extract evidence, then resume the pipeline.",
+      userInputPrompt: brief.claude_prompt,
     };
   }
 
@@ -558,6 +558,8 @@ interface DesignBrief {
     destructive_actions: string[];
     auth_screens: string[];
   };
+  /** Ready-to-paste prompt for Claude Code to drive Paper MCP */
+  claude_prompt: string;
 }
 
 function generateDesignBrief(appSpec: any, intentBrief: any): DesignBrief {
@@ -648,8 +650,53 @@ function generateDesignBrief(appSpec: any, intentBrief: any): DesignBrief {
     },
   ];
 
+  const appTitle = appSpec.title || intentBrief?.inferred_core_outcome || "Untitled App";
+
+  // Build the ready-to-paste Claude Code prompt
+  const screenSpecs = screens.map(s => {
+    const parts = [`### ${s.name}\n- Purpose: ${s.purpose}`];
+    if (s.key_components.length > 0) parts.push(`- Components: ${s.key_components.join(", ")}`);
+    if (s.data_views.length > 0) parts.push(`- Data views: ${s.data_views.join(", ")}`);
+    if (s.forms.length > 0) parts.push(`- Forms: ${s.forms.join(", ")}`);
+    if (s.actions.length > 0) parts.push(`- Actions: ${s.actions.join(", ")}`);
+    parts.push(`- States: ${s.states.join(", ")}`);
+    return parts.join("\n");
+  }).join("\n\n");
+
+  const directionSpecs = directions.map((d, i) =>
+    `**Direction ${i + 1}: ${d.name}**\n${d.description}\n- Layout: ${d.layout}\n- Colors: ${d.color_mood}\n- Density: ${d.density}\n- Typography: ${d.typography}`
+  ).join("\n\n");
+
+  const claudePrompt = `Design a UI for "${appTitle}" in Paper. Create ${directions.length} design directions as separate artboard sets. Each direction should cover all ${screens.length} screens below but with a different visual treatment.
+
+## Screens to design
+
+${screenSpecs}
+
+## Design directions
+
+${directionSpecs}
+
+## Navigation
+- Pattern: sidebar with collapsible sections
+- Primary items: ${screens.filter(s => !authScreens.includes(s.screen_id)).map(s => s.name).join(", ")}
+
+## Requirements
+- Every screen must show loading, empty, and error states (can be as separate artboards or annotated)
+- Destructive actions (${destructiveActions.length > 0 ? destructiveActions.join(", ") : "none"}) need confirmation dialogs
+- Auth screens: ${authScreens.length > 0 ? authScreens.join(", ") : "none — auth handled externally"}
+- Use realistic placeholder content
+- Desktop-first (1440px wide artboards), note responsive considerations
+
+## After designing
+When all directions are done, I will pick one. Then run:
+\`\`\`
+npx tsx src/tools/design-extract.ts --paper --persist
+\`\`\`
+This extracts the design as evidence for the AES build pipeline.`;
+
   return {
-    app_title: appSpec.title || intentBrief?.inferred_core_outcome || "Untitled App",
+    app_title: appTitle,
     app_class: appSpec.app_class || "unknown",
     target_users: appSpec.target_users || [],
     platforms: appSpec.platforms || [],
@@ -664,5 +711,6 @@ function generateDesignBrief(appSpec: any, intentBrief: any): DesignBrief {
       destructive_actions: destructiveActions,
       auth_screens: authScreens,
     },
+    claude_prompt: claudePrompt,
   };
 }
