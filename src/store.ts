@@ -46,6 +46,9 @@ export interface JobRecord {
   previewUrl?: string | null;
   deploymentUrl?: string | null;
   errorMessage?: string | null;
+  designMode?: "auto" | "paper";
+  designBrief?: any;
+  designEvidence?: any;
 }
 
 export class JobStore {

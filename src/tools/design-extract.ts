@@ -854,6 +854,7 @@ async function main(): Promise<void> {
   let outputFile: string | undefined;
   let mode: "json" | "paper" | "interactive" = "interactive";
   let persist = false;
+  let pushJobId: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -871,6 +872,10 @@ async function main(): Promise<void> {
       case "--persist":
         persist = true;
         break;
+      case "--job":
+      case "--job-id":
+        pushJobId = args[++i];
+        break;
       case "--help":
       case "-h":
         console.log(`Usage:
@@ -881,6 +886,7 @@ async function main(): Promise<void> {
 Options:
   --output <file>   Write evidence JSON to file
   --persist         Also persist to Neo4j
+  --job <jobId>     Push evidence to running AES pipeline job (auto-resumes)
   --help            Show this help`);
         process.exit(0);
     }
@@ -974,6 +980,29 @@ Options:
 
   if (persist) {
     await persistDesignEvidence(evidence);
+  }
+
+  // ── Push to running pipeline job ────────────────────────────────
+
+  if (pushJobId) {
+    const apiUrl = process.env.AES_API_URL || "http://localhost:3100";
+    const url = `${apiUrl}/api/jobs/${pushJobId}/design-evidence`;
+    console.log(`[design-extract] Pushing evidence to ${url}...`);
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: jsonOutput,
+      });
+      const result = await resp.json();
+      if (resp.ok) {
+        console.log(`[design-extract] Pipeline notified — ${(result as any).screens} screens, ${(result as any).components} components received. Pipeline will resume.`);
+      } else {
+        console.error(`[design-extract] API error: ${(result as any).error}`);
+      }
+    } catch (err: any) {
+      console.error(`[design-extract] Failed to push to API: ${err.message}`);
+    }
   }
 
   console.log("[design-extract] Done.");

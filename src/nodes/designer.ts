@@ -65,7 +65,7 @@ export async function designer(
     return {};
   }
 
-  // ─── Paper MCP path: generate brief and pause for operator ───
+  // ─── Paper MCP path: generate brief and wait for evidence ───
   if (state.designMode === "paper") {
     cb?.onStep("Design mode: Paper MCP — generating design brief for operator...");
 
@@ -73,19 +73,45 @@ export async function designer(
 
     store.addLog(state.jobId, {
       gate: "gate_1",
-      message: `Designer: Paper MCP mode — brief generated with ${brief.screens.length} screens across ${brief.directions.length} directions. Waiting for operator.`,
+      message: `Designer: Paper MCP mode — brief generated with ${brief.screens.length} screens across ${brief.directions.length} directions. Waiting for design evidence.`,
     });
 
+    // Store the brief on the job so the API can serve it
+    store.update(state.jobId, { designBrief: brief });
+
+    // Broadcast brief + prompt to UI via SSE
     cb?.onPause(
       `Design brief ready — ${brief.screens.length} screens, ${brief.directions.length} directions. ` +
-      `Copy the claude_prompt from the design brief and paste it into Claude Code with Paper open.`
+      `Waiting for design evidence. Use the prompt in the UI or POST to /api/jobs/${state.jobId}/design-evidence`
     );
 
-    return {
-      designBrief: brief,
-      needsUserInput: true,
-      userInputPrompt: brief.claude_prompt,
-    };
+    // Wait for design evidence to arrive via the API endpoint
+    // (same pattern as onNeedsApproval — polls the job store)
+    const designEvidence = await new Promise<any>((resolve) => {
+      const check = setInterval(() => {
+        const job = store.get(state.jobId);
+        if (job?.designEvidence) {
+          clearInterval(check);
+          resolve(job.designEvidence);
+        }
+      }, 1000);
+      // Timeout after 30 minutes (design takes time)
+      setTimeout(() => { clearInterval(check); resolve(null); }, 1800000);
+    });
+
+    if (!designEvidence) {
+      cb?.onWarn("Design evidence not received within 30 minutes — falling back to auto-design");
+      const fallback = isLLMAvailable()
+        ? await llmDesign(state.appSpec, state.intentBrief).catch(() => templateDesign(state.appSpec))
+        : templateDesign(state.appSpec);
+      return { designEvidence: fallback, designBrief: brief };
+    }
+
+    cb?.onSuccess(
+      `Design evidence received: ${designEvidence.screens?.length || 0} screens, ${designEvidence.components?.length || 0} components`
+    );
+
+    return { designEvidence, designBrief: brief };
   }
 
   // ─── Auto path: generate evidence directly ───

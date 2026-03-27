@@ -213,6 +213,59 @@ app.post("/api/jobs/:id/confirm", (req, res) => {
   res.json({ confirmed: true });
 });
 
+// ─── GET /api/jobs/:id/design-brief — Get the design brief + Claude prompt ──
+
+app.get("/api/jobs/:id/design-brief", (req, res) => {
+  const jobId = req.params.id;
+  const store = getJobStore();
+  const job = store.get(jobId);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+  if (!job.designBrief) {
+    res.status(404).json({ error: "No design brief available — job may not be in paper design mode" });
+    return;
+  }
+  res.json({
+    brief: job.designBrief,
+    claude_prompt: job.designBrief.claude_prompt,
+    status: job.designEvidence ? "evidence_received" : "waiting_for_evidence",
+  });
+});
+
+// ─── POST /api/jobs/:id/design-evidence — Submit design evidence ────
+
+app.post("/api/jobs/:id/design-evidence", (req, res) => {
+  const jobId = req.params.id;
+  const store = getJobStore();
+  const job = store.get(jobId);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  const evidence = req.body;
+  if (!evidence || !evidence.screens) {
+    res.status(400).json({ error: "Invalid design evidence — must include screens array" });
+    return;
+  }
+
+  // Store the evidence — the designer node is polling for this
+  store.update(jobId, { designEvidence: evidence });
+  broadcastToJob(jobId, "design_evidence_received", {
+    screens: evidence.screens?.length || 0,
+    components: evidence.components?.length || 0,
+  });
+
+  res.json({
+    received: true,
+    screens: evidence.screens?.length || 0,
+    components: evidence.components?.length || 0,
+    message: "Design evidence received — pipeline will resume automatically",
+  });
+});
+
 // ─── POST /api/jobs/:id/approve — Approve app plan ────────────────
 
 app.post("/api/jobs/:id/approve", (req, res) => {
