@@ -58,6 +58,124 @@ export class GithubService {
   }
 
   /**
+   * Fetch contents of a directory from a GitHub repo.
+   * Returns an array of { path, content } for each file found.
+   * Recurses into subdirectories up to maxDepth.
+   */
+  async fetchDirectoryContents(
+    repo: string,
+    path: string,
+    branch: string = "main",
+    maxDepth: number = 3,
+  ): Promise<{ path: string; content: string }[]> {
+    const org = process.env.AES_GITHUB_ORG;
+    const fullRepo = org ? `${org}/${repo}` : repo;
+    const results: { path: string; content: string }[] = [];
+
+    await this._fetchDirRecursive(fullRepo, path, branch, results, 0, maxDepth);
+    return results;
+  }
+
+  private async _fetchDirRecursive(
+    fullRepo: string,
+    path: string,
+    branch: string,
+    results: { path: string; content: string }[],
+    depth: number,
+    maxDepth: number,
+  ): Promise<void> {
+    if (depth > maxDepth) return;
+
+    const endpoint = `https://api.github.com/repos/${fullRepo}/contents/${path}?ref=${branch}`;
+    const response = await fetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    if (!response.ok) {
+      // Directory may not exist — not fatal
+      console.warn(`[github] Failed to fetch ${path} from ${fullRepo}: ${response.status}`);
+      return;
+    }
+
+    const data = await response.json();
+
+    // If it's a single file (not array), fetch its content
+    if (!Array.isArray(data)) {
+      if (data.type === "file" && data.content) {
+        results.push({
+          path: data.path,
+          content: Buffer.from(data.content, "base64").toString("utf-8"),
+        });
+      }
+      return;
+    }
+
+    // It's a directory listing
+    for (const entry of data) {
+      if (entry.type === "file") {
+        // Only fetch source files (ts, tsx, js, jsx, json, yaml, css)
+        const ext = entry.name.split(".").pop()?.toLowerCase() || "";
+        const sourceExts = ["ts", "tsx", "js", "jsx", "json", "yaml", "yml", "css", "md"];
+        if (!sourceExts.includes(ext)) continue;
+
+        // Fetch individual file content
+        const fileResp = await fetch(entry.url, {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            Accept: "application/vnd.github+json",
+          },
+        });
+        if (fileResp.ok) {
+          const fileData = await fileResp.json();
+          if (fileData.content) {
+            results.push({
+              path: fileData.path,
+              content: Buffer.from(fileData.content, "base64").toString("utf-8"),
+            });
+          }
+        }
+      } else if (entry.type === "dir") {
+        // Skip node_modules, dist, .next, etc.
+        const skipDirs = ["node_modules", "dist", ".next", ".git", "__pycache__", "coverage"];
+        if (!skipDirs.includes(entry.name)) {
+          await this._fetchDirRecursive(fullRepo, entry.path, branch, results, depth + 1, maxDepth);
+        }
+      }
+    }
+  }
+
+  /**
+   * Fetch a single file's content from a GitHub repo.
+   */
+  async fetchFileContent(
+    repo: string,
+    path: string,
+    branch: string = "main",
+  ): Promise<string | null> {
+    const org = process.env.AES_GITHUB_ORG;
+    const fullRepo = org ? `${org}/${repo}` : repo;
+    const endpoint = `https://api.github.com/repos/${fullRepo}/contents/${path}?ref=${branch}`;
+
+    const response = await fetch(endpoint, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.content) {
+      return Buffer.from(data.content, "base64").toString("utf-8");
+    }
+    return null;
+  }
+
+  /**
    * Push a local workspace to a remote GitHub repo.
    *
    * Expects the workspace to already have git initialized with at least

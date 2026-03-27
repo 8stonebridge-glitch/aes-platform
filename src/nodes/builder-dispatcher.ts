@@ -114,6 +114,7 @@ export async function builderDispatcher(
       state.featureBuildOrder,
       cb,
       state.targetPath,
+      state.reusableSourceFiles,
     );
 
     (result.run as any).workspace_path = result.workspace.path;
@@ -234,7 +235,7 @@ async function buildSingleFeature(
 
   let pkg: BuilderPackage | null = null;
   try {
-    pkg = compileBuilderPackage(jobRecord, featureId);
+    pkg = compileBuilderPackage(jobRecord, featureId, state.reusableSourceFiles);
   } catch (err: any) {
     cb?.onWarn(`Failed to compile builder package for ${featureName}: ${err.message}`);
   }

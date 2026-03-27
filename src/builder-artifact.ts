@@ -34,6 +34,8 @@ export interface BuilderPackage {
   // Reuse
   reuse_assets: { name: string; source_path: string; description: string }[];
   reuse_requirements: { package: string; components: string[] }[];
+  // Actual source files fetched from GitHub for reuse as building blocks
+  source_files: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>;
 
   // Pattern requirements (Layer 4 — composition validator expectations)
   pattern_requirements: PatternRequirement[];
@@ -60,12 +62,31 @@ export interface BuilderPackage {
 }
 
 /**
+ * Filter reusable source files to only those relevant to a feature's selected assets.
+ */
+function filterSourceFilesForFeature(
+  assetNames: string[],
+  selectedCandidateIds: string[],
+  allSourceFiles: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>,
+): Record<string, { repo: string; path: string; files: { path: string; content: string }[] }> {
+  const filtered: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }> = {};
+  for (const candidateId of selectedCandidateIds) {
+    if (allSourceFiles[candidateId]) {
+      filtered[candidateId] = allSourceFiles[candidateId];
+    }
+  }
+  return filtered;
+}
+
+/**
  * Compile a BuilderPackage from a completed job and feature ID.
  * Returns null if the bridge is not ready (not approved, has triggered vetoes, blocked).
+ * @param reusableSourceFiles — fetched source files from GitHub, keyed by candidate_id
  */
 export function compileBuilderPackage(
   job: JobRecord,
-  featureId: string
+  featureId: string,
+  reusableSourceFiles?: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>,
 ): BuilderPackage | null {
   if (!job.featureBridges) return null;
 
@@ -127,6 +148,12 @@ export function compileBuilderPackage(
       package: r.package,
       components: r.components,
     })),
+    // Filter source files to only include those for this feature's selected reuse assets
+    source_files: filterSourceFilesForFeature(
+      reuseAssets.map((a) => a.name),
+      (bridge.reuse_candidates || []).filter((c) => c.selected).map((c: any) => c.candidate_id),
+      reusableSourceFiles || {},
+    ),
     pattern_requirements: ((bridge as any).pattern_requirements || []) as PatternRequirement[],
     catalog_enforcement_rules: CATALOG_ENFORCEMENT_RULES,
     rules,

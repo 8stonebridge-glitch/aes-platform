@@ -1,11 +1,19 @@
 import type { AESStateType } from "../state.js";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { GithubService, isGithubConfigured } from "../services/github-service.js";
 
-const CATALOG_DIR = "/tmp/aes-catalog/packages";
+// Resolve catalog path relative to monorepo root (src/nodes/catalog-searcher.ts → ../../catalog)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const MONOREPO_ROOT = join(__dirname, "..", "..");
+const CATALOG_PACKAGES_DIR = join(MONOREPO_ROOT, "catalog", "packages");
+const CATALOG_PATTERNS_DIR = join(MONOREPO_ROOT, "catalog", "patterns");
+const CATALOG_TEMPLATES_DIR = join(MONOREPO_ROOT, "catalog", "templates");
 
 interface CatalogEntry {
   id: string;
@@ -18,14 +26,69 @@ interface CatalogEntry {
   promotion_tier: string;
 }
 
-function loadCatalog(): CatalogEntry[] {
-  if (!existsSync(CATALOG_DIR)) return [];
+function loadCatalogFromDir(dir: string): CatalogEntry[] {
+  if (!existsSync(dir)) return [];
 
-  const files = readdirSync(CATALOG_DIR).filter((f) => f.endsWith(".yaml"));
+  const files = readdirSync(dir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
   return files.map((f) => {
-    const content = readFileSync(join(CATALOG_DIR, f), "utf-8");
+    const content = readFileSync(join(dir, f), "utf-8");
     return parseYaml(content) as CatalogEntry;
   });
+}
+
+function loadCatalog(): CatalogEntry[] {
+  const packages = loadCatalogFromDir(CATALOG_PACKAGES_DIR);
+  const patterns = loadCatalogFromDir(CATALOG_PATTERNS_DIR);
+  const templates = loadCatalogFromDir(CATALOG_TEMPLATES_DIR);
+  return [...packages, ...patterns, ...templates];
+}
+
+/**
+ * Fetch actual source files from GitHub for selected catalog matches.
+ * All catalog entries now live in the aes-platform monorepo.
+ */
+async function fetchSourceFiles(
+  selectedMatches: { candidate_id: string; source_repo: string; source_path: string }[]
+): Promise<Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>> {
+  if (!isGithubConfigured()) return {};
+
+  const github = new GithubService();
+  const results: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }> = {};
+
+  // All catalog packages are in aes-platform now
+  const targetRepo = process.env.AES_MONOREPO_NAME || "aes-platform";
+
+  for (const match of selectedMatches) {
+    if (!match.source_path || match.source_repo === "neo4j-graph") continue;
+
+    try {
+      // Fetch the src/ subdirectory of the package (where actual code lives)
+      const srcPath = `${match.source_path}/src`;
+      const files = await github.fetchDirectoryContents(targetRepo, srcPath, "main", 2);
+
+      // If no src/ directory, try the package root directly
+      if (files.length === 0) {
+        const rootFiles = await github.fetchDirectoryContents(targetRepo, match.source_path, "main", 1);
+        if (rootFiles.length > 0) {
+          results[match.candidate_id] = {
+            repo: targetRepo,
+            path: match.source_path,
+            files: rootFiles,
+          };
+        }
+      } else {
+        results[match.candidate_id] = {
+          repo: targetRepo,
+          path: match.source_path,
+          files,
+        };
+      }
+    } catch (err: any) {
+      console.warn(`[catalog-searcher] Failed to fetch files for ${match.candidate_id}: ${err.message}`);
+    }
+  }
+
+  return results;
 }
 
 function matchFeatureToCatalog(
@@ -190,10 +253,46 @@ export async function catalogSearcher(
     message: `Catalog search complete: ${totalMatches} matches across ${state.appSpec.features.length} features`,
   });
 
+  // Step 2 of 4-step reuse: Fetch real files from GitHub for selected candidates
+  const allSelectedCandidates: { candidate_id: string; source_repo: string; source_path: string }[] = [];
+  for (const candidates of Object.values(featureMatches)) {
+    for (const c of candidates) {
+      if (c.selected && c.source_repo !== "neo4j-graph" && c.source_path) {
+        allSelectedCandidates.push(c);
+      }
+    }
+  }
+
+  // Deduplicate by candidate_id
+  const uniqueCandidates = Array.from(
+    new Map(allSelectedCandidates.map((c) => [c.candidate_id, c])).values()
+  );
+
+  let reusableSourceFiles: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }> = {};
+
+  if (uniqueCandidates.length > 0) {
+    cb?.onStep(`Fetching source files for ${uniqueCandidates.length} selected reuse candidates from GitHub...`);
+    reusableSourceFiles = await fetchSourceFiles(uniqueCandidates);
+
+    const fetchedCount = Object.keys(reusableSourceFiles).length;
+    const totalFiles = Object.values(reusableSourceFiles).reduce((sum, r) => sum + r.files.length, 0);
+
+    if (fetchedCount > 0) {
+      cb?.onStep(`Fetched ${totalFiles} source files from ${fetchedCount} packages`);
+      store.addLog(state.jobId, {
+        gate: "gate_2",
+        message: `GitHub fetch: ${totalFiles} files from ${fetchedCount} packages for builder context`,
+      });
+    } else {
+      cb?.onWarn("No source files fetched from GitHub — builder will generate from scratch");
+    }
+  }
+
   cb?.onSuccess(`${totalMatches} reuse candidates found`);
 
-  // Store matches in state for bridge compiler to use
+  // Store matches and fetched source files in state for bridge compiler and builder
   return {
     featureBridges: featureMatches,
+    reusableSourceFiles,
   };
 }

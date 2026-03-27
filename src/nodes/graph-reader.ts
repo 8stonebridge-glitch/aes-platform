@@ -79,9 +79,14 @@ WHERE (n:Package OR n:Pattern OR n:PatternLibraryEntry OR n:CatalogEntry OR n:Br
 AND (${conditions})
 RETURN labels(n)[0] AS type, n.name AS name,
        n.description AS description,
-       n.tier AS tier
+       n.tier AS tier,
+       n.repo AS repo,
+       n.package_path AS package_path,
+       n.tags AS tags,
+       n.promotion_tier AS promotion_tier,
+       n.id AS id
 ORDER BY n.name
-LIMIT 20
+LIMIT 30
   `.trim();
 }
 

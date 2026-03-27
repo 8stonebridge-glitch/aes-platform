@@ -83,6 +83,12 @@ export const AESState = Annotation.Root({
     value: lastValue,
     default: () => ({}),
   }),
+  // Fetched source files from GitHub keyed by candidate_id
+  // Each entry: { repo, path, files: { path: string, content: string }[] }
+  reusableSourceFiles: Annotation<Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>>({
+    value: lastValue,
+    default: () => ({}),
+  }),
   featureBuildOrder: Annotation<string[]>({
     value: lastValue,
     default: () => [],

@@ -256,6 +256,7 @@ export class AppBuilder {
     featureBuildOrder: string[],
     callbacks?: GraphCallbacks | null,
     targetPath?: string | null,
+    reusableSourceFiles?: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>,
   ): Promise<AppBuildResult> {
     const runId = `br-app-${randomUUID().substring(0, 8)}`;
     const startTime = Date.now();
@@ -351,7 +352,7 @@ export class AppBuilder {
 
         let pkg: BuilderPackage | null = null;
         try {
-          pkg = compileBuilderPackage(jobRecord, featureId);
+          pkg = compileBuilderPackage(jobRecord, featureId, reusableSourceFiles);
         } catch (err: any) {
           callbacks?.onWarn(`Failed to compile builder package for ${featureName}: ${err.message}`);
         }
