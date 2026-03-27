@@ -180,6 +180,7 @@ export async function runGraph(
     rawRequest: string;
     currentGate: "gate_0";
     targetPath?: string | null;
+    deployTarget?: "local" | "cloudflare";
   },
   callbacks: GraphCallbacks
 ): Promise<AESStateType> {
@@ -208,6 +209,7 @@ export async function runGraph(
     rawRequest: input.rawRequest,
     currentGate: input.currentGate,
     targetPath: input.targetPath ?? null,
+    deployTarget: input.deployTarget ?? "local",
     durability: store.hasPersistence() ? "memory_only" : "memory_only",
     createdAt: new Date().toISOString(),
   });
@@ -221,6 +223,7 @@ export async function runGraph(
     rawRequest: input.rawRequest,
     currentGate: "gate_0",
     targetPath: input.targetPath ?? null,
+    deployTarget: input.deployTarget ?? "local",
   });
 
   // Update store with final state

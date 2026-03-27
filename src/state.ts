@@ -19,6 +19,18 @@ export const AESState = Annotation.Root({
     default: () => null,
   }),
 
+  // Deploy target: "local" (write to disk) or "cloudflare" (Dynamic Workers)
+  deployTarget: Annotation<"local" | "cloudflare">({
+    value: lastValue,
+    default: () => "local",
+  }),
+
+  // Cloudflare deploy result
+  previewUrl: Annotation<string | null>({
+    value: lastValue,
+    default: () => null,
+  }),
+
   // Current phase
   currentGate: Annotation<
     | "gate_0"

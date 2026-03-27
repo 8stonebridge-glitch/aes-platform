@@ -29,7 +29,7 @@ function broadcastToJob(jobId: string, event: string, data: any) {
 // ─── POST /api/build — Start a new build ───────────────────────────
 
 app.post("/api/build", async (req, res) => {
-  const { intent, targetPath } = req.body;
+  const { intent, targetPath, deployTarget } = req.body;
   if (!intent || typeof intent !== "string") {
     res.status(400).json({ error: "intent is required" });
     return;
@@ -85,13 +85,14 @@ app.post("/api/build", async (req, res) => {
 
   try {
     const result = await runGraph(
-      { jobId, requestId, rawRequest: intent, currentGate: "gate_0", targetPath: resolvedTargetPath },
+      { jobId, requestId, rawRequest: intent, currentGate: "gate_0", targetPath: resolvedTargetPath, deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local" },
       callbacks
     );
     broadcastToJob(jobId, "complete", {
       gate: result.currentGate,
       features: Object.keys(result.featureBridges || {}).length,
       error: result.errorMessage,
+      previewUrl: result.previewUrl || null,
     });
   } catch (err: any) {
     broadcastToJob(jobId, "error", { message: err.message });
@@ -173,6 +174,8 @@ app.get("/api/jobs/:id", (req, res) => {
     intentConfirmed: job.intentConfirmed,
     userApproved: job.userApproved,
     targetPath: job.targetPath ?? null,
+    deployTarget: job.deployTarget ?? "local",
+    previewUrl: job.previewUrl ?? null,
     features: Object.keys(job.featureBridges || {}),
     featureBridges: job.featureBridges,
     appSpec: job.appSpec ? {
@@ -199,6 +202,8 @@ app.get("/api/jobs", (_req, res) => {
     intentConfirmed: j.intentConfirmed,
     userApproved: j.userApproved,
     targetPath: j.targetPath ?? null,
+    deployTarget: j.deployTarget ?? "local",
+    previewUrl: j.previewUrl ?? null,
     createdAt: j.createdAt,
   }));
   res.json(jobs);

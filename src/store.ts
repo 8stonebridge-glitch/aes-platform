@@ -42,6 +42,8 @@ export interface JobRecord {
   fixTrailEntries?: FixTrailEntry[];
   builderRuns?: BuilderRunRecord[];
   targetPath?: string | null;
+  deployTarget?: "local" | "cloudflare";
+  previewUrl?: string | null;
   deploymentUrl?: string | null;
   errorMessage?: string | null;
 }
