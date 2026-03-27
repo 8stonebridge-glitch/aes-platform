@@ -1,0 +1,19 @@
+id: "audit-trail-module"
+name: "Audit Trail Module"
+description: "Append-only audit trail service that records entity changes, user actions, and system events with timestamps, actor IDs, and diff payloads. Provides query API for compliance and debugging."
+type: "module"
+repo: "aes-packages"
+package_path: "packages/audit"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "audit-trail-integration"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires a database table or collection for audit log storage"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["audit", "compliance", "logging", "append-only"]
+promotion_tier: "DERIVED"
+donor_lineage: []

@@ -1,0 +1,19 @@
+id: "persistent-context-bar"
+name: "Persistent Context Bar"
+description: "Sticky bar that displays persistent context such as selected environment, active org, impersonation mode, or feature flags. Remains visible across navigation to prevent context loss."
+type: "pattern"
+repo: "aes-packages"
+package_path: "packages/patterns/src/persistent-context-bar"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "ui-badge"
+tests:
+  suite: "persistent-context-bar-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["pattern", "ui", "persistent-state", "context"]
+promotion_tier: "DERIVED"
+donor_lineage: []

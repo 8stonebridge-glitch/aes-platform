@@ -1,0 +1,18 @@
+id: "ui-tabs"
+name: "UI Tabs"
+description: "Tabbed navigation component with horizontal and vertical orientations, lazy panel rendering, and keyboard navigation. Supports controlled and uncontrolled tab state."
+type: "component"
+repo: "aes-packages"
+package_path: "packages/ui/src/tabs"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "ui-tabs-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["ui", "primitive", "navigation", "tabs"]
+promotion_tier: "DERIVED"
+donor_lineage: []

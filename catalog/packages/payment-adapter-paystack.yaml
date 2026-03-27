@@ -1,0 +1,19 @@
+id: "payment-adapter-paystack"
+name: "Payment Adapter - Paystack"
+description: "Paystack payment adapter implementing the AES payment interface. Handles transaction initialization, verification, recurring charges, and webhook processing for African markets."
+type: "module"
+repo: "aes-packages"
+package_path: "packages/payments/src/paystack"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "payment-paystack-integration"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires PAYSTACK_SECRET_KEY environment variable"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["payment", "paystack", "billing", "africa"]
+promotion_tier: "DERIVED"
+donor_lineage: []

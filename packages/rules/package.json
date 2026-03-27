@@ -1,0 +1,24 @@
+{
+  "name": "@aes/rules",
+  "version": "12.0.0",
+  "description": "Validation and policy rules for AES v12",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "aes",
+    "rules",
+    "validation",
+    "policy"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}

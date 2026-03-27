@@ -1,0 +1,18 @@
+id: "ui-toast"
+name: "UI Toast"
+description: "Non-blocking notification toast with success, error, warning, and info variants. Supports auto-dismiss, stacking, and action buttons."
+type: "component"
+repo: "aes-packages"
+package_path: "packages/ui/src/toast"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "ui-toast-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["ui", "primitive", "feedback", "notification"]
+promotion_tier: "DERIVED"
+donor_lineage: []

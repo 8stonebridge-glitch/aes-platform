@@ -1,0 +1,24 @@
+id: "tpl-customer-portal"
+name: "Customer Portal"
+description: "Customer-facing portal template with self-service account management, support ticket submission, billing history, and document downloads. Designed for B2B SaaS end-users."
+type: "template"
+repo: "aes-templates"
+package_path: "apps/customer-portal"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "sidebar-layout"
+  - "auth-module"
+  - "auth-org-switcher"
+  - "settings-page"
+  - "detail-page"
+  - "file-upload-zone"
+tests:
+  suite: "customer-portal-e2e"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["template", "portal", "customer", "self-service", "b2b"]
+promotion_tier: "DERIVED"
+donor_lineage: []

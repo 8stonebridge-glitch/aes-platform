@@ -1,0 +1,21 @@
+id: "data-table-page"
+name: "Data Table Page"
+description: "Full-page data table layout with search bar, column filters, bulk actions toolbar, pagination controls, and empty/loading/error states. Connects to server-side data sources."
+type: "template"
+repo: "aes-packages"
+package_path: "packages/layouts/src/data-table-page"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "ui-table"
+  - "ui-input"
+  - "ui-button"
+tests:
+  suite: "data-table-page-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["layout", "table", "data", "list-view"]
+promotion_tier: "DERIVED"
+donor_lineage: []

@@ -1,0 +1,18 @@
+id: "ui-button"
+name: "UI Button"
+description: "Accessible button component with variants (primary, secondary, ghost, destructive), sizes, loading states, and icon support. Use as the standard interactive trigger across all AES surfaces."
+type: "component"
+repo: "aes-packages"
+package_path: "packages/ui/src/button"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "ui-button-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["ui", "primitive", "form"]
+promotion_tier: "DERIVED"
+donor_lineage: []

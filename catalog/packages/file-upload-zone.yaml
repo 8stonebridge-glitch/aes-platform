@@ -1,0 +1,20 @@
+id: "file-upload-zone"
+name: "File Upload Zone"
+description: "Drag-and-drop file upload component with progress indicators, file type validation, size limits, multi-file support, and preview thumbnails. Integrates with S3-compatible storage backends."
+type: "component"
+repo: "aes-packages"
+package_path: "packages/ui/src/file-upload-zone"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "ui-button"
+tests:
+  suite: "file-upload-zone-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires presigned upload URL endpoint"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["ui", "upload", "file", "drag-drop"]
+promotion_tier: "DERIVED"
+donor_lineage: []

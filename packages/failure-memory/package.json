@@ -1,0 +1,20 @@
+{
+  "name": "@aes/failure-memory",
+  "version": "1.0.0",
+  "description": "Structured failure and repair memory system for AES v12",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["aes", "failure-memory", "repair", "patterns"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}

@@ -1,0 +1,19 @@
+id: "status-workflow"
+name: "Status Workflow"
+description: "Generic status state machine for entities with configurable states, transitions, guards, and side effects. Use for order status, ticket lifecycle, document review states, etc."
+type: "workflow"
+repo: "aes-packages"
+package_path: "packages/workflows/src/status"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "status-workflow-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires xstate v5+ runtime"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["workflow", "xstate", "status", "state-machine"]
+promotion_tier: "DERIVED"
+donor_lineage: []

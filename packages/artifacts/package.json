@@ -1,0 +1,22 @@
+{
+  "name": "@aes/artifacts",
+  "version": "0.1.0",
+  "description": "AES v12 Postgres artifact store — immutable build evidence and decision records",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@types/node": "^25.5.0",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  }
+}

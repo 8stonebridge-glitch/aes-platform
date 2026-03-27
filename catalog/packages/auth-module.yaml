@@ -1,0 +1,19 @@
+id: "auth-module"
+name: "Auth Module"
+description: "Authentication module wrapping Clerk for session management, sign-in/sign-up flows, JWT verification, and middleware-level route protection. Provides useAuth hooks and server-side helpers."
+type: "module"
+repo: "aes-packages"
+package_path: "packages/auth"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "auth-module-integration"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY environment variables"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["auth", "clerk", "middleware"]
+promotion_tier: "DERIVED"
+donor_lineage: []

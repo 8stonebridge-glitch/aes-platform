@@ -1,0 +1,18 @@
+id: "ui-card"
+name: "UI Card"
+description: "Container card with header, body, footer slots, and optional border/shadow variants. Use for grouping related content in dashboards, lists, and detail views."
+type: "component"
+repo: "aes-packages"
+package_path: "packages/ui/src/card"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "ui-card-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["ui", "primitive", "container", "layout"]
+promotion_tier: "DERIVED"
+donor_lineage: []

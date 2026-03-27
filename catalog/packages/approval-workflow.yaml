@@ -1,0 +1,19 @@
+id: "approval-workflow"
+name: "Approval Workflow"
+description: "XState-based approval workflow engine supporting single and multi-step approval chains, delegation, escalation, auto-expiry, and audit logging. Emits events for notification integration."
+type: "workflow"
+repo: "aes-packages"
+package_path: "packages/workflows/src/approval"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies: []
+tests:
+  suite: "approval-workflow-integration"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires xstate v5+ runtime"
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["workflow", "xstate", "approval"]
+promotion_tier: "DERIVED"
+donor_lineage: []

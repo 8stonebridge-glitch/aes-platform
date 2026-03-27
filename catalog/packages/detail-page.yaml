@@ -1,0 +1,21 @@
+id: "detail-page"
+name: "Detail Page"
+description: "Entity detail page layout with header section, metadata sidebar, tabbed content area, and action bar. Use for viewing and editing individual records."
+type: "template"
+repo: "aes-packages"
+package_path: "packages/layouts/src/detail-page"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "ui-tabs"
+  - "ui-card"
+  - "ui-badge"
+tests:
+  suite: "detail-page-unit"
+  last_run: "2026-03-23T00:00:00Z"
+  status: "unknown"
+usage_constraints: []
+last_validation_date: "2026-03-23T00:00:00Z"
+tags: ["layout", "detail", "entity", "view"]
+promotion_tier: "DERIVED"
+donor_lineage: []
