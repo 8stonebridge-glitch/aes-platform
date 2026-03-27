@@ -198,24 +198,105 @@ const FEAT_DESC: Record<string, string> = {
   triggers: "Event triggers", jobs: "Background job execution",
   runs: "Job run management", queues: "Queue management",
   collections: "Collection management", environments: "Environment management",
+  // Extended coverage for more app types
+  products: "Product catalog management", orders: "Order lifecycle management",
+  carts: "Shopping cart management", shipping: "Shipping and fulfillment",
+  discounts: "Discount and coupon management", regions: "Regional configuration",
+  inventory: "Inventory tracking", returns: "Return and refund management",
+  customers: "Customer data management", subscribers: "Subscriber management",
+  channels: "Communication channel management", campaigns: "Campaign management",
+  digest: "Notification digest grouping", topics: "Topic subscription management",
+  certificates: "Certificate lifecycle management", secrets: "Secret storage and rotation",
+  roles: "Role definition and assignment", permissions: "Permission management",
+  identity: "Identity provider management", session: "Session management",
+  sso: "Single sign-on integration", mfa: "Multi-factor authentication",
+  pageviews: "Pageview tracking", visitors: "Visitor analytics",
+  events: "Event tracking and reporting", funnels: "Funnel analysis",
+  goals: "Goal tracking", realtime: "Real-time data monitoring",
+  messages: "Message handling", threads: "Threaded conversations",
+  rooms: "Chat room management", video: "Video conferencing",
+  files: "File storage and sharing", mentions: "User mention system",
+  reactions: "Reaction/emoji system", search: "Search functionality",
+  export: "Data export", import: "Data import",
+  billing: "Billing and subscription management", plans: "Plan/pricing management",
+  audit: "Audit logging", activity: "Activity feed",
+  dashboard: "Dashboard and analytics views", reports: "Report generation",
+  pipeline: "Pipeline management", deals: "Deal tracking",
+  companies: "Company/organization management", people: "People/contact management",
+  notes: "Note-taking", tasks: "Task management",
+  tags: "Tag/label system", filters: "Filter and view management",
+  automation: "Automation rules and triggers", middleware: "Request middleware",
+  storage: "Object/file storage", cache: "Caching layer",
+  migration: "Data migration tools", seed: "Database seeding",
+  health: "Health check endpoints", metrics: "Application metrics",
+  localization: "Language/locale management", themes: "Theme customization",
 };
+
+function addFeatureFromDir(
+  root: string, fp: string, dirName: string, seen: Set<string>, features: LearnedFeature[],
+) {
+  const key = dirName.toLowerCase().replace(/[-_]/g, "");
+  if (seen.has(key)) return;
+
+  const fc = countFiles(fp, [".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]);
+  if (fc === 0) return;
+  seen.add(key);
+
+  const pkg = readJson(path.join(fp, "package.json"));
+  const hasTests = countFiles(fp, [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", ".test.js"]) > 0;
+  const hasApi = countFiles(fp, [".handler.ts", ".controller.ts", ".router.ts"]) > 0 ||
+                 exists(path.join(fp, "api")) || exists(path.join(fp, "routes")) ||
+                 exists(path.join(fp, "controllers"));
+  const nameLower = dirName.toLowerCase().replace(/[-_]/g, "");
+  let desc = Object.entries(FEAT_DESC).find(([k]) => nameLower.includes(k))?.[1] || pkg?.description || `${dirName} module`;
+
+  // Try to get a better description from the feature's index file or README
+  let betterDesc = "";
+  for (const indexFile of ["index.ts", "index.tsx", "index.js", "README.md", "readme.md"]) {
+    const indexPath = path.join(fp, indexFile);
+    if (exists(indexPath)) {
+      const content = readFile(indexPath, 20);
+      // Look for JSDoc comment, export description, or first meaningful line
+      const jsdocMatch = content.match(/\/\*\*\s*\n\s*\*\s*(.+)/);
+      const commentMatch = content.match(/\/\/\s*(.{10,80})/);
+      const readmeMatch = content.match(/^#\s+.+\n+(.{10,150})/m);
+      betterDesc = jsdocMatch?.[1]?.trim() || readmeMatch?.[1]?.trim() || commentMatch?.[1]?.trim() || "";
+      if (betterDesc) break;
+    }
+  }
+  if (betterDesc && betterDesc.length > 10) {
+    desc = betterDesc;
+  }
+
+  features.push({
+    feature_id: `feat-${dirName}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase(),
+    name: dirName.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+    description: desc,
+    directory: path.relative(root, fp),
+    complexity: fc > 50 ? "complex" : fc > 15 ? "moderate" : "simple",
+    file_count: fc,
+    has_tests: hasTests,
+    has_api: hasApi,
+    dependencies: pkg?.dependencies ? Object.keys(pkg.dependencies) : [],
+    related_data_models: [],
+    related_integrations: [],
+  });
+}
 
 function scanFeatures(root: string): LearnedFeature[] {
   const features: LearnedFeature[] = [];
   const seen = new Set<string>();
 
-  // Known feature directory patterns — scan recursively for these
+  // ── Strategy 1: Classic feature/module/domain directories ──
   const featureDirPatterns = [
     /^features$/i, /^modules$/i, /^domains$/i,
   ];
 
-  // Fixed well-known paths
   const fixedDirs = [
     "packages/features", "src/features", "src/modules", "src/domains",
     "packages", "apps", "modules", "internal-packages",
   ];
 
-  // Also find any directory named "features", "modules", "domains" anywhere
   for (const pat of featureDirPatterns) {
     const found = findDirs(root, pat, 4);
     for (const d of found) {
@@ -230,38 +311,142 @@ function scanFeatures(root: string): LearnedFeature[] {
     try {
       for (const e of fs.readdirSync(full, { withFileTypes: true })) {
         if (!e.isDirectory() || e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
-        const fp = path.join(full, e.name);
-        const key = e.name.toLowerCase();
-        if (seen.has(key)) continue;
+        addFeatureFromDir(root, path.join(full, e.name), e.name, seen, features);
+      }
+    } catch {}
+  }
 
-        const fc = countFiles(fp, [".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]);
-        if (fc === 0) continue;
-        seen.add(key);
+  // ── Strategy 2: Service-based features (backend services pattern) ──
+  // Common in NestJS, Express, Fastify apps: src/services/*, services/*
+  const serviceDirPatterns = [/^services$/i, /^usecases$/i, /^use-cases$/i];
+  for (const pat of serviceDirPatterns) {
+    for (const svcDir of findDirs(root, pat, 5)) {
+      const rel = path.relative(root, svcDir);
+      if (rel.includes("node_modules")) continue;
+      try {
+        for (const e of fs.readdirSync(svcDir, { withFileTypes: true })) {
+          if (!e.isDirectory() || e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
+          addFeatureFromDir(root, path.join(svcDir, e.name), e.name, seen, features);
+        }
+      } catch {}
+    }
+  }
 
-        const pkg = readJson(path.join(fp, "package.json"));
-        const hasTests = countFiles(fp, [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", ".test.js"]) > 0;
-        const hasApi = countFiles(fp, [".handler.ts", ".controller.ts", ".router.ts"]) > 0 ||
-                       exists(path.join(fp, "api")) || exists(path.join(fp, "routes")) ||
-                       exists(path.join(fp, "controllers"));
-        const nameLower = e.name.toLowerCase().replace(/[-_]/g, "");
-        const desc = Object.entries(FEAT_DESC).find(([k]) => nameLower.includes(k))?.[1] || pkg?.description || `${e.name} module`;
+  // ── Strategy 3: API route-based features ──
+  // REST APIs organized as api/routes/*, api/admin/*, api/store/*
+  const apiRouteDirs: string[] = [];
+  for (const pat of [/^routes$/i, /^admin$/i, /^store$/i]) {
+    for (const d of findDirs(root, pat, 6)) {
+      const rel = path.relative(root, d);
+      if (rel.includes("node_modules")) continue;
+      // Only count if it's under an api/ directory or looks like an API routes dir
+      if (/api|server|backend/i.test(rel) || /routes/i.test(path.basename(d))) {
+        apiRouteDirs.push(d);
+      }
+    }
+  }
+  for (const routeDir of apiRouteDirs) {
+    try {
+      for (const e of fs.readdirSync(routeDir, { withFileTypes: true })) {
+        if (!e.isDirectory() || e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
+        // Skip common non-feature dirs inside api routes
+        if (/^(middlewares?|utils?|helpers?|hooks?|validators?)$/i.test(e.name)) continue;
+        addFeatureFromDir(root, path.join(routeDir, e.name), e.name, seen, features);
+      }
+    } catch {}
+  }
 
+  // ── Strategy 4: NestJS module-based features ──
+  // Each .module.ts file represents a feature module
+  const moduleFiles = findFiles(root, /\.module\.(ts|js)$/, 6);
+  for (const mf of moduleFiles) {
+    const rel = path.relative(root, mf);
+    if (rel.includes("node_modules")) continue;
+    const dirName = path.basename(path.dirname(mf));
+    const key = dirName.toLowerCase().replace(/[-_]/g, "");
+    if (seen.has(key) || SKIP_DIRS.has(dirName) || dirName === "src" || dirName === "app") continue;
+    addFeatureFromDir(root, path.dirname(mf), dirName, seen, features);
+  }
+
+  // ── Strategy 5: NestJS/Express controller-based features ──
+  // Each .controller.ts represents a feature if its parent dir isn't already captured
+  const controllerFiles = findFiles(root, /\.controller\.(ts|js)$/, 6);
+  for (const cf of controllerFiles) {
+    const rel = path.relative(root, cf);
+    if (rel.includes("node_modules")) continue;
+    const dirName = path.basename(path.dirname(cf));
+    const key = dirName.toLowerCase().replace(/[-_]/g, "");
+    if (seen.has(key) || SKIP_DIRS.has(dirName) || dirName === "src" || dirName === "app") continue;
+    addFeatureFromDir(root, path.dirname(cf), dirName, seen, features);
+  }
+
+  // ── Strategy 6: Next.js app router route groups ──
+  // (dashboard)/settings, (main)/analytics etc — groups in parentheses or top-level dirs
+  for (const appDir of findDirs(root, /^app$/, 4)) {
+    const rel = path.relative(root, appDir);
+    if (rel.includes("node_modules")) continue;
+    try {
+      for (const e of fs.readdirSync(appDir, { withFileTypes: true })) {
+        if (!e.isDirectory() || e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
+        // Skip common non-feature dirs
+        if (/^(api|_|fonts|images|styles|lib|utils|components)/.test(e.name)) continue;
+        // Route groups in parentheses — scan their children as features
+        if (e.name.startsWith("(")) {
+          const groupDir = path.join(appDir, e.name);
+          try {
+            for (const child of fs.readdirSync(groupDir, { withFileTypes: true })) {
+              if (!child.isDirectory() || child.name.startsWith(".") || child.name.startsWith("_")) continue;
+              addFeatureFromDir(root, path.join(groupDir, child.name), child.name, seen, features);
+            }
+          } catch {}
+        } else {
+          // Top-level app routes as features
+          addFeatureFromDir(root, path.join(appDir, e.name), e.name, seen, features);
+        }
+      }
+    } catch {}
+  }
+
+  // ── Strategy 7: Query/handler file-based features (for data-heavy apps) ──
+  // When dirs like src/queries/sql/ have files like getPageviewStats.ts, getSessionStats.ts
+  // Group by filename prefix patterns
+  for (const queryDir of findDirs(root, /^(queries|handlers|resolvers)$/i, 5)) {
+    const rel = path.relative(root, queryDir);
+    if (rel.includes("node_modules")) continue;
+    const queryFiles = findFiles(queryDir, /\.(ts|js)$/, 3);
+    // Group by common prefix: getUser*, getSession* → user, session
+    const prefixGroups = new Map<string, number>();
+    for (const qf of queryFiles) {
+      const name = path.basename(qf, path.extname(qf));
+      // Extract domain from camelCase: getPageviewStats → pageview, createTeam → team
+      const match = name.match(/^(?:get|create|update|delete|find|list|fetch|search|remove|set)([A-Z]\w+?)(?:Stats|Data|List|Count|By|Info|Details)?$/);
+      if (match) {
+        const domain = match[1].toLowerCase();
+        prefixGroups.set(domain, (prefixGroups.get(domain) || 0) + 1);
+      }
+    }
+    // Create features for domains with 2+ query files
+    for (const [domain, count] of prefixGroups) {
+      if (count >= 2 && !seen.has(domain)) {
+        seen.add(domain);
+        const desc = FEAT_DESC[domain] || `${domain} data operations`;
         features.push({
-          feature_id: `feat-${e.name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase(),
-          name: e.name.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          feature_id: `feat-${domain}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase(),
+          name: domain.charAt(0).toUpperCase() + domain.slice(1),
           description: desc,
-          directory: path.relative(root, fp),
-          complexity: fc > 50 ? "complex" : fc > 15 ? "moderate" : "simple",
-          file_count: fc,
-          has_tests: hasTests,
-          has_api: hasApi,
-          dependencies: pkg?.dependencies ? Object.keys(pkg.dependencies) : [],
+          directory: path.relative(root, queryDir),
+          complexity: count > 10 ? "complex" : count > 4 ? "moderate" : "simple",
+          file_count: count,
+          has_tests: false,
+          has_api: true,
+          dependencies: [],
           related_data_models: [],
           related_integrations: [],
         });
       }
-    } catch {}
+    }
   }
+
   return features;
 }
 
@@ -414,6 +599,227 @@ function scanDataModels(root: string): LearnedDataModel[] {
       if (seen.has(name) || /Module|Service|Controller|Guard|Interceptor|Pipe|Filter/.test(name)) continue;
       seen.add(name);
       models.push({ name, category: categorizeModel(name), fields: [], relations: [] });
+    }
+  }
+
+  // ── Zod schemas: find z.object() definitions in schema files ──
+  // Common in Infisical, tRPC apps, and many modern TS backends
+  const zodSchemaFiles = findFiles(root, /schema[s]?\.(ts|js)$/, 6);
+  for (const zf of zodSchemaFiles) {
+    const rel = path.relative(root, zf);
+    if (rel.includes("node_modules") || rel.includes(".test.")) continue;
+    const content = readFile(zf, 500);
+    // Match: export const FooSchema = z.object({...}) or export const FoosSchema = z.object
+    const zodRe = /export\s+const\s+(\w+)Schema\s*=\s*z\.object\s*\(\s*\{/g;
+    let zm;
+    while ((zm = zodRe.exec(content)) !== null) {
+      const rawName = zm[1];
+      // Skip if it's an "Insert" or "Update" schema variant — keep the base
+      if (/Insert|Update|Create|Patch/.test(rawName)) continue;
+      const name = rawName.replace(/s$/, ""); // "ApiKeys" → "ApiKey"
+      if (seen.has(name)) continue;
+      seen.add(name);
+
+      // Extract field names from the z.object block
+      const fields: LearnedField[] = [];
+      const blockStart = zm.index + zm[0].length;
+      const chunk = content.slice(blockStart, blockStart + 2000);
+      const fieldRe = /(\w+)\s*:\s*z\.(string|number|boolean|date|enum|array|object|uuid|bigint|record|union|literal|any|unknown|nativeEnum)\b/g;
+      let fm;
+      while ((fm = fieldRe.exec(chunk)) !== null) {
+        fields.push({
+          name: fm[1],
+          type: fm[2],
+          required: !chunk.slice(fm.index, fm.index + 200).includes(".optional()") && !chunk.slice(fm.index, fm.index + 200).includes(".nullable()"),
+          is_id: fm[1] === "id",
+          is_unique: false,
+        });
+      }
+
+      models.push({ name, category: categorizeModel(name), fields, relations: [] });
+    }
+  }
+
+  // ── Mongoose schemas: find new Schema({}) or mongoose.Schema ──
+  const mongooseFiles = findFiles(root, /\.(ts|js)$/, 5);
+  for (const mf of mongooseFiles) {
+    const rel = path.relative(root, mf);
+    if (rel.includes("node_modules") || rel.includes(".test.") || rel.includes("dist/")) continue;
+    // Only check files that are likely model files
+    if (!/model|schema|entity/i.test(path.basename(mf))) continue;
+    const content = readFile(mf, 200);
+    if (!content.includes("Schema(") && !content.includes("mongoose")) continue;
+
+    // Match: const userSchema = new Schema({...}) or new mongoose.Schema
+    const schemaRe = /(?:const|let)\s+(\w+)(?:Schema)?\s*=\s*new\s+(?:mongoose\.)?Schema\s*\(/g;
+    let sm;
+    while ((sm = schemaRe.exec(content)) !== null) {
+      let name = sm[1].replace(/Schema$/i, "").replace(/schema$/i, "");
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+      if (seen.has(name)) continue;
+      seen.add(name);
+      models.push({ name, category: categorizeModel(name), fields: [], relations: [] });
+    }
+
+    // Match: mongoose.model("User", ...) or model("User", ...)
+    const modelRe = /(?:mongoose\.)?model\s*[<(]\s*['"](\w+)['"]/g;
+    let mm;
+    while ((mm = modelRe.exec(content)) !== null) {
+      const name = mm[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      models.push({ name, category: categorizeModel(name), fields: [], relations: [] });
+    }
+  }
+
+  // ── Sequelize models: sequelize.define() or class-based extends Model ──
+  const seqFiles = findFiles(root, /\.model\.(ts|js)$|models\/\w+\.(ts|js)$/, 6);
+  for (const sf of seqFiles) {
+    const rel = path.relative(root, sf);
+    if (rel.includes("node_modules")) continue;
+    const content = readFile(sf, 200);
+    // Class-based: class User extends Model
+    const classRe = /class\s+(\w+)\s+extends\s+Model/g;
+    let cm;
+    while ((cm = classRe.exec(content)) !== null) {
+      if (!seen.has(cm[1])) {
+        seen.add(cm[1]);
+        models.push({ name: cm[1], category: categorizeModel(cm[1]), fields: [], relations: [] });
+      }
+    }
+    // define-based: sequelize.define('User', {...})
+    const defRe = /\.define\s*\(\s*['"](\w+)['"]/g;
+    let dm;
+    while ((dm = defRe.exec(content)) !== null) {
+      const name = dm[1].charAt(0).toUpperCase() + dm[1].slice(1);
+      if (!seen.has(name)) {
+        seen.add(name);
+        models.push({ name, category: categorizeModel(name), fields: [], relations: [] });
+      }
+    }
+  }
+
+  // ── Knex migrations: createTable("tablename") in migration files ──
+  const migrationFiles = findFiles(root, /\d{4,}.*\.(ts|js)$/, 5);
+  for (const mig of migrationFiles.slice(0, 100)) { // limit to avoid scanning too many
+    const rel = path.relative(root, mig);
+    if (rel.includes("node_modules") || !(/migration|migrate/i.test(rel))) continue;
+    const content = readFile(mig, 300);
+    const createRe = /createTable\s*\(\s*['"](\w+)['"]/g;
+    let ct;
+    while ((ct = createRe.exec(content)) !== null) {
+      const tableName = ct[1];
+      const name = tableName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()).replace(/\s/g, "");
+      if (!seen.has(name)) {
+        seen.add(name);
+        models.push({ name, category: categorizeModel(tableName), fields: [], relations: [] });
+      }
+    }
+  }
+
+  // ── TypeScript interfaces in types/models files (last resort for TS-heavy apps) ──
+  const typeFiles = findFiles(root, /types?\.(ts|d\.ts)$/, 5);
+  for (const tf of typeFiles.slice(0, 50)) { // limit
+    const rel = path.relative(root, tf);
+    if (rel.includes("node_modules") || rel.includes(".test.")) continue;
+    // Only look at files in model/types/entity directories
+    if (!/model|type|entity|interface|schema/i.test(rel)) continue;
+    const content = readFile(tf, 300);
+    // Match: export interface User { or export type User = {
+    const ifRe = /export\s+(?:interface|type)\s+(\w+)\s*(?:extends\s+\w+\s*)?[={]/g;
+    let im;
+    while ((im = ifRe.exec(content)) !== null) {
+      const name = im[1];
+      // Skip utility types, generics, function types, etc
+      if (/Props|Config|Options|Params|Args|Result|Response|Request|Context|State|Action|Reducer|Store|Hook|Util|Helper|Fn|Callback|Handler/.test(name)) continue;
+      if (seen.has(name)) continue;
+      // Only add if name looks like a domain entity (has category match)
+      const cat = categorizeModel(name);
+      if (cat !== "general") {
+        seen.add(name);
+        models.push({ name, category: cat, fields: [], relations: [] });
+      }
+    }
+  }
+
+  // ── Meteor Mongo.Collection / createCollection ──
+  const collectionFiles = findFiles(root, /\.(ts|js)$/, 5);
+  for (const cf of collectionFiles.slice(0, 200)) {
+    const rel = path.relative(root, cf);
+    if (rel.includes("node_modules") || rel.includes(".test.")) continue;
+    if (!/model|collection|schema|server|lib/i.test(rel)) continue;
+    const content = readFile(cf, 200);
+    // Meteor: new Mongo.Collection("users")
+    const meteorRe = /new\s+Mongo\.Collection\s*[<(]\s*['"](\w+)['"]/g;
+    let mm;
+    while ((mm = meteorRe.exec(content)) !== null) {
+      const tableName = mm[1];
+      const name = tableName.charAt(0).toUpperCase() + tableName.slice(1).replace(/s$/, "");
+      if (!seen.has(name)) {
+        seen.add(name);
+        models.push({ name, category: categorizeModel(tableName), fields: [], relations: [] });
+      }
+    }
+    // createCollection("users")
+    const createCollRe = /createCollection\s*[<(]\s*['"](\w+)['"]/g;
+    let cc;
+    while ((cc = createCollRe.exec(content)) !== null) {
+      const tableName = cc[1];
+      const name = tableName.charAt(0).toUpperCase() + tableName.slice(1).replace(/s$/, "");
+      if (!seen.has(name)) {
+        seen.add(name);
+        models.push({ name, category: categorizeModel(tableName), fields: [], relations: [] });
+      }
+    }
+  }
+
+  // ── GraphQL type definitions ──
+  const gqlFiles = findFiles(root, /\.(graphql|gql)$/, 5);
+  for (const gf of gqlFiles) {
+    const rel = path.relative(root, gf);
+    if (rel.includes("node_modules")) continue;
+    const content = readFile(gf, 500);
+    const typeRe = /type\s+(\w+)\s*(?:implements\s+\w+\s*)?\{([^}]+)\}/g;
+    let gm;
+    while ((gm = typeRe.exec(content)) !== null) {
+      const name = gm[1];
+      // Skip built-in types and resolvers
+      if (/^(Query|Mutation|Subscription|__\w+)$/.test(name)) continue;
+      if (seen.has(name)) continue;
+      seen.add(name);
+
+      const fields: LearnedField[] = [];
+      for (const line of gm[2].split("\n")) {
+        const fieldMatch = line.trim().match(/^(\w+)\s*(?:\([^)]*\))?\s*:\s*(\w+)/);
+        if (fieldMatch) {
+          fields.push({
+            name: fieldMatch[1],
+            type: fieldMatch[2],
+            required: line.includes("!"),
+            is_id: fieldMatch[1] === "id",
+            is_unique: false,
+          });
+        }
+      }
+      models.push({ name, category: categorizeModel(name), fields, relations: [] });
+    }
+  }
+
+  // ── Raw SQL CREATE TABLE in .sql files ──
+  const sqlFiles = findFiles(root, /\.(sql)$/, 4);
+  for (const sf of sqlFiles.slice(0, 50)) {
+    const rel = path.relative(root, sf);
+    if (rel.includes("node_modules")) continue;
+    const content = readFile(sf, 500);
+    const createRe = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["'`]?(\w+)["'`]?\.)?["'`]?(\w+)["'`]?\s*\(/gi;
+    let ct;
+    while ((ct = createRe.exec(content)) !== null) {
+      const tableName = ct[2];
+      const name = tableName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()).replace(/\s/g, "");
+      if (!seen.has(name)) {
+        seen.add(name);
+        models.push({ name, category: categorizeModel(tableName), fields: [], relations: [] });
+      }
     }
   }
 
@@ -708,6 +1114,92 @@ function scanUI(root: string, deps: string[]): LearnedUI {
     }
   }
 
+  // ── Component Pattern Analysis — deeper scan of top components ──
+  interface ComponentPattern {
+    name: string;
+    category: string;
+    props: string[];
+    child_components: string[];
+    uses_state: boolean;
+    uses_effects: boolean;
+    line_count: number;
+    file_path: string;
+  }
+
+  const componentPatterns: ComponentPattern[] = [];
+  const allCompFiles = new Map<string, string>(); // name -> file path
+
+  // Build a map of component name -> file path for all components
+  for (const full of compDirs) {
+    const rel = path.relative(root, full);
+    if (rel.includes("node_modules")) continue;
+    for (const fp of findFiles(full, /\.(tsx|vue|svelte)$/, 4)) {
+      const name = path.basename(fp).replace(/\.(tsx|vue|svelte)$/, "");
+      if (!name.startsWith("_") && name !== "index") {
+        allCompFiles.set(name, fp);
+      }
+    }
+  }
+
+  // Analyze top 30 most-used components (by category importance)
+  const priorityCategories = ["data_display", "form", "navigation", "overlay", "layout", "editor"];
+  const topComponents: string[] = [];
+
+  for (const cat of priorityCategories) {
+    const comps = compMap.get(cat) || [];
+    topComponents.push(...comps.slice(0, 5));
+  }
+  // Fill remaining slots with other categories
+  for (const [cat, comps] of compMap) {
+    if (!priorityCategories.includes(cat)) {
+      topComponents.push(...comps.slice(0, 3));
+    }
+  }
+
+  for (const compName of topComponents.slice(0, 30)) {
+    const filePath = allCompFiles.get(compName);
+    if (!filePath) continue;
+
+    const content = readFile(filePath, 150);
+    if (!content) continue;
+
+    // Extract props interface
+    const propsRe = /(?:interface|type)\s+\w*Props\w*\s*(?:=\s*)?\{([^}]+)\}/s;
+    const propsMatch = propsRe.exec(content);
+    const props: string[] = [];
+    if (propsMatch) {
+      const propsBody = propsMatch[1];
+      const propLines = propsBody.split("\n");
+      for (const line of propLines) {
+        const propMatch = line.trim().match(/^(\w+)\s*[?:]?\s*:\s*(.+?)(?:;|$)/);
+        if (propMatch) {
+          props.push(`${propMatch[1]}:${propMatch[2].trim().slice(0, 30)}`);
+        }
+      }
+    }
+
+    // Detect child component usage
+    const childRe = /<([A-Z]\w+)/g;
+    const children = new Set<string>();
+    let childMatch;
+    while ((childMatch = childRe.exec(content)) !== null) {
+      if (childMatch[1] !== compName) children.add(childMatch[1]);
+    }
+
+    const cat = catComponent(path.relative(root, filePath), compName);
+
+    componentPatterns.push({
+      name: compName,
+      category: cat,
+      props: props.slice(0, 15),
+      child_components: [...children].slice(0, 10),
+      uses_state: /useState|useReducer|useStore|useAtom|useSelector/.test(content),
+      uses_effects: /useEffect|useMemo|useCallback|useQuery|useMutation/.test(content),
+      line_count: content.split("\n").length,
+      file_path: path.relative(root, filePath),
+    });
+  }
+
   const totalComponents = [...compMap.values()].reduce((s, a) => s + a.length, 0);
   const categories: LearnedComponentCategory[] = [...compMap.entries()]
     .sort((a, b) => b[1].length - a[1].length)
@@ -977,7 +1469,7 @@ function scanUI(root: string, deps: string[]): LearnedUI {
     }
   }
 
-  return { design_system, components, pages, navigation, user_flows, form_patterns, state_patterns };
+  return { design_system, components, pages, navigation, user_flows, form_patterns, state_patterns, component_patterns: componentPatterns };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1195,32 +1687,135 @@ function scanSecurityPatterns(root: string, deps: string[]): LearnedPattern[] {
 // Assemble — all layers into LearnedApp
 // ═══════════════════════════════════════════════════════════════════════
 
-function classifyApp(features: LearnedFeature[], deps: string[]): string {
+function classifyApp(features: LearnedFeature[], deps: string[], root: string, sourceUrl = ""): string {
   const names = features.map(f => f.name.toLowerCase()).join(" ");
-  if (/booking|scheduling|calendar|availability/.test(names)) return "scheduling_platform";
-  if (/payment.*wallet|wallet|fintech/.test(names)) return "fintech_wallet";
-  if (/marketplace|seller|buyer|store/.test(names)) return "marketplace";
-  if (/compliance|audit|case/.test(names)) return "compliance_case_management";
-  if (/property|tenant|rental/.test(names)) return "property_management_system";
-  if (/logistics|fleet|delivery/.test(names)) return "logistics_operations_system";
-  if (/approval|workflow/.test(names)) return "workflow_approval_system";
-  if (/issue|project|sprint|cycle|kanban/.test(names)) return "project_management";
-  if (/document|signing|signature/.test(names)) return "document_platform";
-  if (/survey|form|response|feedback/.test(names)) return "survey_platform";
-  if (/chat|conversation|message|agent/.test(names)) return "chat_platform";
-  if (/invoice|transaction|accounting|expense/.test(names)) return "finance_platform";
-  if (/trigger|job|queue|run|task/.test(names)) return "background_jobs_platform";
-  if (/crm|contact|lead|deal|pipeline/.test(names)) return "crm_platform";
-  if (/api|request|collection|environment/.test(names)) return "api_tool";
-  if (/secret|vault|key|config/.test(names)) return "secrets_management";
-  if (/dashboard|admin|ops/.test(names)) return "internal_ops_tool";
-  if (/portal|customer|account/.test(names)) return "customer_portal";
-  return "other";
+  const dirs = features.map(f => f.directory.toLowerCase()).join(" ");
+  const signal = names + " " + dirs;
+
+  const hasDep = (...needles: string[]) => needles.some(n => deps.some(d => d.includes(n)));
+
+  // Score-based classification: tally votes per category, highest wins
+  const scores: Record<string, number> = {};
+  const vote = (cls: string, weight: number) => { scores[cls] = (scores[cls] || 0) + weight; };
+
+  // ── Source URL hints (very reliable when available) ──
+  const urlLower = sourceUrl.toLowerCase();
+  if (/secret|infisical|vault|hashicorp/i.test(urlLower)) vote("secrets_management", 12);
+  if (/analytics|umami|plausible|posthog|matomo/i.test(urlLower)) vote("analytics_platform", 12);
+  if (/crm|twenty|salesforce/i.test(urlLower)) vote("crm_platform", 12);
+  if (/email|plunk|mailing|campaign/i.test(urlLower)) vote("email_marketing_platform", 12);
+  if (/chat|rocket|slack|matrix|mattermost/i.test(urlLower)) vote("chat_platform", 12);
+  if (/auth|logto|keycloak|ory|casdoor/i.test(urlLower)) vote("auth_platform", 12);
+  if (/n8n|workflow|automat/i.test(urlLower)) vote("workflow_automation", 12);
+  if (/medusa|saleor|commerce|shop/i.test(urlLower)) vote("ecommerce_platform", 12);
+  if (/novu|notification|knock/i.test(urlLower)) vote("notification_platform", 12);
+
+  // ── Dependency-based signals (strong) ──
+  if (hasDep("@medusajs", "medusa")) vote("ecommerce_platform", 10);
+  if (hasDep("@novu/")) vote("notification_platform", 10);
+  if (hasDep("n8n", "temporal", "inngest")) vote("workflow_automation", 8);
+  if (hasDep("hoppscotch")) vote("api_tool", 10);
+  if (hasDep("openai", "@anthropic-ai", "langchain")) vote("ai_chat_platform", 4);
+  if (hasDep("meteor", "ddp-client")) vote("chat_platform", 5);
+  if (hasDep("bullmq", "@trigger.dev")) vote("background_jobs_platform", 5);
+
+  // ── Feature name signals (scaled by term count) ──
+  const countTerms = (re: RegExp) => (signal.match(re) || []).length;
+
+  // Chat/messaging
+  const chatN = countTerms(/\b(chat|livechat|message.?type|conversation|thread|channel|room|ddp|meteor|fuselage)\b/g);
+  if (chatN >= 3) vote("chat_platform", 8); else if (chatN >= 1) vote("chat_platform", 3);
+
+  // Ecommerce
+  const ecomN = countTerms(/\b(product|cart|order|shipping|discount|storefront|inventory|fulfillment|return|refund)\b/g);
+  if (ecomN >= 3) vote("ecommerce_platform", 8); else if (ecomN >= 1) vote("ecommerce_platform", 3);
+
+  // Notification (specific terms, not just "notification")
+  const notifN = countTerms(/\b(subscriber|digest|notification.?channel|notification.?template|notification.?workflow|in.?app)\b/g);
+  if (notifN >= 2) vote("notification_platform", 8);
+
+  // Secrets/certificate management (high weight for domain-specific terms)
+  const secretN = countTerms(/\b(secret|vault|certificate|key.?rotation|encrypt|kms|pki|seal|cmek)\b/g);
+  if (secretN >= 10) vote("secrets_management", 15);
+  else if (secretN >= 3) vote("secrets_management", 10);
+  else if (secretN >= 1) vote("secrets_management", 4);
+
+  // Auth platform
+  const authN = countTerms(/\b(sso|saml|oidc|identity.?provider|mfa|totp|rbac|oauth.?provider|connector|sign.?in.?experience)\b/g);
+  if (authN >= 3) vote("auth_platform", 8); else if (authN >= 1) vote("auth_platform", 4);
+
+  // Analytics (expanded terms)
+  const analyticsN = countTerms(/\b(pageview|visitor|session.?stat|event.?tracking|realtime|funnel|bounce|referrer|utm|tracker|pixel|website.?stats|dashboard)\b/g);
+  if (analyticsN >= 3) vote("analytics_platform", 10);
+  else if (analyticsN >= 1) vote("analytics_platform", 4);
+
+  // CRM
+  const crmN = countTerms(/\b(crm|lead|deal|pipeline|contact.?company|people|opportunity|activities)\b/g);
+  if (crmN >= 2) vote("crm_platform", 8); else if (crmN >= 1) vote("crm_platform", 4);
+
+  // Email marketing
+  const emailN = countTerms(/\b(campaign|email.?template|transactional|subscriber|bounce|unsubscribe|smtp)\b/g);
+  if (emailN >= 2) vote("email_marketing_platform", 8);
+  else if (emailN >= 1) vote("email_marketing_platform", 4);
+
+  // Scheduling
+  if (/booking|scheduling|calendar|availability|slot/.test(signal)) vote("scheduling_platform", 6);
+
+  // Project management
+  if (/\b(issue|sprint|cycle|kanban|backlog)\b/.test(signal)) vote("project_management", 6);
+
+  // Document
+  if (/signing|signature|document.?template|recipient/.test(signal)) vote("document_platform", 6);
+
+  // Survey
+  if (/survey|form.?response|question.?logic/.test(signal)) vote("survey_platform", 6);
+
+  // Workflow (only from feature names, not generic "trigger")
+  if (/\b(workflow|automation)\b/.test(signal) && hasDep("n8n", "temporal", "inngest")) vote("workflow_automation", 6);
+  else if (/\bworkflow\b/.test(signal)) vote("workflow_automation", 2);
+
+  // Finance
+  if (/invoice|transaction|accounting|expense|ledger/.test(signal)) vote("finance_platform", 6);
+
+  // Background jobs (needs stronger signal than just "trigger")
+  if (/\b(job.?queue|run.?execution|background.?job)\b/.test(signal)) vote("background_jobs_platform", 4);
+
+  // Pick the highest scoring class
+  let best = "other";
+  let bestScore = 0;
+  for (const [cls, score] of Object.entries(scores)) {
+    if (score > bestScore) { bestScore = score; best = cls; }
+  }
+
+  return best;
+}
+
+/** Derive a clean app name — avoids "root", "@scope/root", "src", "backend" etc. */
+function deriveAppName(rootDir: string, sourceUrl: string, pkgName?: string): string {
+  // 1. Try extracting from source URL (most reliable for repos)
+  if (sourceUrl) {
+    const urlMatch = sourceUrl.match(/github\.com\/[\w-]+\/([\w.-]+)/);
+    if (urlMatch) {
+      return urlMatch[1].toLowerCase().replace(/\.git$/, "").replace(/\./g, "-");
+    }
+  }
+
+  // 2. Use package.json name if it's not a generic monorepo root name
+  if (pkgName && !/^(root|src|backend|frontend|app|server|client|web|api|@[\w-]+\/root)$/i.test(pkgName)) {
+    // Strip org scope: @medusajs/medusa → medusa
+    const stripped = pkgName.replace(/^@[\w-]+\//, "");
+    if (stripped && !/^(root|monorepo)$/i.test(stripped)) {
+      return stripped;
+    }
+  }
+
+  // 3. Fall back to directory name
+  return path.basename(rootDir);
 }
 
 export function analyzeApp(rootDir: string, sourceUrl = ""): LearnedApp {
   const rootPkg = readJson(path.join(rootDir, "package.json"));
-  const name = rootPkg?.name || path.basename(rootDir);
+  const name = deriveAppName(rootDir, sourceUrl, rootPkg?.name);
   const sourceId = `learned-${name}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
   const deps = allDeps(rootDir);
 
@@ -1238,6 +1833,23 @@ export function analyzeApp(rootDir: string, sourceUrl = ""): LearnedApp {
   console.log("[learn-app] Layer 3: Data Models...");
   const data_models = scanDataModels(rootDir);
   console.log(`  → ${data_models.length} models`);
+
+  // Link features to models
+  console.log("[learn-app] Linking features → models...");
+  for (const feature of features) {
+    const featureKeywords = feature.name.toLowerCase().replace(/[-_\s]/g, "").split(/(?=[A-Z])/).map(w => w.toLowerCase());
+    const featureDir = feature.directory.toLowerCase();
+    for (const model of data_models) {
+      const modelLower = model.name.toLowerCase();
+      // Match if model name contains feature keyword or model is in feature directory
+      if (featureKeywords.some(k => k.length > 2 && modelLower.includes(k)) ||
+          (featureDir && model.name && featureDir.includes(modelLower))) {
+        feature.related_data_models.push(model.name);
+      }
+    }
+  }
+  const linkedCount = features.filter(f => f.related_data_models.length > 0).length;
+  console.log(`  → ${linkedCount} features linked to models`);
 
   console.log("[learn-app] Layer 4: Integrations...");
   const integrations = scanIntegrations(rootDir, deps);
@@ -1323,7 +1935,7 @@ export function analyzeApp(rootDir: string, sourceUrl = ""): LearnedApp {
 
   const patterns = [...archPatterns, ...authPatterns, ...testPatterns, ...errorPatterns, ...deployPatterns, ...securityPatterns];
 
-  const app_class = classifyApp(features, deps);
+  const app_class = classifyApp(features, deps, rootDir, sourceUrl);
   const description = rootPkg?.description || `${app_class.replace(/_/g, " ")} built with ${tech_stack.framework}`;
   const totalFiles = countFiles(rootDir, [".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]);
 
@@ -1368,6 +1980,9 @@ async function writeToNeo4j(app: LearnedApp): Promise<{ written: number; failed:
   const ok = await neo4j.connect();
   if (!ok) { console.error("[learn-app] Cannot connect to Neo4j"); return { written: 0, failed: 0 }; }
 
+  // Incremental scan: track scan version so we can clean up stale nodes after
+  const scanVersion = new Date().toISOString();
+
   let written = 0, failed = 0;
   const w = async (cypher: string, label: string) => {
     try { await neo4j.runCypher(cypher); written++; } catch (e: any) { console.warn(`  ✗ ${label}: ${e.message}`); failed++; }
@@ -1402,7 +2017,8 @@ SET a.name = '${esc(app.name)}',
     a.total_user_flows = ${app.stats.total_user_flows},
     a.api_style = '${esc(app.api_surface.style)}',
     a.schema_version = ${app.schema_version},
-    a.learned_at = '${esc(app.learned_at)}'
+    a.learned_at = '${esc(app.learned_at)}',
+    a.scan_version = '${esc(scanVersion)}'
 RETURN a.source_id
   `.trim(), "App");
 
@@ -1413,7 +2029,8 @@ RETURN a.source_id
 MERGE (f:${L.feature} {feature_id: '${esc(f.feature_id)}', source: '${esc(sid)}'})
 SET f.name = '${esc(f.name)}', f.description = '${esc(f.description)}',
     f.directory = '${esc(f.directory)}', f.complexity = '${f.complexity}',
-    f.file_count = ${f.file_count}, f.has_tests = ${f.has_tests}, f.has_api = ${f.has_api}
+    f.file_count = ${f.file_count}, f.has_tests = ${f.has_tests}, f.has_api = ${f.has_api},
+    f.scan_version = '${esc(scanVersion)}'
 WITH f
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_feature}]->(f)
@@ -1430,12 +2047,25 @@ RETURN f.feature_id
 MERGE (m:${L.data_model} {name: '${esc(dm.name)}', source: '${esc(sid)}'})
 SET m.category = '${esc(dm.category)}', m.field_count = ${dm.fields.length},
     m.relation_count = ${dm.relations.length}, m.fields = '${esc(fieldSummary)}',
-    m.relations = '${esc(relSummary)}'
+    m.relations = '${esc(relSummary)}',
+    m.scan_version = '${esc(scanVersion)}'
 WITH m
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_data_model}]->(m)
 RETURN m.name
     `.trim(), `Model [${dm.name}]`);
+  }
+
+  // ── Feature → Model edges ──
+  console.log(`[neo4j] Linking features to models...`);
+  for (const f of app.features) {
+    for (const modelName of f.related_data_models) {
+      await w(`
+MATCH (f:${L.feature} {feature_id: '${esc(f.feature_id)}', source: '${esc(sid)}'})
+MATCH (m:${L.data_model} {name: '${esc(modelName)}', source: '${esc(sid)}'})
+MERGE (f)-[:USES_MODEL]->(m)
+      `.trim(), `Link [${f.name}→${modelName}]`);
+    }
   }
 
   // ── Integrations ──
@@ -1444,7 +2074,8 @@ RETURN m.name
     await w(`
 MERGE (i:${L.integration} {name: '${esc(i.name)}', source: '${esc(sid)}'})
 SET i.type = '${esc(i.type)}', i.provider = '${esc(i.provider)}',
-    i.category = '${esc(i.category)}', i.auth_method = '${esc(i.auth_method)}'
+    i.category = '${esc(i.category)}', i.auth_method = '${esc(i.auth_method)}',
+    i.scan_version = '${esc(scanVersion)}'
 WITH i
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_integration}]->(i)
@@ -1458,7 +2089,8 @@ RETURN i.name
     await w(`
 MERGE (d:${L.api_domain} {name: '${esc(d.name)}', source: '${esc(sid)}'})
 SET d.endpoint_count = ${d.endpoint_count}, d.has_crud = ${d.has_crud},
-    d.has_search = ${d.has_search}, d.has_batch = ${d.has_batch}
+    d.has_search = ${d.has_search}, d.has_batch = ${d.has_batch},
+    d.scan_version = '${esc(scanVersion)}'
 WITH d
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_api_domain}]->(d)
@@ -1471,12 +2103,34 @@ RETURN d.name
   for (const c of app.ui.components.categories) {
     await w(`
 MERGE (c:${L.component_group} {name: '${esc(c.name)}', source: '${esc(sid)}'})
-SET c.count = ${c.count}, c.key_components = '${esc(c.key_components.join(", "))}'
+SET c.count = ${c.count}, c.key_components = '${esc(c.key_components.join(", "))}',
+    c.scan_version = '${esc(scanVersion)}'
 WITH c
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_components}]->(c)
 RETURN c.name
     `.trim(), `ComponentGroup [${c.name}]`);
+  }
+
+  // ── Component Patterns (top components with props/children) ──
+  const compPatterns = (app.ui as any).component_patterns || [];
+  console.log(`[neo4j] Writing ${compPatterns.length} component patterns...`);
+  for (const cp of compPatterns) {
+    await w(`
+MERGE (c:LearnedComponentPattern {name: '${esc(cp.name)}', source: '${esc(sid)}'})
+SET c.category = '${esc(cp.category)}',
+    c.props = '${esc(cp.props.join(", "))}',
+    c.child_components = '${esc(cp.child_components.join(", "))}',
+    c.uses_state = ${cp.uses_state},
+    c.uses_effects = ${cp.uses_effects},
+    c.line_count = ${cp.line_count},
+    c.file_path = '${esc(cp.file_path)}',
+    c.scan_version = '${esc(scanVersion)}'
+WITH c
+MATCH (a:${L.app} {source_id: '${esc(sid)}'})
+MERGE (a)-[:HAS_COMPONENT_PATTERN]->(c)
+RETURN c.name
+    `.trim(), `ComponentPattern [${cp.name}]`);
   }
 
   // ── Page Sections ──
@@ -1485,7 +2139,8 @@ RETURN c.name
     await w(`
 MERGE (s:${L.page_section} {name: '${esc(s.name)}', source: '${esc(sid)}'})
 SET s.page_count = ${s.page_count}, s.is_public = ${s.is_public},
-    s.requires_auth = ${s.requires_auth}, s.key_routes = '${esc(s.key_routes.join(", "))}'
+    s.requires_auth = ${s.requires_auth}, s.key_routes = '${esc(s.key_routes.join(", "))}',
+    s.scan_version = '${esc(scanVersion)}'
 WITH s
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_pages}]->(s)
@@ -1505,7 +2160,8 @@ SET d.css_framework = '${esc(ds.css_framework)}',
     d.has_dark_mode = ${ds.color_system.has_dark_mode},
     d.has_custom_theming = ${ds.color_system.has_custom_theming},
     d.font_families = '${esc(ds.typography.font_families.join(", "))}',
-    d.spacing_system = '${esc(ds.spacing.system)}'
+    d.spacing_system = '${esc(ds.spacing.system)}',
+    d.scan_version = '${esc(scanVersion)}'
 WITH d
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_design_system}]->(d)
@@ -1519,7 +2175,8 @@ RETURN d.source
 MERGE (f:${L.user_flow} {name: '${esc(uf.name)}', source: '${esc(sid)}'})
 SET f.section = '${esc(uf.section)}', f.step_count = ${uf.step_count},
     f.entry_point = '${esc(uf.entry_point)}',
-    f.steps = '${esc(uf.steps.map(s => s.name).join(" → "))}'
+    f.steps = '${esc(uf.steps.map(s => s.name).join(" → "))}',
+    f.scan_version = '${esc(scanVersion)}'
 WITH f
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_user_flow}]->(f)
@@ -1536,7 +2193,8 @@ SET f.validation_library = '${esc(fp.validation_library)}',
     f.form_library = '${esc(fp.form_library)}',
     f.has_multi_step = ${fp.has_multi_step},
     f.has_file_upload = ${fp.has_file_upload},
-    f.components = '${esc(fp.components.join(", "))}'
+    f.components = '${esc(fp.components.join(", "))}',
+    f.scan_version = '${esc(scanVersion)}'
 WITH f
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_form_pattern}]->(f)
@@ -1550,7 +2208,8 @@ RETURN f.name
     await w(`
 MERGE (s:${L.state_pattern} {component: '${esc(sp.component)}', source: '${esc(sid)}'})
 SET s.type = '${esc(sp.type)}', s.description = '${esc(sp.description)}',
-    s.scope = '${esc(sp.scope)}'
+    s.scope = '${esc(sp.scope)}',
+    s.scan_version = '${esc(scanVersion)}'
 WITH s
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_state_pattern}]->(s)
@@ -1565,7 +2224,8 @@ RETURN s.component
 MERGE (p:${L.pattern} {name: '${esc(p.name)}', source: '${esc(sid)}'})
 SET p.type = '${esc(p.type)}', p.description = '${esc(p.description)}',
     p.evidence = '${esc(p.evidence)}',
-    p.applicable_to = '${esc(p.applicable_to.join(", "))}'
+    p.applicable_to = '${esc(p.applicable_to.join(", "))}',
+    p.scan_version = '${esc(scanVersion)}'
 WITH p
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:${R.has_pattern}]->(p)
@@ -1590,6 +2250,22 @@ MATCH (a:${L.app} {source_id: '${esc(sid)}'})
 MERGE (a)-[:HAS_NAVIGATION]->(n)
 RETURN n.source
     `.trim(), "Navigation");
+  }
+
+  // Cleanup stale nodes from previous scans of this app
+  console.log("[neo4j] Cleaning up stale nodes...");
+  for (const label of [L.feature, L.data_model, L.integration, L.pattern, L.user_flow, L.form_pattern, L.state_pattern, L.api_domain, L.page_section, L.component_group]) {
+    try {
+      const result = await neo4j.runCypher(`
+        MATCH (n:${label} {source: '${esc(sid)}'})
+        WHERE n.scan_version IS NULL OR n.scan_version <> '${esc(scanVersion)}'
+        DETACH DELETE n
+        RETURN count(n) AS deleted
+      `);
+      const deleted = result[0]?.deleted;
+      const count = typeof deleted === "object" ? deleted.low : deleted;
+      if (count > 0) console.log(`  Removed ${count} stale ${label} nodes`);
+    } catch {}
   }
 
   console.log(`\n  Neo4j: ${written} nodes written, ${failed} failed`);

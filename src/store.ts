@@ -41,6 +41,7 @@ export interface JobRecord {
   vetoResults?: VetoResult[];
   fixTrailEntries?: FixTrailEntry[];
   builderRuns?: BuilderRunRecord[];
+  targetPath?: string | null;
   deploymentUrl?: string | null;
   errorMessage?: string | null;
 }

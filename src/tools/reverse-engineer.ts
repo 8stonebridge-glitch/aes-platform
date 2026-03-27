@@ -350,7 +350,7 @@ function inferFeatureDescription(name: string): string {
     flags: "Feature flag management",
     emails: "Email template and delivery",
     sms: "SMS notification service",
-    embed: "Embeddable scheduling widget",
+    "embed-scheduling": "Embeddable scheduling widget",
   };
 
   const lower = name.toLowerCase().replace(/[-_]/g, "");

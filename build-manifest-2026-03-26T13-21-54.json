@@ -1,0 +1,962 @@
+{
+  "intent": "Build a project management tool with billing and team management",
+  "created_at": "2026-03-26T13:21:54.316Z",
+  "features": [
+    {
+      "name": "Authentication",
+      "status": "ready",
+      "donors": [
+        {
+          "app_name": "formbricks",
+          "app_class": "survey_platform",
+          "overall_score": 0.7,
+          "feature_score": 0.771,
+          "model_score": 0.737,
+          "integration_score": 0.71,
+          "pattern_score": 0.692,
+          "matched_features": [
+            "Auth"
+          ],
+          "matched_models": [
+            "Membership",
+            "User"
+          ],
+          "matched_integrations": [
+            "next-auth"
+          ],
+          "matched_patterns": [
+            "SSO/SAML Integration"
+          ],
+          "reuse_suggestions": [
+            "Reuse formbricks's Auth feature (Authentication and authorization)",
+            "Adopt formbricks's User data model (18 fields)",
+            "Adopt formbricks's Membership data model (6 fields)",
+            "Copy formbricks's SSO/SAML Integration pattern"
+          ]
+        },
+        {
+          "app_name": "calcom-monorepo",
+          "app_class": "scheduling_platform",
+          "overall_score": 0.694,
+          "feature_score": 0.771,
+          "model_score": 0.739,
+          "integration_score": 0.672,
+          "pattern_score": 0.699,
+          "matched_features": [
+            "Auth"
+          ],
+          "matched_models": [
+            "Session",
+            "Membership",
+            "UserFeatures",
+            "Credential",
+            "UserPassword",
+            "User"
+          ],
+          "matched_integrations": [
+            "next-auth",
+            "autocheckin",
+            "zohocrm"
+          ],
+          "matched_patterns": [
+            "Passport.js Auth Pattern",
+            "SSO/SAML Integration"
+          ],
+          "reuse_suggestions": [
+            "Reuse calcom-monorepo's Auth feature (Authentication and authorization)",
+            "Adopt calcom-monorepo's UserFeatures data model (8 fields)",
+            "Adopt calcom-monorepo's Session data model (5 fields)",
+            "Adopt calcom-monorepo's Membership data model (14 fields)",
+            "Adopt calcom-monorepo's User data model (9 fields)",
+            "Adopt calcom-monorepo's UserPassword data model (3 fields)",
+            "Adopt calcom-monorepo's Credential data model (22 fields)",
+            "Copy calcom-monorepo's Passport.js Auth Pattern pattern",
+            "Copy calcom-monorepo's SSO/SAML Integration pattern"
+          ]
+        },
+        {
+          "app_name": "logto",
+          "app_class": "auth_platform",
+          "overall_score": 0.584,
+          "feature_score": 0.764,
+          "model_score": 0.732,
+          "integration_score": 0.666,
+          "pattern_score": 0,
+          "matched_features": [
+            "Sign In Experience",
+            "Experience"
+          ],
+          "matched_models": [
+            "UserProfile"
+          ],
+          "matched_integrations": [
+            "connector-logto-social-demo",
+            "connector-oauth2",
+            "connector-saml"
+          ],
+          "matched_patterns": [],
+          "reuse_suggestions": [
+            "Reuse logto's Experience feature (experience module)",
+            "Reuse logto's Experience feature (The register and sign-in experience for end-users.)",
+            "Reuse logto's Sign In Experience feature (sign-in-experience module)",
+            "Adopt logto's UserProfile data model (0 fields)"
+          ]
+        },
+        {
+          "app_name": "novu",
+          "app_class": "notification_platform",
+          "overall_score": 0.564,
+          "feature_score": 0.771,
+          "model_score": 0.758,
+          "integration_score": 0,
+          "pattern_score": 0.702,
+          "matched_features": [
+            "Auth"
+          ],
+          "matched_models": [
+            "Session"
+          ],
+          "matched_integrations": [],
+          "matched_patterns": [
+            "Passport.js Auth Pattern",
+            "Clerk Auth Pattern"
+          ],
+          "reuse_suggestions": [
+            "Reuse novu's Auth feature (Authentication and authorization)",
+            "Reuse novu's Auth feature (Authentication and authorization)",
+            "Adopt novu's Session data model (0 fields)",
+            "Copy novu's Passport.js Auth Pattern pattern",
+            "Copy novu's Clerk Auth Pattern pattern"
+          ]
+        },
+        {
+          "app_name": "-documenso-root",
+          "app_class": "unknown",
+          "overall_score": 0.558,
+          "feature_score": 0.771,
+          "model_score": 0.738,
+          "integration_score": 0,
+          "pattern_score": 0.692,
+          "matched_features": [
+            "Auth"
+          ],
+          "matched_models": [
+            "Session",
+            "OrganisationAuthenticationPortal",
+            "User"
+          ],
+          "matched_integrations": [],
+          "matched_patterns": [
+            "SSO/SAML Integration"
+          ],
+          "reuse_suggestions": [
+            "Reuse -documenso-root's Auth feature",
+            "Adopt -documenso-root's Session data model",
+            "Adopt -documenso-root's OrganisationAuthenticationPortal data model",
+            "Adopt -documenso-root's User data model",
+            "Copy -documenso-root's SSO/SAML Integration pattern"
+          ]
+        }
+      ],
+      "bridge": {
+        "feature_name": "Authentication",
+        "description": "User authentication with login, signup, session management",
+        "scope": {
+          "paths_allowed": [
+            "src/features/auth/",
+            "src/components/auth/",
+            "src/api/auth/"
+          ],
+          "paths_forbidden": [
+            "node_modules/",
+            "dist/",
+            ".env",
+            "src/features/*/internal/"
+          ],
+          "max_files": 20,
+          "max_lines": 2000
+        },
+        "dependencies": [],
+        "donor_reuse": [
+          {
+            "app": "formbricks",
+            "suggestions": [
+              "Reuse formbricks's Auth feature (Authentication and authorization)",
+              "Adopt formbricks's User data model (18 fields)",
+              "Adopt formbricks's Membership data model (6 fields)",
+              "Copy formbricks's SSO/SAML Integration pattern"
+            ]
+          },
+          {
+            "app": "calcom-monorepo",
+            "suggestions": [
+              "Reuse calcom-monorepo's Auth feature (Authentication and authorization)",
+              "Adopt calcom-monorepo's UserFeatures data model (8 fields)",
+              "Adopt calcom-monorepo's Session data model (5 fields)",
+              "Adopt calcom-monorepo's Membership data model (14 fields)",
+              "Adopt calcom-monorepo's User data model (9 fields)",
+              "Adopt calcom-monorepo's UserPassword data model (3 fields)",
+              "Adopt calcom-monorepo's Credential data model (22 fields)",
+              "Copy calcom-monorepo's Passport.js Auth Pattern pattern",
+              "Copy calcom-monorepo's SSO/SAML Integration pattern"
+            ]
+          },
+          {
+            "app": "logto",
+            "suggestions": [
+              "Reuse logto's Experience feature (experience module)",
+              "Reuse logto's Experience feature (The register and sign-in experience for end-users.)",
+              "Reuse logto's Sign In Experience feature (sign-in-experience module)",
+              "Adopt logto's UserProfile data model (0 fields)"
+            ]
+          },
+          {
+            "app": "novu",
+            "suggestions": [
+              "Reuse novu's Auth feature (Authentication and authorization)",
+              "Reuse novu's Auth feature (Authentication and authorization)",
+              "Adopt novu's Session data model (0 fields)",
+              "Copy novu's Passport.js Auth Pattern pattern",
+              "Copy novu's Clerk Auth Pattern pattern"
+            ]
+          },
+          {
+            "app": "-documenso-root",
+            "suggestions": [
+              "Reuse -documenso-root's Auth feature",
+              "Adopt -documenso-root's Session data model",
+              "Adopt -documenso-root's OrganisationAuthenticationPortal data model",
+              "Adopt -documenso-root's User data model",
+              "Copy -documenso-root's SSO/SAML Integration pattern"
+            ]
+          }
+        ],
+        "required_models": [],
+        "required_integrations": [],
+        "confidence": 0.767,
+        "tests": [
+          "test: users can sign up",
+          "test: users can log in",
+          "test: sessions are managed",
+          "test: protected routes require auth"
+        ]
+      },
+      "vetoes": [],
+      "blocking_reason": null,
+      "artifact_state": "execution_ready",
+      "started_at": "2026-03-26T13:21:52.308Z",
+      "completed_at": "2026-03-26T13:21:52.922Z"
+    },
+    {
+      "name": "App Layout & Navigation",
+      "status": "ready",
+      "donors": [
+        {
+          "app_name": "-lobehub-lobehub",
+          "app_class": "unknown",
+          "overall_score": 0.484,
+          "feature_score": 0.714,
+          "model_score": 0,
+          "integration_score": 0.673,
+          "pattern_score": 0.661,
+          "matched_features": [
+            "NavPanel",
+            "NavHeader",
+            "DesktopNavigationBridge",
+            "MobileTabBar"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "lobehub"
+          ],
+          "matched_patterns": [
+            "React Error Boundaries",
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse -lobehub-lobehub's NavPanel feature",
+            "Reuse -lobehub-lobehub's NavHeader feature",
+            "Reuse -lobehub-lobehub's DesktopNavigationBridge feature",
+            "Copy -lobehub-lobehub's React Error Boundaries pattern",
+            "Copy -lobehub-lobehub's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "rocket-chat",
+          "app_class": "chat_platform",
+          "overall_score": 0.483,
+          "feature_score": 0.705,
+          "model_score": 0,
+          "integration_score": 0.677,
+          "pattern_score": 0.671,
+          "matched_features": [
+            "Fuselage Ui Kit"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "ModalProvider"
+          ],
+          "matched_patterns": [
+            "React Error Boundaries"
+          ],
+          "reuse_suggestions": [
+            "Reuse rocket-chat's Fuselage Ui Kit feature (> UiKit elements for Rocket.Chat Apps built under Fuselage design system)",
+            "Copy rocket-chat's React Error Boundaries pattern"
+          ]
+        },
+        {
+          "app_name": "midday",
+          "app_class": "finance_dashboard",
+          "overall_score": 0.478,
+          "feature_score": 0.705,
+          "model_score": 0,
+          "integration_score": 0.668,
+          "pattern_score": 0.652,
+          "matched_features": [
+            "Dashboard"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "@react-email"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse midday's Dashboard feature (dashboard module)",
+            "Copy midday's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "root",
+          "app_class": "unknown",
+          "overall_score": 0.478,
+          "feature_score": 0.705,
+          "model_score": 0,
+          "integration_score": 0.668,
+          "pattern_score": 0.652,
+          "matched_features": [
+            "Dashboard"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "@react-email"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse root's Dashboard feature",
+            "Copy root's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "twenty",
+          "app_class": "crm_platform",
+          "overall_score": 0.476,
+          "feature_score": 0.71,
+          "model_score": 0,
+          "integration_score": 0.668,
+          "pattern_score": 0.626,
+          "matched_features": [
+            "Navigation",
+            "Page Layout",
+            "Dashboard",
+            "Layout Customization"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "@react-email"
+          ],
+          "matched_patterns": [
+            "Role-Based Access Control"
+          ],
+          "reuse_suggestions": [
+            "Reuse twenty's Dashboard feature (Dashboard and analytics views)",
+            "Reuse twenty's Page Layout feature (page-layout module)",
+            "Reuse twenty's Navigation feature (navigation module)",
+            "Reuse twenty's Layout Customization feature (layout-customization module)",
+            "Copy twenty's Role-Based Access Control pattern"
+          ]
+        }
+      ],
+      "bridge": {
+        "feature_name": "App Layout & Navigation",
+        "description": "Shared layout shell with sidebar navigation, responsive design",
+        "scope": {
+          "paths_allowed": [
+            "src/features/layout/",
+            "src/components/layout/",
+            "src/api/layout/"
+          ],
+          "paths_forbidden": [
+            "node_modules/",
+            "dist/",
+            ".env",
+            "src/features/*/internal/"
+          ],
+          "max_files": 20,
+          "max_lines": 2000
+        },
+        "dependencies": [
+          "feat-auth"
+        ],
+        "donor_reuse": [
+          {
+            "app": "-lobehub-lobehub",
+            "suggestions": [
+              "Reuse -lobehub-lobehub's NavPanel feature",
+              "Reuse -lobehub-lobehub's NavHeader feature",
+              "Reuse -lobehub-lobehub's DesktopNavigationBridge feature",
+              "Copy -lobehub-lobehub's React Error Boundaries pattern",
+              "Copy -lobehub-lobehub's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "rocket-chat",
+            "suggestions": [
+              "Reuse rocket-chat's Fuselage Ui Kit feature (> UiKit elements for Rocket.Chat Apps built under Fuselage design system)",
+              "Copy rocket-chat's React Error Boundaries pattern"
+            ]
+          },
+          {
+            "app": "midday",
+            "suggestions": [
+              "Reuse midday's Dashboard feature (dashboard module)",
+              "Copy midday's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "root",
+            "suggestions": [
+              "Reuse root's Dashboard feature",
+              "Copy root's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "twenty",
+            "suggestions": [
+              "Reuse twenty's Dashboard feature (Dashboard and analytics views)",
+              "Reuse twenty's Page Layout feature (page-layout module)",
+              "Reuse twenty's Navigation feature (navigation module)",
+              "Reuse twenty's Layout Customization feature (layout-customization module)",
+              "Copy twenty's Role-Based Access Control pattern"
+            ]
+          }
+        ],
+        "required_models": [],
+        "required_integrations": [],
+        "confidence": 0.7,
+        "tests": [
+          "test: sidebar navigation works",
+          "test: responsive on mobile",
+          "test: auth state reflected in nav"
+        ]
+      },
+      "vetoes": [],
+      "blocking_reason": null,
+      "artifact_state": "execution_ready",
+      "started_at": "2026-03-26T13:21:52.309Z",
+      "completed_at": "2026-03-26T13:21:53.363Z"
+    },
+    {
+      "name": "Project Management",
+      "status": "ready",
+      "donors": [
+        {
+          "app_name": "calcom-monorepo",
+          "app_class": "scheduling_platform",
+          "overall_score": 0.48,
+          "feature_score": 0.706,
+          "model_score": 0,
+          "integration_score": 0.652,
+          "pattern_score": 0.684,
+          "matched_features": [
+            "Features",
+            "CrmManager",
+            "Organizations",
+            "Bookings"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "basecamp3",
+            "hubspot",
+            "pipedrive-crm",
+            "webex",
+            "plausible",
+            "templates"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse calcom-monorepo's Features feature (Cal.com's main collocation of features)",
+            "Reuse calcom-monorepo's Bookings feature (Booking management and scheduling)",
+            "Reuse calcom-monorepo's CrmManager feature (crmManager module)",
+            "Reuse calcom-monorepo's Organizations feature (Organization and team management)",
+            "Copy calcom-monorepo's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "infisical",
+          "app_class": "secrets_management",
+          "overall_score": 0.428,
+          "feature_score": 0.713,
+          "model_score": 0.2,
+          "integration_score": 0.645,
+          "pattern_score": 0,
+          "matched_features": [
+            "Project",
+            "Group Project",
+            "Project Membership",
+            "Project Env",
+            "Project Bot",
+            "Project Role",
+            "Project Key",
+            "Microsoft Teams"
+          ],
+          "matched_models": [
+            "TIntegrationAuthOctopusDeployProjectScopeValuesDTO"
+          ],
+          "matched_integrations": [
+            "teamcity",
+            "azure-devops",
+            "bitbucket",
+            "build-tools",
+            "octopus-deploy",
+            "platforms",
+            "github",
+            "frameworks"
+          ],
+          "matched_patterns": [],
+          "reuse_suggestions": [
+            "Reuse infisical's Project Role feature (project-role module)",
+            "Reuse infisical's Project Membership feature (Team membership and roles)",
+            "Reuse infisical's Project Key feature (project-key module)",
+            "Reuse infisical's Project Env feature (project-env module)",
+            "Reuse infisical's Project Bot feature (project-bot module)",
+            "Reuse infisical's Project feature (project module)",
+            "Reuse infisical's Microsoft Teams feature (Team management)",
+            "Reuse infisical's Group Project feature (group-project module)",
+            "Adopt infisical's TIntegrationAuthOctopusDeployProjectScopeValuesDTO data model (0 fields)"
+          ]
+        },
+        {
+          "app_name": "formbricks",
+          "app_class": "survey_platform",
+          "overall_score": 0.363,
+          "feature_score": 0.762,
+          "model_score": 0,
+          "integration_score": 0,
+          "pattern_score": 0.643,
+          "matched_features": [
+            "Projects"
+          ],
+          "matched_models": [],
+          "matched_integrations": [],
+          "matched_patterns": [
+            "Role-Based Access Control"
+          ],
+          "reuse_suggestions": [
+            "Reuse formbricks's Projects feature (Project management)",
+            "Copy formbricks's Role-Based Access Control pattern"
+          ]
+        },
+        {
+          "app_name": "midday",
+          "app_class": "finance_dashboard",
+          "overall_score": 0.345,
+          "feature_score": 0.702,
+          "model_score": 0,
+          "integration_score": 0,
+          "pattern_score": 0.663,
+          "matched_features": [
+            "Plans"
+          ],
+          "matched_models": [],
+          "matched_integrations": [],
+          "matched_patterns": [
+            "App Store / Plugin Architecture",
+            "Role-Based Access Control"
+          ],
+          "reuse_suggestions": [
+            "Reuse midday's Plans feature (plans module)",
+            "Copy midday's App Store / Plugin Architecture pattern",
+            "Copy midday's Role-Based Access Control pattern"
+          ]
+        },
+        {
+          "app_name": "plane",
+          "app_class": "project_management",
+          "overall_score": 0.344,
+          "feature_score": 0.707,
+          "model_score": 0,
+          "integration_score": 0,
+          "pattern_score": 0.643,
+          "matched_features": [
+            "Propel",
+            "Space",
+            "Shared State",
+            "Codemods",
+            "Live"
+          ],
+          "matched_models": [],
+          "matched_integrations": [],
+          "matched_patterns": [
+            "Role-Based Access Control"
+          ],
+          "reuse_suggestions": [
+            "Reuse plane's Codemods feature (codemods module)",
+            "Reuse plane's Propel feature (propel module)",
+            "Reuse plane's Shared State feature (Shared state shared across multiple apps internally)",
+            "Reuse plane's Live feature (A realtime collaborative server powers Plane's rich text editor)",
+            "Reuse plane's Space feature (space module)",
+            "Copy plane's Role-Based Access Control pattern"
+          ]
+        }
+      ],
+      "bridge": {
+        "feature_name": "Project Management",
+        "description": "Project Management functionality based on 2 discovered features",
+        "scope": {
+          "paths_allowed": [
+            "src/features/project-management/",
+            "src/components/project-management/",
+            "src/api/project-management/"
+          ],
+          "paths_forbidden": [
+            "node_modules/",
+            "dist/",
+            ".env",
+            "src/features/*/internal/"
+          ],
+          "max_files": 15,
+          "max_lines": 1500
+        },
+        "dependencies": [
+          "feat-auth",
+          "feat-layout"
+        ],
+        "donor_reuse": [
+          {
+            "app": "calcom-monorepo",
+            "suggestions": [
+              "Reuse calcom-monorepo's Features feature (Cal.com's main collocation of features)",
+              "Reuse calcom-monorepo's Bookings feature (Booking management and scheduling)",
+              "Reuse calcom-monorepo's CrmManager feature (crmManager module)",
+              "Reuse calcom-monorepo's Organizations feature (Organization and team management)",
+              "Copy calcom-monorepo's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "infisical",
+            "suggestions": [
+              "Reuse infisical's Project Role feature (project-role module)",
+              "Reuse infisical's Project Membership feature (Team membership and roles)",
+              "Reuse infisical's Project Key feature (project-key module)",
+              "Reuse infisical's Project Env feature (project-env module)",
+              "Reuse infisical's Project Bot feature (project-bot module)",
+              "Reuse infisical's Project feature (project module)",
+              "Reuse infisical's Microsoft Teams feature (Team management)",
+              "Reuse infisical's Group Project feature (group-project module)",
+              "Adopt infisical's TIntegrationAuthOctopusDeployProjectScopeValuesDTO data model (0 fields)"
+            ]
+          },
+          {
+            "app": "formbricks",
+            "suggestions": [
+              "Reuse formbricks's Projects feature (Project management)",
+              "Copy formbricks's Role-Based Access Control pattern"
+            ]
+          },
+          {
+            "app": "midday",
+            "suggestions": [
+              "Reuse midday's Plans feature (plans module)",
+              "Copy midday's App Store / Plugin Architecture pattern",
+              "Copy midday's Role-Based Access Control pattern"
+            ]
+          },
+          {
+            "app": "plane",
+            "suggestions": [
+              "Reuse plane's Codemods feature (codemods module)",
+              "Reuse plane's Propel feature (propel module)",
+              "Reuse plane's Shared State feature (Shared state shared across multiple apps internally)",
+              "Reuse plane's Live feature (A realtime collaborative server powers Plane's rich text editor)",
+              "Reuse plane's Space feature (space module)",
+              "Copy plane's Role-Based Access Control pattern"
+            ]
+          }
+        ],
+        "required_models": [
+          "OrganizationProjectIntegration",
+          "ProjectAlertStorage",
+          "ProjectAlert",
+          "TIntegrationAuthOctopusDeployProjectScopeValuesDTO",
+          "ProjectAlertChannel"
+        ],
+        "required_integrations": [],
+        "confidence": 0.833,
+        "tests": [
+          "test: project role works as expected",
+          "test: project role works as expected"
+        ]
+      },
+      "vetoes": [],
+      "blocking_reason": null,
+      "artifact_state": "execution_ready",
+      "started_at": "2026-03-26T13:21:52.309Z",
+      "completed_at": "2026-03-26T13:21:53.847Z"
+    },
+    {
+      "name": "Settings",
+      "status": "ready",
+      "donors": [
+        {
+          "app_name": "calcom-monorepo",
+          "app_class": "scheduling_platform",
+          "overall_score": 0.671,
+          "feature_score": 0.737,
+          "model_score": 0.722,
+          "integration_score": 0.637,
+          "pattern_score": 0.7,
+          "matched_features": [
+            "Settings",
+            "Apps",
+            "Users",
+            "CalVideoSettings"
+          ],
+          "matched_models": [
+            "UserHolidaySettings",
+            "App",
+            "OrganizationSettings",
+            "UserFeatures",
+            "User"
+          ],
+          "matched_integrations": [
+            "autocheckin",
+            "next-auth",
+            "nextcloudtalk"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse calcom-monorepo's Users feature (User management)",
+            "Reuse calcom-monorepo's Settings feature (User and system settings)",
+            "Reuse calcom-monorepo's Apps feature (App/integration management)",
+            "Reuse calcom-monorepo's CalVideoSettings feature (User and system settings)",
+            "Adopt calcom-monorepo's UserHolidaySettings data model (7 fields)",
+            "Adopt calcom-monorepo's UserFeatures data model (8 fields)",
+            "Adopt calcom-monorepo's App data model (11 fields)",
+            "Adopt calcom-monorepo's OrganizationSettings data model (25 fields)",
+            "Adopt calcom-monorepo's User data model (9 fields)",
+            "Copy calcom-monorepo's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "novu",
+          "app_class": "notification_platform",
+          "overall_score": 0.654,
+          "feature_score": 0.726,
+          "model_score": 0.704,
+          "integration_score": 0.624,
+          "pattern_score": 0.661,
+          "matched_features": [
+            "Preferences"
+          ],
+          "matched_models": [
+            "UserPreferencesForm"
+          ],
+          "matched_integrations": [
+            "firebase"
+          ],
+          "matched_patterns": [
+            "Clerk Auth Pattern"
+          ],
+          "reuse_suggestions": [
+            "Reuse novu's Preferences feature (preferences module)",
+            "Adopt novu's UserPreferencesForm data model (1 fields)",
+            "Copy novu's Clerk Auth Pattern pattern"
+          ]
+        },
+        {
+          "app_name": "root",
+          "app_class": "unknown",
+          "overall_score": 0.506,
+          "feature_score": 0.796,
+          "model_score": 0,
+          "integration_score": 0.627,
+          "pattern_score": 0.68,
+          "matched_features": [
+            "Settings"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "notification-local",
+            "firebase"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture",
+            "Clerk Auth Pattern"
+          ],
+          "reuse_suggestions": [
+            "Reuse root's Settings feature",
+            "Copy root's App Store / Plugin Architecture pattern",
+            "Copy root's Clerk Auth Pattern pattern"
+          ]
+        },
+        {
+          "app_name": "medusa",
+          "app_class": "ecommerce_platform",
+          "overall_score": 0.495,
+          "feature_score": 0.756,
+          "model_score": 0,
+          "integration_score": 0.629,
+          "pattern_score": 0.7,
+          "matched_features": [
+            "Settings",
+            "Users"
+          ],
+          "matched_models": [],
+          "matched_integrations": [
+            "notification-local"
+          ],
+          "matched_patterns": [
+            "App Store / Plugin Architecture"
+          ],
+          "reuse_suggestions": [
+            "Reuse medusa's Users feature (User management)",
+            "Reuse medusa's Settings feature (The settings module provides functionality for managing user preferences and con)",
+            "Copy medusa's App Store / Plugin Architecture pattern"
+          ]
+        },
+        {
+          "app_name": "umami",
+          "app_class": "analytics_platform",
+          "overall_score": 0.439,
+          "feature_score": 0.756,
+          "model_score": 0.698,
+          "integration_score": 0,
+          "pattern_score": 0,
+          "matched_features": [
+            "Settings",
+            "Users"
+          ],
+          "matched_models": [
+            "User"
+          ],
+          "matched_integrations": [],
+          "matched_patterns": [],
+          "reuse_suggestions": [
+            "Reuse umami's Settings feature (User and system settings)",
+            "Reuse umami's Users feature (User management)",
+            "Adopt umami's User data model (15 fields)"
+          ]
+        }
+      ],
+      "bridge": {
+        "feature_name": "Settings",
+        "description": "User and app settings management",
+        "scope": {
+          "paths_allowed": [
+            "src/features/settings/",
+            "src/components/settings/",
+            "src/api/settings/"
+          ],
+          "paths_forbidden": [
+            "node_modules/",
+            "dist/",
+            ".env",
+            "src/features/*/internal/"
+          ],
+          "max_files": 10,
+          "max_lines": 800
+        },
+        "dependencies": [
+          "feat-auth"
+        ],
+        "donor_reuse": [
+          {
+            "app": "calcom-monorepo",
+            "suggestions": [
+              "Reuse calcom-monorepo's Users feature (User management)",
+              "Reuse calcom-monorepo's Settings feature (User and system settings)",
+              "Reuse calcom-monorepo's Apps feature (App/integration management)",
+              "Reuse calcom-monorepo's CalVideoSettings feature (User and system settings)",
+              "Adopt calcom-monorepo's UserHolidaySettings data model (7 fields)",
+              "Adopt calcom-monorepo's UserFeatures data model (8 fields)",
+              "Adopt calcom-monorepo's App data model (11 fields)",
+              "Adopt calcom-monorepo's OrganizationSettings data model (25 fields)",
+              "Adopt calcom-monorepo's User data model (9 fields)",
+              "Copy calcom-monorepo's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "novu",
+            "suggestions": [
+              "Reuse novu's Preferences feature (preferences module)",
+              "Adopt novu's UserPreferencesForm data model (1 fields)",
+              "Copy novu's Clerk Auth Pattern pattern"
+            ]
+          },
+          {
+            "app": "root",
+            "suggestions": [
+              "Reuse root's Settings feature",
+              "Copy root's App Store / Plugin Architecture pattern",
+              "Copy root's Clerk Auth Pattern pattern"
+            ]
+          },
+          {
+            "app": "medusa",
+            "suggestions": [
+              "Reuse medusa's Users feature (User management)",
+              "Reuse medusa's Settings feature (The settings module provides functionality for managing user preferences and con)",
+              "Copy medusa's App Store / Plugin Architecture pattern"
+            ]
+          },
+          {
+            "app": "umami",
+            "suggestions": [
+              "Reuse umami's Settings feature (User and system settings)",
+              "Reuse umami's Users feature (User management)",
+              "Adopt umami's User data model (15 fields)"
+            ]
+          }
+        ],
+        "required_models": [],
+        "required_integrations": [],
+        "confidence": 0.7,
+        "tests": [
+          "test: users can update profile",
+          "test: app settings are configurable"
+        ]
+      },
+      "vetoes": [],
+      "blocking_reason": null,
+      "artifact_state": "execution_ready",
+      "started_at": "2026-03-26T13:21:52.309Z",
+      "completed_at": "2026-03-26T13:21:54.315Z"
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "ready": 4,
+    "blocked": 0,
+    "skipped": 0
+  },
+  "build_order": [
+    "feat-auth",
+    "feat-layout",
+    "feat-project-management",
+    "feat-settings"
+  ],
+  "critical_path": [
+    "feat-auth",
+    "feat-layout",
+    "feat-project-management"
+  ],
+  "estimated_complexity": "high"
+}

@@ -14,6 +14,7 @@ import { validatorRunner } from "./nodes/validator-runner.js";
 import { deploymentHandler } from "./nodes/deployment-handler.js";
 import { graphUpdater } from "./nodes/graph-updater.js";
 import { graphReader } from "./nodes/graph-reader.js";
+import { researchNode } from "./nodes/research-node.js";
 import { getJobStore } from "./store.js";
 import { getNeo4jService } from "./services/neo4j-service.js";
 
@@ -56,16 +57,16 @@ function routeAfterClassifier(state: AESStateType): string {
     brief.ambiguity_flags.length === 0 &&
     brief.inferred_risk_class === "low"
   ) {
-    return "decomposer";
+    return "research"; // Research before decomposition
   }
 
-  // Needs confirmation
+  // Needs confirmation first
   return "intent_confirmer";
 }
 
 function routeAfterConfirmer(state: AESStateType): string {
   if (!state.intentConfirmed) return "__end__";
-  return "decomposer";
+  return "research"; // Research before decomposition
 }
 
 function routeAfterSpecValidator(state: AESStateType): string {
@@ -111,6 +112,9 @@ export function buildAESGraph() {
   graph.addNode("intent_classifier", intentClassifier);
   graph.addNode("intent_confirmer", intentConfirmer);
 
+  // Research node (between classification and decomposition)
+  graph.addNode("research", researchNode);
+
   // Gate 1 nodes
   graph.addNode("decomposer", decomposer);
   graph.addNode("spec_validator", specValidator);
@@ -140,6 +144,9 @@ export function buildAESGraph() {
   graph.addEdge("graph_reader", "intent_classifier");
   graph.addConditionalEdges("intent_classifier", routeAfterClassifier);
   graph.addConditionalEdges("intent_confirmer", routeAfterConfirmer);
+
+  // Research → Decomposer
+  graph.addEdge("research", "decomposer");
 
   // Gate 1 routing
   graph.addEdge("decomposer", "spec_validator");
@@ -172,6 +179,7 @@ export async function runGraph(
     requestId: string;
     rawRequest: string;
     currentGate: "gate_0";
+    targetPath?: string | null;
   },
   callbacks: GraphCallbacks
 ): Promise<AESStateType> {
@@ -199,6 +207,7 @@ export async function runGraph(
     requestId: input.requestId,
     rawRequest: input.rawRequest,
     currentGate: input.currentGate,
+    targetPath: input.targetPath ?? null,
     durability: store.hasPersistence() ? "memory_only" : "memory_only",
     createdAt: new Date().toISOString(),
   });
@@ -211,6 +220,7 @@ export async function runGraph(
     requestId: input.requestId,
     rawRequest: input.rawRequest,
     currentGate: "gate_0",
+    targetPath: input.targetPath ?? null,
   });
 
   // Update store with final state

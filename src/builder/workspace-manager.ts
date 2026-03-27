@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -14,15 +14,24 @@ export class WorkspaceManager {
 
   /**
    * Create an isolated workspace for a feature build.
+   * If targetPath is provided, writes into that directory instead of a temp dir.
    * Uses a temp directory with git init — fully isolated from any real repo.
    */
-  createWorkspace(jobId: string, featureName: string): Workspace {
+  createWorkspace(jobId: string, featureName: string, targetPath?: string | null): Workspace {
     const slug = featureName.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 40);
     const branch = `aes/${jobId}/${slug}`;
     const workspaceId = `ws-${jobId}-${slug}`;
 
-    // Create temp directory
-    const basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+    // Use target path if provided, otherwise create temp directory
+    let basePath: string;
+    if (targetPath) {
+      basePath = targetPath;
+      if (!existsSync(basePath)) {
+        mkdirSync(basePath, { recursive: true });
+      }
+    } else {
+      basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+    }
 
     // Initialize git repo
     execSync("git init", { cwd: basePath, stdio: "pipe" });

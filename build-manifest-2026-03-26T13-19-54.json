@@ -1,0 +1,97 @@
+{
+  "intent": "Build a project management tool with billing and team management",
+  "created_at": "2026-03-26T13:19:54.906Z",
+  "features": [
+    {
+      "name": "App Layout & Navigation",
+      "status": "blocked",
+      "donors": [],
+      "bridge": null,
+      "vetoes": [],
+      "blocking_reason": "Dependency not ready: feat-auth",
+      "artifact_state": "raw",
+      "started_at": "2026-03-26T13:19:54.903Z",
+      "completed_at": "2026-03-26T13:19:54.904Z"
+    },
+    {
+      "name": "Auth",
+      "status": "skipped",
+      "donors": [],
+      "bridge": null,
+      "vetoes": [],
+      "blocking_reason": "Hard dependency BLOCKED: feat-layout",
+      "artifact_state": "raw",
+      "started_at": "2026-03-26T13:19:54.904Z",
+      "completed_at": "2026-03-26T13:19:54.904Z"
+    },
+    {
+      "name": "Project Management",
+      "status": "skipped",
+      "donors": [],
+      "bridge": null,
+      "vetoes": [],
+      "blocking_reason": "Hard dependency BLOCKED: feat-layout",
+      "artifact_state": "raw",
+      "started_at": "2026-03-26T13:19:54.904Z",
+      "completed_at": "2026-03-26T13:19:54.904Z"
+    },
+    {
+      "name": "Settings",
+      "status": "ready",
+      "donors": [],
+      "bridge": {
+        "feature_name": "Settings",
+        "description": "User and app settings management",
+        "scope": {
+          "paths_allowed": [
+            "src/features/settings/",
+            "src/components/settings/",
+            "src/api/settings/"
+          ],
+          "paths_forbidden": [
+            "node_modules/",
+            "dist/",
+            ".env",
+            "src/features/*/internal/"
+          ],
+          "max_files": 10,
+          "max_lines": 800
+        },
+        "dependencies": [
+          "feat-auth"
+        ],
+        "donor_reuse": [],
+        "required_models": [],
+        "required_integrations": [],
+        "confidence": 0.595,
+        "tests": [
+          "test: users can update profile",
+          "test: app settings are configurable"
+        ]
+      },
+      "vetoes": [],
+      "blocking_reason": null,
+      "artifact_state": "validated",
+      "started_at": "2026-03-26T13:19:54.904Z",
+      "completed_at": "2026-03-26T13:19:54.906Z"
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "ready": 1,
+    "blocked": 1,
+    "skipped": 2
+  },
+  "build_order": [
+    "feat-layout",
+    "feat-auth",
+    "feat-project-management",
+    "feat-settings"
+  ],
+  "critical_path": [
+    "feat-layout",
+    "feat-auth",
+    "feat-project-management"
+  ],
+  "estimated_complexity": "high"
+}

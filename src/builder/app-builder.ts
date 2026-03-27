@@ -255,6 +255,7 @@ export class AppBuilder {
     featureBridges: Record<string, any>,
     featureBuildOrder: string[],
     callbacks?: GraphCallbacks | null,
+    targetPath?: string | null,
   ): Promise<AppBuildResult> {
     const runId = `br-app-${randomUUID().substring(0, 8)}`;
     const startTime = Date.now();
@@ -262,7 +263,7 @@ export class AppBuilder {
 
     // 1. Create ONE shared workspace for the entire app
     const appSlug = toSlug(appSpec?.title || "app");
-    const workspace = this.workspaceManager.createWorkspace(jobId, appSlug);
+    const workspace = this.workspaceManager.createWorkspace(jobId, appSlug, targetPath);
 
     callbacks?.onStep("Created shared workspace for the entire application");
 

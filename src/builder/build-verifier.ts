@@ -4,6 +4,7 @@ import { CURRENT_SCHEMA_VERSION, GateErrorCode } from "../types/artifacts.js";
 import { randomUUID } from "node:crypto";
 import { validateCatalogUsage, type CatalogValidatorResult } from "../validators/catalog-usage-validator.js";
 import { validateComposition, type CompositionValidatorResult } from "../validators/composition-validator.js";
+import type { KGFactValidatorResult } from "../validators/kg-fact-validator.js";
 
 export interface VerificationResult {
   passed: boolean;
@@ -13,6 +14,8 @@ export interface VerificationResult {
   fix_trail_entries: FixTrailEntry[];
   catalog_validation?: CatalogValidatorResult;
   composition_validation?: CompositionValidatorResult;
+  /** KG fact validation — checks builder claims against knowledge graph */
+  kg_fact_validation?: KGFactValidatorResult;
 }
 
 export function verifyBuild(

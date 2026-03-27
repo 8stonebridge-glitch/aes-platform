@@ -13,6 +13,12 @@ export const AESState = Annotation.Root({
   jobId: Annotation<string>,
   requestId: Annotation<string>,
 
+  // Target output path — where the built app files go
+  targetPath: Annotation<string | null>({
+    value: lastValue,
+    default: () => null,
+  }),
+
   // Current phase
   currentGate: Annotation<
     | "gate_0"
@@ -109,6 +115,14 @@ export const AESState = Annotation.Root({
     knownPatterns: any[];
     failureHistory: any[];
     reusableBridges: any[];
+    // Learned knowledge layer (from codebase scanning + Perplexity research)
+    learnedFeatures: any[];
+    learnedModels: any[];
+    learnedIntegrations: any[];
+    learnedPatterns: any[];
+    learnedFlows: any[];
+    learnedResearch: any[];
+    learnedCorrections: any[];
   }>({
     value: lastValue,
     default: () => ({
@@ -117,6 +131,13 @@ export const AESState = Annotation.Root({
       knownPatterns: [],
       failureHistory: [],
       reusableBridges: [],
+      learnedFeatures: [],
+      learnedModels: [],
+      learnedIntegrations: [],
+      learnedPatterns: [],
+      learnedFlows: [],
+      learnedResearch: [],
+      learnedCorrections: [],
     }),
   }),
 

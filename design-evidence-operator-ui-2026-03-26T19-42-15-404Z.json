@@ -1,0 +1,726 @@
+{
+  "evidence_id": "design-aes-operator-ui-001",
+  "source": {
+    "type": "paper",
+    "ref": "Diligent ink",
+    "name": "AES Operator UI",
+    "artboard_ids": [
+      "01-intent-input",
+      "02-active-build",
+      "03-knowledge-graph"
+    ],
+    "artboard_count": 3
+  },
+  "screens": [
+    {
+      "screen_id": "screen-intent-input",
+      "name": "Intent Input",
+      "purpose": "Landing state where the user describes what they want to build. Single text area with Start button.",
+      "artboard_ref": "01-intent-input",
+      "dimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "is_overlay": false,
+      "regions": [
+        {
+          "name": "Sidebar",
+          "purpose": "Navigation and health status",
+          "component_ids": [
+            "comp-sidebar-nav",
+            "comp-health-indicator"
+          ]
+        },
+        {
+          "name": "Main Content",
+          "purpose": "Centered intent input form",
+          "component_ids": [
+            "comp-intent-input"
+          ]
+        }
+      ],
+      "component_ids": [
+        "comp-sidebar-nav",
+        "comp-health-indicator",
+        "comp-intent-input"
+      ],
+      "data_view_ids": [],
+      "form_ids": [
+        "form-intent"
+      ],
+      "action_ids": [
+        "action-start-build"
+      ],
+      "state_ids": [
+        "state-idle",
+        "state-disconnected"
+      ]
+    },
+    {
+      "screen_id": "screen-active-build",
+      "name": "Active Build",
+      "purpose": "Shows the AES pipeline in motion — thinking line, stage rail, feature cards, dependency graph, and activity timeline.",
+      "artboard_ref": "02-active-build",
+      "dimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "is_overlay": false,
+      "regions": [
+        {
+          "name": "Sidebar",
+          "purpose": "Navigation and health status",
+          "component_ids": [
+            "comp-sidebar-nav",
+            "comp-health-indicator"
+          ]
+        },
+        {
+          "name": "Thinking Line",
+          "purpose": "Human-readable status of what AES is doing right now",
+          "component_ids": [
+            "comp-thinking-line"
+          ]
+        },
+        {
+          "name": "Pipeline Content",
+          "purpose": "Stage rail, feature cards, dependency graph",
+          "component_ids": [
+            "comp-stage-rail",
+            "comp-feature-card",
+            "comp-dependency-graph"
+          ]
+        },
+        {
+          "name": "Activity Sidebar",
+          "purpose": "Chronological event timeline",
+          "component_ids": [
+            "comp-activity-timeline"
+          ]
+        }
+      ],
+      "component_ids": [
+        "comp-sidebar-nav",
+        "comp-health-indicator",
+        "comp-thinking-line",
+        "comp-stage-rail",
+        "comp-feature-card",
+        "comp-dependency-graph",
+        "comp-activity-timeline",
+        "comp-gate-controls"
+      ],
+      "data_view_ids": [
+        "view-feature-cards",
+        "view-dependency-graph"
+      ],
+      "form_ids": [],
+      "action_ids": [
+        "action-approve-plan",
+        "action-abort-build"
+      ],
+      "state_ids": [
+        "state-researching",
+        "state-decomposing",
+        "state-promoting",
+        "state-building",
+        "state-verifying",
+        "state-blocked",
+        "state-failed",
+        "state-complete"
+      ]
+    },
+    {
+      "screen_id": "screen-knowledge-graph",
+      "name": "Knowledge Graph",
+      "purpose": "Interactive visualization of the knowledge graph with search and color-coded node types.",
+      "artboard_ref": "03-knowledge-graph",
+      "dimensions": {
+        "width": 1440,
+        "height": 900
+      },
+      "is_overlay": false,
+      "regions": [
+        {
+          "name": "Sidebar",
+          "purpose": "Navigation and health status",
+          "component_ids": [
+            "comp-sidebar-nav",
+            "comp-health-indicator"
+          ]
+        },
+        {
+          "name": "Graph Header",
+          "purpose": "Title, stats, search, legend",
+          "component_ids": [
+            "comp-graph-search",
+            "comp-graph-legend"
+          ]
+        },
+        {
+          "name": "Graph Canvas",
+          "purpose": "Interactive node-edge visualization",
+          "component_ids": [
+            "comp-knowledge-graph"
+          ]
+        }
+      ],
+      "component_ids": [
+        "comp-sidebar-nav",
+        "comp-health-indicator",
+        "comp-graph-search",
+        "comp-graph-legend",
+        "comp-knowledge-graph"
+      ],
+      "data_view_ids": [
+        "view-knowledge-graph"
+      ],
+      "form_ids": [],
+      "action_ids": [
+        "action-search-graph"
+      ],
+      "state_ids": [
+        "state-graph-loading",
+        "state-graph-error"
+      ]
+    }
+  ],
+  "navigation": {
+    "primary_items": [
+      {
+        "label": "Builds",
+        "target_screen_id": "screen-intent-input",
+        "icon": "amber-dot",
+        "level": "primary"
+      },
+      {
+        "label": "Graph",
+        "target_screen_id": "screen-knowledge-graph",
+        "icon": "circle-outline",
+        "level": "primary"
+      },
+      {
+        "label": "History",
+        "target_screen_id": "screen-history",
+        "icon": "clock",
+        "level": "primary"
+      }
+    ],
+    "secondary_items": [],
+    "edges": [
+      {
+        "from_screen_id": "screen-intent-input",
+        "to_screen_id": "screen-active-build",
+        "trigger": "Submit intent via Start button",
+        "label": "Start Build"
+      },
+      {
+        "from_screen_id": "screen-active-build",
+        "to_screen_id": "screen-knowledge-graph",
+        "trigger": "Click Graph tab in sidebar",
+        "label": "Graph"
+      },
+      {
+        "from_screen_id": "screen-knowledge-graph",
+        "to_screen_id": "screen-active-build",
+        "trigger": "Click Builds tab in sidebar",
+        "label": "Builds"
+      },
+      {
+        "from_screen_id": "screen-intent-input",
+        "to_screen_id": "screen-knowledge-graph",
+        "trigger": "Click Graph tab in sidebar",
+        "label": "Graph"
+      }
+    ]
+  },
+  "components": [
+    {
+      "component_id": "comp-sidebar-nav",
+      "name": "Sidebar Navigation",
+      "category": "navigation",
+      "purpose": "220px wide sidebar with logo, 3 nav items (Builds, Graph, History), and health indicator at bottom.",
+      "screen_ids": [
+        "screen-intent-input",
+        "screen-active-build",
+        "screen-knowledge-graph"
+      ],
+      "visible_props": [
+        "activeTab"
+      ],
+      "children": [
+        "comp-health-indicator"
+      ],
+      "interactions": [
+        "click"
+      ]
+    },
+    {
+      "component_id": "comp-health-indicator",
+      "name": "Health Indicator",
+      "category": "status",
+      "purpose": "Green/amber/red dot + record count text at bottom of sidebar.",
+      "screen_ids": [
+        "screen-intent-input",
+        "screen-active-build",
+        "screen-knowledge-graph"
+      ],
+      "visible_props": [
+        "status",
+        "recordCount",
+        "pendingEscalations"
+      ],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-intent-input",
+      "name": "Intent Input",
+      "category": "form",
+      "purpose": "Centered card with heading, textarea (560px), and Start button.",
+      "screen_ids": [
+        "screen-intent-input"
+      ],
+      "visible_props": [
+        "disabled",
+        "onSubmit"
+      ],
+      "children": [],
+      "interactions": [
+        "type",
+        "submit"
+      ]
+    },
+    {
+      "component_id": "comp-thinking-line",
+      "name": "Thinking Line",
+      "category": "feedback",
+      "purpose": "Amber pulse dot + human-readable text. Text cross-fades on update.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "text",
+        "phase"
+      ],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-stage-rail",
+      "name": "Stage Rail",
+      "category": "feedback",
+      "purpose": "5 stages as circles. Done=green, active=amber, future=gray.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "activeStage",
+        "completedStages",
+        "featureCounts"
+      ],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-feature-card",
+      "name": "Feature Card",
+      "category": "data_display",
+      "purpose": "220px card with feature name, status badge, and dependency list.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "feature",
+        "stage"
+      ],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-dependency-graph",
+      "name": "Dependency Graph",
+      "category": "data_display",
+      "purpose": "Horizontal node-edge diagram showing feature build order.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "features"
+      ],
+      "children": [],
+      "interactions": [
+        "click",
+        "hover"
+      ]
+    },
+    {
+      "component_id": "comp-activity-timeline",
+      "name": "Activity Timeline",
+      "category": "data_display",
+      "purpose": "260px right sidebar. Vertical timeline with colored dots.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "events"
+      ],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-gate-controls",
+      "name": "Gate Controls",
+      "category": "action",
+      "purpose": "Amber banner at approve stage. Approve Plan button.",
+      "screen_ids": [
+        "screen-active-build"
+      ],
+      "visible_props": [
+        "featureCount",
+        "onApprove"
+      ],
+      "children": [],
+      "interactions": [
+        "click"
+      ]
+    },
+    {
+      "component_id": "comp-graph-search",
+      "name": "Graph Search",
+      "category": "form",
+      "purpose": "220px text input. Filters graph nodes by label.",
+      "screen_ids": [
+        "screen-knowledge-graph"
+      ],
+      "visible_props": [
+        "value",
+        "onChange"
+      ],
+      "children": [],
+      "interactions": [
+        "type"
+      ]
+    },
+    {
+      "component_id": "comp-graph-legend",
+      "name": "Graph Legend",
+      "category": "data_display",
+      "purpose": "Horizontal row of colored dots with labels: App, Feature, Model, Integration, UI Pattern.",
+      "screen_ids": [
+        "screen-knowledge-graph"
+      ],
+      "visible_props": [],
+      "children": [],
+      "interactions": []
+    },
+    {
+      "component_id": "comp-knowledge-graph",
+      "name": "Knowledge Graph Viewer",
+      "category": "data_display",
+      "purpose": "Full-width canvas with interactive node-edge visualization.",
+      "screen_ids": [
+        "screen-knowledge-graph"
+      ],
+      "visible_props": [
+        "graphData",
+        "searchQuery"
+      ],
+      "children": [],
+      "interactions": [
+        "click",
+        "hover",
+        "drag",
+        "zoom"
+      ]
+    }
+  ],
+  "data_views": [
+    {
+      "view_id": "view-feature-cards",
+      "name": "Feature Cards Grid",
+      "type": "card_grid",
+      "screen_id": "screen-active-build",
+      "columns": [
+        {
+          "name": "name",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "stage",
+          "type": "status",
+          "sortable": false,
+          "filterable": true
+        },
+        {
+          "name": "dependencies",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        }
+      ],
+      "implied_model": "OrchestratorFeature",
+      "capabilities": [
+        "filter"
+      ],
+      "row_actions": [],
+      "bulk_actions": []
+    },
+    {
+      "view_id": "view-dependency-graph",
+      "name": "Dependency Graph",
+      "type": "chart",
+      "screen_id": "screen-active-build",
+      "columns": [
+        {
+          "name": "feature_id",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "dependencies",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "stage",
+          "type": "status",
+          "sortable": false,
+          "filterable": false
+        }
+      ],
+      "implied_model": "OrchestratorFeature",
+      "capabilities": [],
+      "row_actions": [],
+      "bulk_actions": []
+    },
+    {
+      "view_id": "view-knowledge-graph",
+      "name": "Knowledge Graph",
+      "type": "chart",
+      "screen_id": "screen-knowledge-graph",
+      "columns": [
+        {
+          "name": "id",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "label",
+          "type": "text",
+          "sortable": false,
+          "filterable": true
+        },
+        {
+          "name": "type",
+          "type": "status",
+          "sortable": false,
+          "filterable": true
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        },
+        {
+          "name": "target",
+          "type": "text",
+          "sortable": false,
+          "filterable": false
+        }
+      ],
+      "implied_model": "GraphNode",
+      "capabilities": [
+        "search",
+        "filter"
+      ],
+      "row_actions": [],
+      "bulk_actions": []
+    }
+  ],
+  "forms": [
+    {
+      "form_id": "form-intent",
+      "name": "Intent Form",
+      "screen_id": "screen-intent-input",
+      "fields": [
+        {
+          "name": "intent-text",
+          "label": "What do you want to build?",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "A project management tool with team workspaces, kanban boards, and billing..."
+        }
+      ],
+      "submit_label": "Start",
+      "is_multi_step": false,
+      "has_validation": true
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "action-start-build",
+      "label": "Start Build",
+      "type": "submit",
+      "screen_id": "screen-intent-input",
+      "element": "button",
+      "is_destructive": false,
+      "is_primary": true,
+      "target_screen_id": "screen-active-build",
+      "implied_operation": "POST /api/app/intake"
+    },
+    {
+      "action_id": "action-approve-plan",
+      "label": "Approve Plan",
+      "type": "confirm",
+      "screen_id": "screen-active-build",
+      "element": "button",
+      "is_destructive": false,
+      "is_primary": true,
+      "implied_operation": "POST /api/app/:id/promote"
+    },
+    {
+      "action_id": "action-abort-build",
+      "label": "Abort Build",
+      "type": "delete",
+      "screen_id": "screen-active-build",
+      "element": "button",
+      "is_destructive": true,
+      "is_primary": false,
+      "implied_operation": "POST /api/builds/:id/abort-builder"
+    },
+    {
+      "action_id": "action-search-graph",
+      "label": "Search Graph",
+      "type": "filter",
+      "screen_id": "screen-knowledge-graph",
+      "element": "button",
+      "is_destructive": false,
+      "is_primary": false,
+      "implied_operation": "client-side filter on GET /api/graph/visualize"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "state-idle",
+      "type": "empty",
+      "screen_id": "screen-intent-input",
+      "description": "No build active. Showing intent input.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-disconnected",
+      "type": "offline",
+      "screen_id": "screen-intent-input",
+      "description": "Neo4j offline. Health dot red. Start button disabled.",
+      "explicit": true,
+      "recovery_action": "Check Neo4j connection"
+    },
+    {
+      "state_id": "state-researching",
+      "type": "loading",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: researching patterns. Stage rail: Research active.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-decomposing",
+      "type": "loading",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: breaking into features. Stage rail: Plan active.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-promoting",
+      "type": "approval_pending",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: checking gates. Gate controls visible.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-building",
+      "type": "loading",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: building feature X. Stage rail: Build active.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-verifying",
+      "type": "loading",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: running validators. Stage rail: Verify active.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-blocked",
+      "type": "blocked",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: blocked, needs input.",
+      "explicit": true,
+      "recovery_action": "Resolve blocker in governance queue"
+    },
+    {
+      "state_id": "state-failed",
+      "type": "error",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: feature failed. Feature card red border.",
+      "explicit": true,
+      "recovery_action": "Retry or abort build"
+    },
+    {
+      "state_id": "state-complete",
+      "type": "success",
+      "screen_id": "screen-active-build",
+      "description": "Thinking line: all features built. All stage dots green.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-graph-loading",
+      "type": "loading",
+      "screen_id": "screen-knowledge-graph",
+      "description": "Loading knowledge graph text centered in canvas.",
+      "explicit": true
+    },
+    {
+      "state_id": "state-graph-error",
+      "type": "error",
+      "screen_id": "screen-knowledge-graph",
+      "description": "Error message with retry button in canvas.",
+      "explicit": true,
+      "recovery_action": "Retry graph load"
+    }
+  ],
+  "layout": {
+    "pattern": "sidebar_main",
+    "responsive_notes": [
+      "Desktop only for MVP (1440px). No responsive breakpoints."
+    ],
+    "sidebar": {
+      "position": "left",
+      "collapsible": false,
+      "width_hint": "220px"
+    },
+    "content": {
+      "padding": "32px"
+    }
+  },
+  "extraction_meta": {
+    "confidence": 0.95,
+    "artboards_analyzed": 3,
+    "nodes_traversed": 0,
+    "warnings": [],
+    "duration_ms": 0
+  },
+  "extracted_at": "2026-03-26T19:42:13.199Z"
+}

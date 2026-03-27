@@ -162,6 +162,7 @@ export interface LearnedUI {
   user_flows: LearnedUserFlow[];
   form_patterns: LearnedFormPattern[];
   state_patterns: LearnedStatePattern[];
+  component_patterns?: { name: string; category: string; props: string[]; child_components: string[]; uses_state: boolean; uses_effects: boolean; line_count: number; file_path: string }[];
 }
 
 // Design System
