@@ -468,6 +468,104 @@ app.get("/api/governance/pending", (_req, res) => {
 
 // ─── Health check ──────────────────────────────────────────────────
 
+// ─── Graph Visualize — returns nodes + edges for the operator UI ────
+
+app.get("/api/graph/visualize", async (req, res) => {
+  const mode = (req.query.mode as string) || "full";
+  const limit = Math.min(parseInt(req.query.limit as string) || 220, 500);
+
+  try {
+    const { getNeo4jService } = await import("../services/neo4j-service.js");
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+
+    if (!ok) {
+      return res.json({
+        nodes: [],
+        edges: [],
+        total_nodes: 0,
+        total_edges: 0,
+        mode,
+        error: "Cannot connect to Neo4j",
+      });
+    }
+
+    // Fetch nodes — LearnedApp + their features, models, integrations
+    let nodeQuery: string;
+    if (mode === "feature") {
+      nodeQuery = `
+        MATCH (n)
+        WHERE n:LearnedFeature OR n:LearnedApp OR n:CatalogEntry
+        RETURN elementId(n) AS id, labels(n)[0] AS type, coalesce(n.name, n.feature_id, n.id) AS label,
+               properties(n) AS props
+        ORDER BY type, label
+        LIMIT ${limit}
+      `;
+    } else {
+      nodeQuery = `
+        MATCH (n)
+        WHERE n:LearnedApp OR n:LearnedFeature OR n:LearnedDataModel
+           OR n:LearnedIntegration OR n:LearnedPattern OR n:CatalogEntry
+           OR n:LearnedUserFlow OR n:LearnedComponentGroup
+        RETURN elementId(n) AS id, labels(n)[0] AS type, coalesce(n.name, n.feature_id, n.id) AS label,
+               properties(n) AS props
+        ORDER BY type, label
+        LIMIT ${limit}
+      `;
+    }
+
+    const nodeRecords = await neo4j.runCypher(nodeQuery);
+    const nodeIds = new Set<string>();
+    const nodes = nodeRecords.map((r: any) => {
+      const id = String(r.id);
+      nodeIds.add(id);
+      return {
+        id,
+        label: r.label || "unknown",
+        type: r.type || "Unknown",
+        properties: r.props || {},
+      };
+    });
+
+    // Fetch edges between the returned nodes
+    const edgeQuery = `
+      MATCH (a)-[r]->(b)
+      WHERE elementId(a) IN $ids AND elementId(b) IN $ids
+      RETURN elementId(a) AS source, elementId(b) AS target, type(r) AS type
+      LIMIT ${limit * 3}
+    `;
+    const edgeRecords = await neo4j.runCypher(edgeQuery, { ids: [...nodeIds] });
+    const edges = edgeRecords.map((r: any) => ({
+      source: String(r.source),
+      target: String(r.target),
+      type: r.type || "RELATED",
+    }));
+
+    // Get totals
+    const countResult = await neo4j.runCypher("MATCH (n) RETURN count(n) AS cnt");
+    const edgeCountResult = await neo4j.runCypher("MATCH ()-[r]->() RETURN count(r) AS cnt");
+    const totalNodes = countResult[0]?.cnt?.toNumber?.() || Number(countResult[0]?.cnt) || 0;
+    const totalEdges = edgeCountResult[0]?.cnt?.toNumber?.() || Number(edgeCountResult[0]?.cnt) || 0;
+
+    res.json({
+      nodes,
+      edges,
+      total_nodes: totalNodes,
+      total_edges: totalEdges,
+      mode,
+    });
+  } catch (err: any) {
+    res.json({
+      nodes: [],
+      edges: [],
+      total_nodes: 0,
+      total_edges: 0,
+      mode,
+      error: err.message,
+    });
+  }
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", version: "v12", math_layer: true });
 });
