@@ -641,7 +641,7 @@ export async function bridgeCompiler(
   });
 
   const ranked = rankPriorities(candidates);
-  cb?.onStep(`Priority ranking: ${ranked.filter(r => !r.is_blocked).map(r => `${r.rank}. ${r.name} (${(r.score * 100).toFixed(0)}%)`).join(", ")}`);
+  cb?.onStep(`Priority ranking: ${ranked.filter((r: any) => !r.is_blocked).map((r: any) => `${r.rank}. ${r.name} (${(r.score * 100).toFixed(0)}%)`).join(", ")}`);
 
   store.addLog(state.jobId, {
     gate: "gate_2",

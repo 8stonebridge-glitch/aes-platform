@@ -3,16 +3,16 @@
   "version": "0.1.0",
   "type": "module",
   "description": "AES v12 LangGraph.js orchestrator and operator UI",
-  "main": "dist/graph.js",
+  "main": "dist/src/graph.js",
   "bin": {
-    "aes": "dist/cli/index.js"
+    "aes": "dist/src/cli/index.js"
   },
   "scripts": {
     "build": "npm run build --prefix packages/math && tsc",
     "dev": "tsc --watch",
-    "aes": "node dist/cli/index.js",
-    "start": "node dist/api/index.js",
-    "start:api": "node dist/api/index.js",
+    "aes": "node dist/src/cli/index.js",
+    "start": "node dist/src/api/index.js",
+    "start:api": "node dist/src/api/index.js",
     "test": "vitest run",
     "verify": "tsc --noEmit",
     "paperclip": "tsx paperclip/aes-agent.ts"

@@ -242,7 +242,7 @@ export async function vetoChecker(
       bridge.status = "blocked";
       const allReasons = [
         ...triggered.map((v) => `${v.code}: ${v.reason}`),
-        ...mathVetoResult.blocking_codes.map((c) => `MATH:${c}`),
+        ...mathVetoResult.blocking_codes.map((c: string) => `MATH:${c}`),
       ];
       bridge.blocked_reason = allReasons.join("; ");
       anyBlocked = true;
