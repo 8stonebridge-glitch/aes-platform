@@ -184,6 +184,7 @@ export async function runGraph(
     currentGate: "gate_0";
     targetPath?: string | null;
     deployTarget?: "local" | "cloudflare";
+    designMode?: "auto" | "paper";
   },
   callbacks: GraphCallbacks
 ): Promise<AESStateType> {
@@ -227,6 +228,7 @@ export async function runGraph(
     currentGate: "gate_0",
     targetPath: input.targetPath ?? null,
     deployTarget: input.deployTarget ?? "local",
+    designMode: input.designMode ?? "auto",
   });
 
   // Update store with final state

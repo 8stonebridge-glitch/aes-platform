@@ -85,7 +85,7 @@ function broadcastToJob(jobId: string, event: string, data: any) {
 // ─── POST /api/build — Start a new build ───────────────────────────
 
 app.post("/api/build", async (req, res) => {
-  const { intent, targetPath, deployTarget } = req.body;
+  const { intent, targetPath, deployTarget, designMode } = req.body;
   if (!intent || typeof intent !== "string") {
     res.status(400).json({ error: "intent is required" });
     return;
@@ -153,7 +153,7 @@ app.post("/api/build", async (req, res) => {
 
   try {
     const result = await runGraph(
-      { jobId, requestId, rawRequest: intent, currentGate: "gate_0", targetPath: resolvedTargetPath, deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local" },
+      { jobId, requestId, rawRequest: intent, currentGate: "gate_0", targetPath: resolvedTargetPath, deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local", designMode: designMode === "paper" ? "paper" : "auto" },
       callbacks
     );
     broadcastToJob(jobId, "complete", {

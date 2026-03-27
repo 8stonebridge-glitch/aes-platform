@@ -65,7 +65,31 @@ export async function designer(
     return {};
   }
 
-  cb?.onStep("Auto-generating design evidence from AppSpec...");
+  // ─── Paper MCP path: generate brief and pause for operator ───
+  if (state.designMode === "paper") {
+    cb?.onStep("Design mode: Paper MCP — generating design brief for operator...");
+
+    const brief = generateDesignBrief(state.appSpec, state.intentBrief);
+
+    store.addLog(state.jobId, {
+      gate: "gate_1",
+      message: `Designer: Paper MCP mode — brief generated with ${brief.screens.length} screens across ${brief.directions.length} directions. Waiting for operator.`,
+    });
+
+    cb?.onPause(
+      `Design brief ready — ${brief.screens.length} screens, ${brief.directions.length} directions. ` +
+      `Open Paper, create the designs, then extract with: npx tsx src/tools/design-extract.ts --paper --persist`
+    );
+
+    return {
+      designBrief: brief,
+      needsUserInput: true,
+      userInputPrompt: "Design brief is ready. Create designs in Paper MCP, extract evidence, then resume the pipeline.",
+    };
+  }
+
+  // ─── Auto path: generate evidence directly ───
+  cb?.onStep("Design mode: auto — generating design evidence from AppSpec...");
 
   let designEvidence: DesignEvidence;
 
@@ -496,4 +520,149 @@ function addStates(states: DesignState[], screenId: string): void {
       recovery_action: st.recovery,
     });
   }
+}
+
+// ─── Design brief generator (Paper MCP path) ─────────────────────
+
+interface DesignDirection {
+  name: string;
+  description: string;
+  layout: string;
+  color_mood: string;
+  density: string;
+  typography: string;
+}
+
+interface DesignBrief {
+  app_title: string;
+  app_class: string;
+  target_users: string[];
+  platforms: string[];
+  screens: Array<{
+    screen_id: string;
+    name: string;
+    purpose: string;
+    key_components: string[];
+    data_views: string[];
+    forms: string[];
+    actions: string[];
+    states: string[];
+  }>;
+  directions: DesignDirection[];
+  navigation: {
+    pattern: string;
+    primary_items: string[];
+  };
+  constraints: {
+    must_have_states: string[];
+    destructive_actions: string[];
+    auth_screens: string[];
+  };
+}
+
+function generateDesignBrief(appSpec: any, intentBrief: any): DesignBrief {
+  const features = appSpec.features || [];
+  const screens: DesignBrief["screens"] = [];
+  const destructiveActions: string[] = [];
+  const authScreens: string[] = [];
+
+  // Always include dashboard
+  screens.push({
+    screen_id: "screen-dashboard",
+    name: "Dashboard",
+    purpose: "Overview of key metrics and quick actions",
+    key_components: ["stats cards", "recent activity", "quick actions"],
+    data_views: ["summary metrics"],
+    forms: [],
+    actions: [],
+    states: ["loading", "empty", "error"],
+  });
+
+  for (const feature of features) {
+    const name = feature.name || feature.feature_id;
+    const fSlug = (feature.feature_id || "").replace(/^f_/, "").replace(/[\s]+/g, "_").toLowerCase();
+    const isAuth = /auth|login|register|signup|rbac|role/i.test(name);
+    const isCrud = /manage|crud|list|admin/i.test(name) || feature.outcome?.includes("create");
+    const isSettings = /setting|config|preference|profile/i.test(name);
+
+    const screen: DesignBrief["screens"][0] = {
+      screen_id: `screen-${fSlug}`,
+      name,
+      purpose: feature.outcome || feature.description || name,
+      key_components: [],
+      data_views: [],
+      forms: [],
+      actions: [],
+      states: ["loading", "empty", "error", "success"],
+    };
+
+    if (isCrud || (!isAuth && !isSettings)) {
+      screen.key_components.push("data table", "search/filter bar", "pagination");
+      screen.data_views.push(`${name} table`);
+      screen.forms.push(`create ${name.replace(/s$/, "")} form`);
+      screen.actions.push(`create ${name.replace(/s$/, "")}`, `edit`, `delete`);
+      destructiveActions.push(`delete ${name.replace(/s$/, "")}`);
+    }
+
+    if (isAuth) {
+      screen.key_components.push("auth form", "social login buttons", "password field");
+      screen.forms.push(/register|signup/i.test(name) ? "registration form" : "login form");
+      screen.actions.push("submit");
+      authScreens.push(screen.screen_id);
+    }
+
+    if (isSettings) {
+      screen.key_components.push("settings form", "toggle switches", "save button");
+      screen.forms.push("settings form");
+      screen.actions.push("save", "reset");
+    }
+
+    screens.push(screen);
+  }
+
+  // Generate 3 design directions
+  const directions: DesignDirection[] = [
+    {
+      name: "Minimal Command Center",
+      description: "Dense, information-rich. Inspired by terminal UIs and developer tools. Dark background, monospace accents, high data density.",
+      layout: "sidebar_main",
+      color_mood: "Dark neutral with single accent color (amber or cyan)",
+      density: "High — tables, compact cards, minimal whitespace",
+      typography: "Inter for UI, JetBrains Mono for data. Heavy weight contrast between headings and labels.",
+    },
+    {
+      name: "Clean Editorial",
+      description: "Spacious, readable. Inspired by Notion and Linear. Light background, generous whitespace, strong typographic hierarchy.",
+      layout: "sidebar_main",
+      color_mood: "Warm off-white with one refined accent (slate blue or warm red)",
+      density: "Medium — breathing room around elements, card-based layouts",
+      typography: "Inter throughout. Large bold headings, regular body, small muted secondary text.",
+    },
+    {
+      name: "Dashboard Grid",
+      description: "Widget-based layout. Inspired by Grafana and analytics tools. Modular cards, charts, status indicators.",
+      layout: "sidebar_topbar_main",
+      color_mood: "Light with color-coded status indicators (green/amber/red)",
+      density: "Medium-high — grid of cards with charts and status badges",
+      typography: "Inter. Tabular numbers for data, condensed headers for card titles.",
+    },
+  ];
+
+  return {
+    app_title: appSpec.title || intentBrief?.inferred_core_outcome || "Untitled App",
+    app_class: appSpec.app_class || "unknown",
+    target_users: appSpec.target_users || [],
+    platforms: appSpec.platforms || [],
+    screens,
+    directions,
+    navigation: {
+      pattern: "sidebar with collapsible sections",
+      primary_items: screens.filter(s => !authScreens.includes(s.screen_id)).map(s => s.name),
+    },
+    constraints: {
+      must_have_states: ["loading", "empty", "error", "success"],
+      destructive_actions: destructiveActions,
+      auth_screens: authScreens,
+    },
+  };
 }

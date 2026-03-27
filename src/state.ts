@@ -159,8 +159,20 @@ export const AESState = Annotation.Root({
     }),
   }),
 
-  // Design evidence — loaded from Paper MCP extractions or disk
+  // Design mode: "auto" (generate evidence automatically) or "paper" (pause for Paper MCP)
+  designMode: Annotation<"auto" | "paper">({
+    value: lastValue,
+    default: () => "auto",
+  }),
+
+  // Design evidence — loaded from Paper MCP extractions or auto-generated
   designEvidence: Annotation<any | null>({
+    value: lastValue,
+    default: () => null,
+  }),
+
+  // Design brief — output by designer node for Paper MCP path
+  designBrief: Annotation<any | null>({
     value: lastValue,
     default: () => null,
   }),
