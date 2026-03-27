@@ -4,6 +4,7 @@ import { intake } from "./nodes/intake.js";
 import { intentClassifier } from "./nodes/intent-classifier.js";
 import { intentConfirmer } from "./nodes/intent-confirmer.js";
 import { decomposer } from "./nodes/decomposer.js";
+import { designer } from "./nodes/designer.js";
 import { specValidator } from "./nodes/spec-validator.js";
 import { userApproval } from "./nodes/user-approval.js";
 import { catalogSearcher } from "./nodes/catalog-searcher.js";
@@ -117,6 +118,7 @@ export function buildAESGraph() {
 
   // Gate 1 nodes
   graph.addNode("decomposer", decomposer);
+  graph.addNode("designer", designer);
   graph.addNode("spec_validator", specValidator);
   graph.addNode("user_approval", userApproval);
 
@@ -148,8 +150,9 @@ export function buildAESGraph() {
   // Research → Decomposer
   graph.addEdge("research", "decomposer");
 
-  // Gate 1 routing
-  graph.addEdge("decomposer", "spec_validator");
+  // Gate 1 routing: decomposer → designer → spec_validator
+  graph.addEdge("decomposer", "designer");
+  graph.addEdge("designer", "spec_validator");
   graph.addConditionalEdges("spec_validator", routeAfterSpecValidator);
   graph.addConditionalEdges("user_approval", routeAfterUserApproval);
 
