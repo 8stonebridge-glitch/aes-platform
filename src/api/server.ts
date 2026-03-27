@@ -14,6 +14,49 @@ const jobStreams = new Map<string, express.Response[]>();
 // Event buffer — stores events so clients connecting late get a full replay
 const jobEventBuffer = new Map<string, { event: string; data: any }[]>();
 
+// ─── Convex sync — push status updates to Convex for real-time UI ───
+const CONVEX_SITE_URL = process.env.AES_CONVEX_SITE_URL || "";
+
+async function pushToConvex(path: string, body: any) {
+  if (!CONVEX_SITE_URL) return;
+  try {
+    await fetch(`${CONVEX_SITE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    // Convex sync is best-effort — don't block the pipeline
+  }
+}
+
+function syncJobToConvex(jobId: string) {
+  const store = getJobStore();
+  const job = store.get(jobId);
+  if (!job) return;
+  pushToConvex("/push-status", {
+    jobId,
+    intent: job.rawRequest,
+    currentGate: job.currentGate,
+    intentConfirmed: job.intentConfirmed,
+    userApproved: job.userApproved,
+    targetPath: job.targetPath,
+    deployTarget: job.deployTarget,
+    previewUrl: job.previewUrl,
+    features: Object.keys(job.featureBridges || {}),
+    featureBridges: job.featureBridges,
+    appSpec: job.appSpec ? {
+      title: job.appSpec.title,
+      app_class: job.appSpec.app_class,
+      features: job.appSpec.features?.length,
+      roles: job.appSpec.roles?.length,
+      confidence: job.appSpec.confidence,
+    } : null,
+    vetoResults: job.vetoResults,
+    errorMessage: job.errorMessage,
+  });
+}
+
 function broadcastToJob(jobId: string, event: string, data: any) {
   // Buffer the event for late-connecting clients
   if (!jobEventBuffer.has(jobId)) jobEventBuffer.set(jobId, []);
@@ -23,6 +66,19 @@ function broadcastToJob(jobId: string, event: string, data: any) {
   const clients = jobStreams.get(jobId) || [];
   for (const res of clients) {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+
+  // Push log entry to Convex
+  pushToConvex("/push-log", {
+    jobId,
+    gate: event,
+    message: data.message || data.gate || JSON.stringify(data),
+    timestamp: new Date().toISOString(),
+  });
+
+  // Sync full job state to Convex on gate transitions and completion
+  if (["gate", "complete", "error", "fail", "needs_approval", "needs_confirmation"].includes(event)) {
+    syncJobToConvex(jobId);
   }
 }
 
@@ -41,6 +97,18 @@ app.post("/api/build", async (req, res) => {
 
   // Return immediately with job ID
   res.json({ jobId, requestId, status: "started" });
+
+  // Sync initial state to Convex
+  pushToConvex("/push-status", {
+    jobId,
+    intent,
+    currentGate: "gate_0",
+    intentConfirmed: false,
+    userApproved: false,
+    targetPath: resolvedTargetPath,
+    deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local",
+    features: [],
+  });
 
   // Run the pipeline in background
   const callbacks: GraphCallbacks = {
@@ -94,8 +162,11 @@ app.post("/api/build", async (req, res) => {
       error: result.errorMessage,
       previewUrl: result.previewUrl || null,
     });
+    // Final sync to Convex with complete state
+    syncJobToConvex(jobId);
   } catch (err: any) {
     broadcastToJob(jobId, "error", { message: err.message });
+    syncJobToConvex(jobId);
   }
 });
 
