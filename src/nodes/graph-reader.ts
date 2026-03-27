@@ -23,6 +23,7 @@ import {
   type VectorSearchResult,
 } from "../services/embedding-service.js";
 import { rrfFuse, boostDualSource, type RankedItem } from "../services/rrf-fusion.js";
+import { loadDesignEvidenceFromDisk } from "../services/design-evidence-loader.js";
 
 // ─── Cypher Queries ──────────────────────────────────────────────────
 
@@ -577,7 +578,18 @@ export async function graphReader(
     cb?.onWarn(`Graph search failed: ${err.message} — continuing without context`);
   }
 
-  return { graphContext: context };
+  // ── Load design evidence (Paper MCP extractions) ──
+  let designEvidence = null;
+  try {
+    designEvidence = await loadDesignEvidenceFromDisk();
+    if (designEvidence) {
+      cb?.onSuccess(`Design evidence loaded: ${designEvidence.screens.length} screens, ${designEvidence.components.length} components`);
+    }
+  } catch (err: any) {
+    cb?.onStep(`Design evidence not available: ${err.message}`);
+  }
+
+  return { graphContext: context, designEvidence };
 }
 
 // ─── Hybrid Fusion Helper ─────────────────────────────────────────

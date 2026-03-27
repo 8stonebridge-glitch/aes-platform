@@ -8,6 +8,7 @@ import { getJobStore } from "../store.js";
 import { getLLM, isLLMAvailable } from "../llm/provider.js";
 import { AppSpecSchema } from "../llm/schemas.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
+import { applyDesignEvidenceToSpec } from "../services/design-evidence-loader.js";
 
 // ─── Templates directory ────────────────────────────────────────────────
 const TEMPLATES_DIR = "/tmp/aes-templates/apps";
@@ -647,6 +648,27 @@ export async function decomposer(
     gate: "gate_1",
     message: `AppSpec generated: ${appSpec.features.length} features, ${appSpec.roles.length} roles, method: ${usedLLM ? "llm" : "template"}, confidence ${((appSpec.confidence?.overall ?? 0) * 100).toFixed(0)}%`,
   });
+
+  // Apply design evidence constraints to features (if design evidence loaded)
+  if (state.designEvidence) {
+    try {
+      const { constraintsApplied, featuresMatched } = applyDesignEvidenceToSpec(
+        appSpec,
+        state.designEvidence
+      );
+      if (constraintsApplied > 0) {
+        cb?.onSuccess(`Design constraints applied to ${constraintsApplied} features: ${featuresMatched.join(", ")}`);
+        store.addLog(state.jobId, {
+          gate: "gate_1",
+          message: `Design evidence → ${constraintsApplied} features got design constraints: ${featuresMatched.join(", ")}`,
+        });
+      } else {
+        cb?.onStep("Design evidence loaded but no features matched screen names — constraints skipped");
+      }
+    } catch (err: any) {
+      cb?.onWarn(`Design constraint application failed: ${err.message} — continuing without`);
+    }
+  }
 
   cb?.onSuccess(
     `AppSpec: ${appSpec.features.length} features, ${appSpec.roles.length} roles, ${appSpec.acceptance_tests.length} tests, ${((appSpec.confidence?.overall ?? 0) * 100).toFixed(0)}% confidence (${usedLLM ? "LLM" : "template"})`

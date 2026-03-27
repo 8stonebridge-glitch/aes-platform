@@ -12,6 +12,7 @@ import {
   type PriorityCandidate,
   type VetoInput,
 } from "@aes/math";
+import { extractDesignConstraintsForFeature } from "../services/design-evidence-loader.js";
 
 // ─── Reuse Requirements ──────────────────────────────────────────────────
 
@@ -603,6 +604,26 @@ export async function bridgeCompiler(
         bridge.confidence.rule_coverage +
         bridge.confidence.test_coverage
       ) / 5;
+    }
+
+    // Apply design constraints from design evidence (Paper MCP)
+    if (state.designEvidence) {
+      const dc = extractDesignConstraintsForFeature(state.designEvidence, feature.name);
+      if (dc) {
+        bridge.design_constraints = dc;
+        bridge.confidence.notes.push(
+          `Design evidence: ${dc.required_screens.length} screens, ${dc.required_components.length} components`
+        );
+        // Boost scope clarity when we have design constraints
+        bridge.confidence.scope_clarity = Math.min(bridge.confidence.scope_clarity + 0.15, 1.0);
+        bridge.confidence.overall = (
+          bridge.confidence.scope_clarity +
+          bridge.confidence.reuse_fit +
+          bridge.confidence.dependency_clarity +
+          bridge.confidence.rule_coverage +
+          bridge.confidence.test_coverage
+        ) / 5;
+      }
     }
 
     bridges[feature.feature_id] = bridge;

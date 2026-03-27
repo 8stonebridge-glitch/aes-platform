@@ -490,56 +490,62 @@ app.get("/api/graph/visualize", async (req, res) => {
       });
     }
 
-    // Fetch nodes — LearnedApp + their features, models, integrations
-    let nodeQuery: string;
-    if (mode === "feature") {
-      nodeQuery = `
-        MATCH (n)
-        WHERE n:LearnedFeature OR n:LearnedApp OR n:CatalogEntry
-        RETURN elementId(n) AS id, labels(n)[0] AS type, coalesce(n.name, n.feature_id, n.id) AS label,
-               properties(n) AS props
-        ORDER BY type, label
-        LIMIT ${limit}
-      `;
-    } else {
-      nodeQuery = `
-        MATCH (n)
-        WHERE n:LearnedApp OR n:LearnedFeature OR n:LearnedDataModel
-           OR n:LearnedIntegration OR n:LearnedPattern OR n:CatalogEntry
-           OR n:LearnedUserFlow OR n:LearnedComponentGroup
-        RETURN elementId(n) AS id, labels(n)[0] AS type, coalesce(n.name, n.feature_id, n.id) AS label,
-               properties(n) AS props
-        ORDER BY type, label
-        LIMIT ${limit}
-      `;
-    }
+    // Strategy: fetch connected pairs first so every returned node has edges,
+    // then backfill isolated high-value nodes only if there's room.
 
-    const nodeRecords = await neo4j.runCypher(nodeQuery);
+    const allowedLabels = mode === "feature"
+      ? "n:LearnedFeature OR n:LearnedApp OR n:CatalogEntry"
+      : "n:LearnedApp OR n:LearnedFeature OR n:LearnedDataModel OR n:DataModel OR n:LearnedIntegration OR n:LearnedPattern OR n:CatalogEntry OR n:LearnedUserFlow OR n:LearnedComponentGroup OR n:LearnedApiDomain OR n:LearnedPageSection OR n:LearnedStatePattern OR n:LearnedDesignSystem OR n:LearnedFormPattern OR n:LearnedCorrection OR n:LearnedFeedback OR n:LearnedResearch OR n:ResearchHub OR n:BuildHistory";
+
+    // Step 1: Fetch connected pairs — both ends of every relationship
+    const connectedQuery = `
+      MATCH (a)-[r]->(b)
+      WHERE (${allowedLabels.replace(/\bn\b/g, "a")})
+        AND (${allowedLabels.replace(/\bn\b/g, "b")})
+      WITH a, r, b
+      ORDER BY
+        CASE WHEN labels(a)[0] = 'LearnedApp' THEN 0
+             WHEN labels(a)[0] = 'CatalogEntry' THEN 1
+             ELSE 2 END
+      LIMIT ${limit * 2}
+      WITH collect(DISTINCT a) + collect(DISTINCT b) AS allNodes,
+           collect({ source: elementId(a), target: elementId(b), type: type(r) }) AS allEdges
+      UNWIND allNodes AS n
+      WITH collect(DISTINCT n) AS nodes, allEdges
+      RETURN
+        [n IN nodes | {
+          id: elementId(n),
+          type: labels(n)[0],
+          label: coalesce(n.name, n.feature_id, n.id),
+          props: properties(n)
+        }][..${limit}] AS nodes,
+        allEdges AS edges
+    `;
+
+    const connResult = await neo4j.runCypher(connectedQuery);
+    const rawNodes: any[] = connResult[0]?.nodes || [];
+    const rawEdges: any[] = connResult[0]?.edges || [];
+
     const nodeIds = new Set<string>();
-    const nodes = nodeRecords.map((r: any) => {
-      const id = String(r.id);
+    const nodes = rawNodes.map((n: any) => {
+      const id = String(n.id);
       nodeIds.add(id);
       return {
         id,
-        label: r.label || "unknown",
-        type: r.type || "Unknown",
-        properties: r.props || {},
+        label: n.label || "unknown",
+        type: n.type || "Unknown",
+        properties: n.props || {},
       };
     });
 
-    // Fetch edges between the returned nodes
-    const edgeQuery = `
-      MATCH (a)-[r]->(b)
-      WHERE elementId(a) IN $ids AND elementId(b) IN $ids
-      RETURN elementId(a) AS source, elementId(b) AS target, type(r) AS type
-      LIMIT ${limit * 3}
-    `;
-    const edgeRecords = await neo4j.runCypher(edgeQuery, { ids: [...nodeIds] });
-    const edges = edgeRecords.map((r: any) => ({
-      source: String(r.source),
-      target: String(r.target),
-      type: r.type || "RELATED",
-    }));
+    // Filter edges to only those whose both ends are in the returned node set
+    const edges = rawEdges
+      .map((e: any) => ({
+        source: String(e.source),
+        target: String(e.target),
+        type: e.type || "RELATED",
+      }))
+      .filter((e: any) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
     // Get totals
     const countResult = await neo4j.runCypher("MATCH (n) RETURN count(n) AS cnt");

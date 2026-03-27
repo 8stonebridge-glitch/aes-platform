@@ -159,6 +159,12 @@ export const AESState = Annotation.Root({
     }),
   }),
 
+  // Design evidence — loaded from Paper MCP extractions or disk
+  designEvidence: Annotation<any | null>({
+    value: lastValue,
+    default: () => null,
+  }),
+
   // Control
   errorMessage: Annotation<string | null>({
     value: lastValue,
