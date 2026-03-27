@@ -5,14 +5,14 @@
     "moduleResolution": "bundler",
     "strict": true,
     "outDir": "dist",
-    "rootDir": ".",
+    "rootDir": "src",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
     "paths": {
-      "@aes/math": ["./packages/math/src/index.ts"],
-      "@aes/math/*": ["./packages/math/src/*"]
+      "@aes/math": ["./packages/math/dist/index.d.ts"],
+      "@aes/math/*": ["./packages/math/dist/*"]
     }
   },
-  "include": ["src", "packages/math/src"]
+  "include": ["src"]
 }
