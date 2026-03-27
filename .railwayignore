@@ -1,0 +1,11 @@
+dist
+.git
+apps
+templates
+paperclip
+tests
+seeds
+scripts
+*.md
+design-evidence-*
+build-manifest-*
