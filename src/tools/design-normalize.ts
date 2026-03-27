@@ -596,7 +596,7 @@ function normalizeState(
 }
 
 function normalizeNavigation(
-  raw?: RawNavigationGraph
+  raw?: any
 ): NavigationGraph {
   if (!raw) {
     return { primary_items: [], secondary_items: [], edges: [] };
@@ -625,7 +625,7 @@ function normalizeNavigation(
   };
 }
 
-function normalizeLayout(raw?: RawLayoutInfo): LayoutInfo {
+function normalizeLayout(raw?: any): LayoutInfo {
   if (!raw) {
     return { pattern: "custom", responsive_notes: [] };
   }

@@ -398,7 +398,7 @@ app.get("/api/health", (_req, res) => {
 
 // ─── Start server ──────────────────────────────────────────────────
 
-const PORT = parseInt(process.env.AES_PORT || "3100");
+const PORT = parseInt(process.env.PORT || process.env.AES_PORT || "3100");
 
 export function startServer() {
   app.listen(PORT, () => {
