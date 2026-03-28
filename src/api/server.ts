@@ -112,7 +112,11 @@ app.post("/api/build", async (req, res) => {
 
   // Run the pipeline in background
   const callbacks: GraphCallbacks = {
-    onGate: (gate, message) => broadcastToJob(jobId, "gate", { gate, message }),
+    onGate: (gate, message) => {
+      const store = getJobStore();
+      store.update(jobId, { currentGate: gate });
+      broadcastToJob(jobId, "gate", { gate, message });
+    },
     onStep: (message) => broadcastToJob(jobId, "step", { message }),
     onSuccess: (message) => broadcastToJob(jobId, "success", { message }),
     onFail: (message) => broadcastToJob(jobId, "fail", { message }),

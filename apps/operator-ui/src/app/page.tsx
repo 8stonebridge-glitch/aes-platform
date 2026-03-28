@@ -47,20 +47,50 @@ export default function Home() {
   const { messages: sseMessages, lastEvent, connected: sseConnected } = useOrchestratorStream(jobId);
   const { data: jobStatus } = useOrchestratorJobStatus(jobId, buildActive);
 
-  // Fallback: detect confirmation/approval gates from polled jobStatus
-  // when SSE stream fails to deliver events
+  // Fallback: use polled jobStatus when SSE stream is not delivering events.
+  // Updates pipeline stage, detects confirmation/approval gates, and catches
+  // completion/failure states that SSE missed.
   useEffect(() => {
     if (!jobStatus || !pipelineRunning) return;
+
+    // Update pipeline stage from polled currentGate (SSE fallback)
+    if (!sseConnected || sseMessages.length === 0) {
+      const gateStageMap: Record<string, string> = {
+        gate_0: "intake",
+        research: "research",
+        gate_1: "decompose",
+        gate_2: "verify",
+        gate_3: "promote",
+        building: "building",
+        validation: "validation",
+        deploying: "deploying",
+        complete: "deploying",
+        failed: pipelineStage, // keep current stage on failure
+      };
+      const mappedStage = gateStageMap[jobStatus.currentGate];
+      if (mappedStage && mappedStage !== pipelineStage) {
+        setPipelineStage(mappedStage);
+      }
+    }
+
+    // Detect confirmation gate
     if (jobStatus.pendingAction === "confirm" && !needsConfirmation) {
       setNeedsConfirmation(true);
       setPipelineMessage(jobStatus.confirmationStatement ?? "Confirm intent?");
     }
+    // Detect approval gate
     if (jobStatus.pendingAction === "approve" && !needsApproval) {
       setNeedsApproval(true);
       setApprovalData({ appSpec: jobStatus.appSpec });
       setPipelineMessage("Review and approve the plan");
     }
-  }, [jobStatus, pipelineRunning, needsConfirmation, needsApproval]);
+    // Detect completion/failure via polling
+    if (jobStatus.currentGate === "complete" || jobStatus.currentGate === "failed") {
+      setPipelineRunning(false);
+      setPromoted(jobStatus.currentGate === "complete" && !jobStatus.errorMessage);
+      setPipelineMessage(jobStatus.errorMessage ?? "Pipeline complete");
+    }
+  }, [jobStatus, pipelineRunning, needsConfirmation, needsApproval, sseConnected, sseMessages.length, pipelineStage]);
 
   // Derive thinking text from SSE events
   const sseThinkingText = lastEvent
