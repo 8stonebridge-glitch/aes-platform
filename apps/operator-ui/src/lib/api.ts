@@ -304,6 +304,8 @@ export interface OrchestratorJobStatus {
   } | null;
   vetoResults: unknown[];
   errorMessage: string | null;
+  pendingAction: "confirm" | "approve" | null;
+  confirmationStatement: string | null;
 }
 
 export interface OrchestratorSSEEvent {

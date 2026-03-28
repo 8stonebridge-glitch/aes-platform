@@ -120,10 +120,11 @@ app.post("/api/build", async (req, res) => {
     onPause: (message) => broadcastToJob(jobId, "pause", { message }),
     onFeatureStatus: (id, name, status) => broadcastToJob(jobId, "feature", { id, name, status }),
     onNeedsApproval: async (prompt, data) => {
+      const store = getJobStore();
+      store.update(jobId, { pendingAction: "approve" });
       broadcastToJob(jobId, "needs_approval", { prompt, data });
       // Wait for approval via the approve endpoint
       return new Promise((resolve) => {
-        const store = getJobStore();
         const check = setInterval(() => {
           const job = store.get(jobId);
           if (job?.userApproved) {
@@ -136,9 +137,10 @@ app.post("/api/build", async (req, res) => {
       });
     },
     onNeedsConfirmation: async (statement) => {
+      const store = getJobStore();
+      store.update(jobId, { pendingAction: "confirm", confirmationStatement: statement });
       broadcastToJob(jobId, "needs_confirmation", { statement });
       return new Promise((resolve) => {
-        const store = getJobStore();
         const check = setInterval(() => {
           const job = store.get(jobId);
           if (job?.intentConfirmed) {
@@ -209,7 +211,7 @@ app.post("/api/jobs/:id/confirm", (req, res) => {
     return;
   }
 
-  store.update(jobId, { intentConfirmed: true });
+  store.update(jobId, { intentConfirmed: true, pendingAction: null, confirmationStatement: null });
   res.json({ confirmed: true });
 });
 
@@ -277,7 +279,7 @@ app.post("/api/jobs/:id/approve", (req, res) => {
     return;
   }
 
-  store.update(jobId, { userApproved: true });
+  store.update(jobId, { userApproved: true, pendingAction: null });
   res.json({ approved: true });
 });
 
@@ -311,6 +313,8 @@ app.get("/api/jobs/:id", (req, res) => {
     } : null,
     vetoResults: job.vetoResults,
     errorMessage: job.errorMessage,
+    pendingAction: job.pendingAction ?? null,
+    confirmationStatement: job.confirmationStatement ?? null,
   });
 });
 

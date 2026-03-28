@@ -44,8 +44,23 @@ export default function Home() {
   const agentThinkingText = useThinkingText(buildActive && !pipelineRunning ? agentStatus : null);
 
   // SSE stream from LangGraph orchestrator
-  const { messages: sseMessages, lastEvent } = useOrchestratorStream(jobId);
+  const { messages: sseMessages, lastEvent, connected: sseConnected } = useOrchestratorStream(jobId);
   const { data: jobStatus } = useOrchestratorJobStatus(jobId, buildActive);
+
+  // Fallback: detect confirmation/approval gates from polled jobStatus
+  // when SSE stream fails to deliver events
+  useEffect(() => {
+    if (!jobStatus || !pipelineRunning) return;
+    if (jobStatus.pendingAction === "confirm" && !needsConfirmation) {
+      setNeedsConfirmation(true);
+      setPipelineMessage(jobStatus.confirmationStatement ?? "Confirm intent?");
+    }
+    if (jobStatus.pendingAction === "approve" && !needsApproval) {
+      setNeedsApproval(true);
+      setApprovalData({ appSpec: jobStatus.appSpec });
+      setPipelineMessage("Review and approve the plan");
+    }
+  }, [jobStatus, pipelineRunning, needsConfirmation, needsApproval]);
 
   // Derive thinking text from SSE events
   const sseThinkingText = lastEvent
@@ -273,6 +288,7 @@ export default function Home() {
                 needsApproval={needsApproval}
                 approvalData={approvalData}
                 sseMessages={sseMessages}
+                sseConnected={sseConnected}
                 onSubmitIntent={handleSubmitIntent}
                 onApprove={handleApprove}
                 onConfirm={handleConfirm}
@@ -388,6 +404,7 @@ function BuildsTab({
   needsApproval: boolean;
   approvalData: Record<string, unknown> | null;
   sseMessages: import("@/lib/hooks").SSEMessage[];
+  sseConnected: boolean;
   onSubmitIntent: (intent: string, targetPath?: string, deployTarget?: "local" | "cloudflare") => void;
   onApprove: () => void;
   onConfirm: () => void;
@@ -505,6 +522,15 @@ function BuildsTab({
         <p className="text-sm text-[var(--text-secondary)]">
           {jobId ? "Orchestrator is processing your intent..." : "Processing your intent through the AES pipeline..."}
         </p>
+        {/* SSE connection warning */}
+        {jobId && !sseConnected && sseMessages.length === 0 && (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+            <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-[11px] text-amber-700">
+              Live stream not connected — using polling fallback
+            </span>
+          </div>
+        )}
         {jobId && (
           <p className="text-xs font-mono text-[var(--text-muted)]">
             Job: {jobId}

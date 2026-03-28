@@ -49,6 +49,8 @@ export interface JobRecord {
   designMode?: "auto" | "paper";
   designBrief?: any;
   designEvidence?: any;
+  pendingAction?: "confirm" | "approve" | null;
+  confirmationStatement?: string | null;
 }
 
 export class JobStore {
