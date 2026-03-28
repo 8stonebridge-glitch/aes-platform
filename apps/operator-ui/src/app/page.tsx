@@ -53,7 +53,7 @@ export default function Home() {
   useEffect(() => {
     if (!jobStatus || !pipelineRunning) return;
 
-    // Update pipeline stage from polled currentGate (SSE fallback)
+    // Update pipeline stage and message from polled currentGate (SSE fallback)
     if (!sseConnected || sseMessages.length === 0) {
       const gateStageMap: Record<string, string> = {
         gate_0: "intake",
@@ -67,9 +67,22 @@ export default function Home() {
         complete: "deploying",
         failed: pipelineStage, // keep current stage on failure
       };
+      const gateMessageMap: Record<string, string> = {
+        gate_0: "Processing intent...",
+        research: "Researching patterns and requirements...",
+        gate_1: "Decomposing into features...",
+        gate_2: "Verifying feature specs...",
+        gate_3: "Evaluating promotion gates...",
+        building: "Building features...",
+        validation: "Running validators...",
+        deploying: "Deploying...",
+        complete: "Pipeline complete",
+        failed: jobStatus.errorMessage ?? "Pipeline failed",
+      };
       const mappedStage = gateStageMap[jobStatus.currentGate];
       if (mappedStage && mappedStage !== pipelineStage) {
         setPipelineStage(mappedStage);
+        setPipelineMessage(gateMessageMap[jobStatus.currentGate] ?? `Gate: ${jobStatus.currentGate}`);
       }
     }
 
@@ -319,6 +332,7 @@ export default function Home() {
                 approvalData={approvalData}
                 sseMessages={sseMessages}
                 sseConnected={sseConnected}
+                pipelineMessage={pipelineMessage}
                 onSubmitIntent={handleSubmitIntent}
                 onApprove={handleApprove}
                 onConfirm={handleConfirm}
@@ -435,6 +449,7 @@ function BuildsTab({
   approvalData: Record<string, unknown> | null;
   sseMessages: import("@/lib/hooks").SSEMessage[];
   sseConnected: boolean;
+  pipelineMessage: string;
   onSubmitIntent: (intent: string, targetPath?: string, deployTarget?: "local" | "cloudflare") => void;
   onApprove: () => void;
   onConfirm: () => void;
@@ -550,7 +565,7 @@ function BuildsTab({
       <div className="flex h-full flex-col items-center justify-center gap-6">
         <PipelineStageRail currentStage={displayStage} />
         <p className="text-sm text-[var(--text-secondary)]">
-          {jobId ? "Orchestrator is processing your intent..." : "Processing your intent through the AES pipeline..."}
+          {pipelineMessage || (jobId ? "Orchestrator is processing your intent..." : "Processing your intent through the AES pipeline...")}
         </p>
         {/* SSE connection warning */}
         {jobId && !sseConnected && sseMessages.length === 0 && (
