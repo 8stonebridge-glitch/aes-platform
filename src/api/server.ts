@@ -821,8 +821,12 @@ app.get("/api/graph/visualize", async (req, res) => {
   }
 });
 
+// Build fingerprint — changes on every deploy so Hermes can detect stale containers
+const BUILD_ID = `b-${Date.now().toString(36)}`;
+const BOOT_TIME = new Date().toISOString();
+
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", version: "v12", math_layer: true });
+  res.json({ status: "ok", version: "v13", build_id: BUILD_ID, booted_at: BOOT_TIME, math_layer: true });
 });
 
 // ─── Start server ──────────────────────────────────────────────────
