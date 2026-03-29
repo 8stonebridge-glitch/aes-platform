@@ -179,9 +179,21 @@ export function useOrchestratorStream(jobId: string | null) {
 }
 
 /* ── Orchestrator Health ── */
+export interface OrchestratorHealthResponse {
+  status: "ok" | "partial" | "degraded";
+  version: string;
+  services?: {
+    neo4j: { status: "up" | "down"; detail: string };
+    llm: { status: "up" | "down"; detail: string };
+    research: { status: "up" | "down"; detail: string };
+    postgres: { status: "up" | "down"; detail: string };
+  };
+  message?: string;
+}
+
 export function useOrchestratorHealth() {
   const fetcher = useCallback(() => orchestrator.health(), []);
-  return usePoll<{ status: string; version: string }>(fetcher, 15_000);
+  return usePoll<OrchestratorHealthResponse>(fetcher, 15_000);
 }
 
 /* ── Orchestrator Job Status (polling) ── */

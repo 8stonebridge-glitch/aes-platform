@@ -284,12 +284,29 @@ export default function Home() {
         <div className="border-t border-[var(--border)] px-6 py-4 space-y-2">
           <HealthIndicator health={health} error={healthError} />
           {orchConnected && (
-            <div className="flex items-center gap-1.5">
-              <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-              <span className="text-[10px] text-[var(--text-muted)]">
-                Orchestrator {orchHealth?.version ?? "?"}
-              </span>
-            </div>
+            <>
+              <div className="flex items-center gap-1.5">
+                <div className={`h-1.5 w-1.5 rounded-full ${orchHealth?.status === "ok" ? "bg-green-500" : orchHealth?.status === "partial" ? "bg-amber-500" : orchHealth?.status === "degraded" ? "bg-red-500" : "bg-green-500"}`} />
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  Orchestrator {orchHealth?.version ?? "?"}
+                </span>
+              </div>
+              {orchHealth?.services && (
+                <div className="space-y-1 pl-3">
+                  {Object.entries(orchHealth.services).map(([name, svc]) => (
+                    <div key={name} className="flex items-center gap-1.5">
+                      <div className={`h-1 w-1 rounded-full ${svc.status === "up" ? "bg-green-500" : "bg-red-400"}`} />
+                      <span className="text-[9px] text-[var(--text-muted)]">
+                        {name === "neo4j" ? "Knowledge Graph" : name === "llm" ? "LLM" : name === "research" ? "Research" : name === "postgres" ? "Persistence" : name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {orchHealth?.status !== "ok" && orchHealth?.message && (
+                <p className="text-[9px] text-amber-600 leading-tight">{orchHealth.message}</p>
+              )}
+            </>
           )}
         </div>
       </aside>
@@ -309,6 +326,29 @@ export default function Home() {
                     : (agentStatus?.phase ?? (promoted ? "complete" : "idle"))
               }
             />
+          </div>
+        )}
+
+        {/* Service degradation banner */}
+        {orchHealth?.status && orchHealth.status !== "ok" && (
+          <div className={`shrink-0 border-b px-7 py-2.5 ${orchHealth.status === "degraded" ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${orchHealth.status === "degraded" ? "bg-red-500" : "bg-amber-500"}`} />
+              <span className={`text-[11px] font-medium ${orchHealth.status === "degraded" ? "text-red-700" : "text-amber-700"}`}>
+                {orchHealth.message}
+              </span>
+            </div>
+            {orchHealth.services && (
+              <div className="mt-1 flex gap-3 pl-4">
+                {Object.entries(orchHealth.services)
+                  .filter(([, svc]) => svc.status === "down")
+                  .map(([name, svc]) => (
+                    <span key={name} className="text-[10px] text-[var(--text-muted)]">
+                      {name}: {svc.detail}
+                    </span>
+                  ))}
+              </div>
+            )}
           </div>
         )}
 

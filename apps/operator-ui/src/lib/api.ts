@@ -387,7 +387,7 @@ export const orchestrator = {
   health: async () => {
     const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/health`, { cache: "no-store" });
     if (!res.ok) throw new Error(`GET /orchestrator/health → ${res.status}`);
-    return res.json() as Promise<{ status: string; version: string }>;
+    return res.json();
   },
 };
 

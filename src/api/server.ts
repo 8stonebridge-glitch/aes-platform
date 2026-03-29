@@ -633,8 +633,97 @@ app.get("/api/graph/visualize", async (req, res) => {
   }
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", version: "v12", math_layer: true });
+app.get("/api/health", async (_req, res) => {
+  const store = getJobStore();
+
+  // Check Neo4j
+  let neo4jStatus: "up" | "down" = "down";
+  let neo4jDetail = "Not configured";
+  try {
+    const { getNeo4jService } = await import("../services/neo4j-service.js");
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+    if (ok) {
+      neo4jStatus = "up";
+      neo4jDetail = "Connected";
+    } else {
+      neo4jDetail = "Connection failed";
+    }
+  } catch (err: any) {
+    neo4jDetail = err.message || "Unavailable";
+  }
+
+  // Check LLM
+  let llmStatus: "up" | "down" = "down";
+  let llmDetail = "No API key configured (OPENAI_API_KEY)";
+  try {
+    const { isLLMAvailable } = await import("../llm/provider.js");
+    if (isLLMAvailable()) {
+      llmStatus = "up";
+      llmDetail = `Model: ${process.env.AES_LLM_MODEL || "gpt-4o"}`;
+    }
+  } catch {}
+
+  // Check Perplexity / Research API
+  let researchStatus: "up" | "down" = "down";
+  const researchUrl = process.env.AES_PERPLEXITY_URL ?? "http://localhost:3200";
+  let researchDetail = `Unreachable (${researchUrl})`;
+  const hasPerplexityKey = !!process.env.PERPLEXITY_API_KEY;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const r = await fetch(`${researchUrl}/health`, { signal: controller.signal }).catch(() => null);
+    clearTimeout(timeout);
+    if (r && r.ok) {
+      researchStatus = "up";
+      researchDetail = "MCP research server connected";
+    } else if (hasPerplexityKey) {
+      researchStatus = "up";
+      researchDetail = "Direct Perplexity API (key configured)";
+    }
+  } catch {
+    if (hasPerplexityKey) {
+      researchStatus = "up";
+      researchDetail = "Direct Perplexity API (key configured)";
+    }
+  }
+
+  // Postgres persistence
+  let postgresStatus: "up" | "down" = "down";
+  let postgresDetail = "Not configured";
+  if (store.hasPersistence()) {
+    postgresStatus = "up";
+    postgresDetail = "Write-through enabled";
+  }
+
+  const allUp = neo4jStatus === "up" && llmStatus === "up" && researchStatus === "up";
+  const allDown = neo4jStatus === "down" && llmStatus === "down" && researchStatus === "down";
+
+  res.json({
+    status: allDown ? "degraded" : allUp ? "ok" : "partial",
+    version: "v12",
+    services: {
+      neo4j: { status: neo4jStatus, detail: neo4jDetail },
+      llm: { status: llmStatus, detail: llmDetail },
+      research: { status: researchStatus, detail: researchDetail },
+      postgres: { status: postgresStatus, detail: postgresDetail },
+    },
+    capabilities: {
+      knowledge_graph: neo4jStatus === "up",
+      llm_reasoning: llmStatus === "up",
+      external_research: researchStatus === "up",
+      durable_persistence: postgresStatus === "up",
+    },
+    message: allDown
+      ? "All reasoning services are offline — pipeline will use fallback logic only"
+      : allUp
+        ? "All services operational"
+        : `Degraded: ${[
+            neo4jStatus === "down" ? "knowledge graph offline" : null,
+            llmStatus === "down" ? "no LLM (keyword fallback)" : null,
+            researchStatus === "down" ? "research API offline" : null,
+          ].filter(Boolean).join(", ")}`,
+  });
 });
 
 // ─── Start server ──────────────────────────────────────────────────
