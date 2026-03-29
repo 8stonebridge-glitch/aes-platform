@@ -164,6 +164,29 @@ app.post("/api/build", async (req, res) => {
     });
     // Final sync to Convex with complete state
     syncJobToConvex(jobId);
+
+    // Push pipeline outcome to Hermes for behavioral analysis
+    const hermesUrl = process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
+    if (hermesUrl) {
+      const store = getJobStore();
+      const job = store.get(jobId);
+      fetch(`${hermesUrl}/pipeline-outcome`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: jobId,
+          success: !result.errorMessage && result.currentGate !== "failed",
+          gate_reached: result.currentGate,
+          error_message: result.errorMessage || null,
+          app_class: result.intentBrief?.inferred_app_class || result.appSpec?.app_class || "unknown",
+          risk_class: result.intentBrief?.inferred_risk_class || "unknown",
+          ambiguity_flags: result.intentBrief?.ambiguity_flags || [],
+          intent_confirmed: !!result.intentConfirmed,
+          user_approved: !!result.userApproved,
+          feature_count: Object.keys(result.featureBridges || {}).length,
+        }),
+      }).catch(() => {}); // best-effort
+    }
   } catch (err: any) {
     broadcastToJob(jobId, "error", { message: err.message });
     syncJobToConvex(jobId);
@@ -523,6 +546,175 @@ app.get("/api/governance/pending", (_req, res) => {
   res.json(pending);
 });
 
+// ─── POST /api/self-audit — Analyze pipeline failure patterns ────────
+
+app.get("/api/self-audit", async (_req, res) => {
+  try {
+    const { getNeo4jService } = await import("../services/neo4j-service.js");
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+
+    if (!ok) {
+      return res.json({ suggestions: [], error: "Neo4j unavailable" });
+    }
+
+    // Query failure distributions
+    const outcomeQuery = `
+      MATCH (o:PipelineOutcome)
+      WITH count(o) AS total,
+           count(CASE WHEN o.success = true THEN 1 END) AS successes,
+           count(CASE WHEN o.success = false THEN 1 END) AS failures
+      RETURN total, successes, failures
+    `;
+    const totals = await neo4j.runCypher(outcomeQuery);
+    const total = Number(totals[0]?.total ?? 0);
+    const successes = Number(totals[0]?.successes ?? 0);
+    const failures = Number(totals[0]?.failures ?? 0);
+
+    if (total === 0) {
+      return res.json({ suggestions: [], message: "No pipeline runs recorded yet" });
+    }
+
+    // Gate failure breakdown
+    const gateQuery = `
+      MATCH (o:PipelineOutcome)
+      WHERE o.success = false
+      RETURN o.gate_reached AS gate, o.failure_category AS category, count(*) AS cnt
+      ORDER BY cnt DESC
+    `;
+    const gateBreakdown = await neo4j.runCypher(gateQuery);
+
+    // Ambiguity analysis
+    const ambiguityQuery = `
+      MATCH (o:PipelineOutcome)
+      WHERE size(o.ambiguity_flags) > 0
+      RETURN o.ambiguity_flags AS flags, o.success AS success, o.had_clarification AS clarified, count(*) AS cnt
+      ORDER BY cnt DESC
+    `;
+    const ambiguityData = await neo4j.runCypher(ambiguityQuery);
+
+    // App class success rates
+    const classQuery = `
+      MATCH (o:PipelineOutcome)
+      RETURN o.app_class AS app_class,
+             count(*) AS total,
+             count(CASE WHEN o.success = true THEN 1 END) AS successes
+      ORDER BY total DESC
+    `;
+    const classData = await neo4j.runCypher(classQuery);
+
+    // Generate suggestions
+    const suggestions: { id: string; severity: string; title: string; detail: string; evidence: string }[] = [];
+    let sugId = 0;
+
+    // 1. Overall success rate
+    const successRate = total > 0 ? (successes / total) * 100 : 0;
+    if (successRate < 50 && total >= 3) {
+      suggestions.push({
+        id: `sug-${++sugId}`,
+        severity: "critical",
+        title: "Pipeline success rate is below 50%",
+        detail: `Only ${successes}/${total} runs succeeded (${successRate.toFixed(0)}%). Review common failure patterns and consider adding guardrails or better defaults.`,
+        evidence: `${total} total runs, ${failures} failures`,
+      });
+    }
+
+    // 2. Gate-specific failures
+    for (const row of gateBreakdown) {
+      const gate = row.gate;
+      const category = row.category;
+      const cnt = Number(row.cnt);
+      const pct = ((cnt / total) * 100).toFixed(0);
+
+      if (category === "confirmation_timeout" && cnt >= 2) {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "high",
+          title: "Users frequently time out at intent confirmation",
+          detail: `${cnt} runs (${pct}%) timed out waiting for confirmation. Consider: longer timeout, auto-confirm for low-risk, or better clarification prompts.`,
+          evidence: `${cnt}x at ${gate}, category: ${category}`,
+        });
+      }
+      if (category === "ambiguity" && cnt >= 2) {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "high",
+          title: "Ambiguous intents are causing pipeline failures",
+          detail: `${cnt} runs (${pct}%) failed due to ambiguity. The system should ask clarifying questions instead of failing. Check that the clarification loop is working.`,
+          evidence: `${cnt}x at ${gate}, category: ${category}`,
+        });
+      }
+      if (category === "veto_triggered" && cnt >= 2) {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "medium",
+          title: "Veto checks are frequently blocking builds",
+          detail: `${cnt} runs (${pct}%) were blocked by veto checks. Review veto rules — some may be too strict or need better defaults.`,
+          evidence: `${cnt}x at ${gate}, category: ${category}`,
+        });
+      }
+      if (category === "spec_validation" && cnt >= 2) {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "medium",
+          title: "Spec validation failures are common",
+          detail: `${cnt} runs (${pct}%) failed spec validation. The decomposer may need better defaults or the validator rules may be too strict.`,
+          evidence: `${cnt}x at ${gate}, category: ${category}`,
+        });
+      }
+    }
+
+    // 3. App class with 0% success
+    for (const row of classData) {
+      const cls = row.app_class;
+      const clsTotal = Number(row.total);
+      const clsSuccesses = Number(row.successes);
+      if (clsTotal >= 2 && clsSuccesses === 0 && cls !== "unknown") {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "high",
+          title: `No successful builds for "${cls.replace(/_/g, " ")}" apps`,
+          detail: `${clsTotal} attempts, 0 successes. This app class may need additional templates, better keyword matching, or domain-specific decomposition rules.`,
+          evidence: `${clsTotal} runs for ${cls}, 0% success`,
+        });
+      }
+    }
+
+    // 4. Ambiguity without clarification
+    for (const row of ambiguityData) {
+      if (!row.clarified && !row.success && Number(row.cnt) >= 2) {
+        suggestions.push({
+          id: `sug-${++sugId}`,
+          severity: "medium",
+          title: "Ambiguous intents failing without clarification attempt",
+          detail: `${Number(row.cnt)} ambiguous runs failed without asking the user for clarification. Ensure the clarification loop is active.`,
+          evidence: `flags: ${JSON.stringify(row.flags)}, ${Number(row.cnt)} occurrences`,
+        });
+      }
+    }
+
+    // Push suggestions to Hermes if available
+    const hermesUrl = process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
+    if (hermesUrl && suggestions.length > 0) {
+      fetch(`${hermesUrl}/suggestions/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source: "aes-self-audit", suggestions }),
+      }).catch(() => {}); // best-effort
+    }
+
+    res.json({
+      total_runs: total,
+      success_rate: `${successRate.toFixed(1)}%`,
+      failures,
+      gate_breakdown: gateBreakdown.map((r: any) => ({ gate: r.gate, category: r.category, count: Number(r.cnt) })),
+      suggestions,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Health check ──────────────────────────────────────────────────
 
 // ─── Graph Visualize — returns nodes + edges for the operator UI ────
@@ -653,6 +845,7 @@ export function startServer() {
     console.log(`  GET  /api/governance/pending              — Pending governance items`);
     console.log(`  POST /api/governance/escalations/:id/approve — Approve escalation`);
     console.log(`  POST /api/governance/escalations/:id/reject  — Reject escalation`);
+    console.log(`  GET  /api/self-audit                     — Self-audit failure patterns`);
   });
   return app;
 }

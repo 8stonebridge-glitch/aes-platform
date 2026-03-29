@@ -349,6 +349,54 @@ RETURN b.entity_id
   await safeWrite(linkCypher, `BuildRecord->App link [${buildEid}]`);
 }
 
+/**
+ * Pipeline Outcome — write a queryable record of every pipeline run.
+ * Enables failure distribution analysis and self-audit.
+ */
+async function writePipelineOutcome(state: AESStateType): Promise<void> {
+  const now = ts();
+  const success = !state.errorMessage && state.currentGate !== "failed";
+  const gateReached = state.currentGate || "gate_0";
+
+  // Determine failure reason category
+  let failureCategory = "none";
+  if (!success) {
+    if (state.errorMessage?.includes("timed out")) failureCategory = "confirmation_timeout";
+    else if (state.errorMessage?.includes("rejected")) failureCategory = "user_rejected";
+    else if (state.errorMessage?.includes("ambiguity") || state.errorMessage?.includes("ambiguous")) failureCategory = "ambiguity";
+    else if (state.errorMessage?.includes("validation")) failureCategory = "spec_validation";
+    else if (state.errorMessage?.includes("veto") || state.errorMessage?.includes("VETO")) failureCategory = "veto_triggered";
+    else if (state.errorMessage?.includes("build") || state.errorMessage?.includes("Build")) failureCategory = "build_failure";
+    else if (state.errorMessage?.includes("deploy")) failureCategory = "deploy_failure";
+    else failureCategory = "other";
+  }
+
+  const ambiguityFlags = state.intentBrief?.ambiguity_flags || [];
+  const appClass = state.intentBrief?.inferred_app_class || state.appSpec?.app_class || "unknown";
+  const riskClass = state.intentBrief?.inferred_risk_class || "unknown";
+  const hadClarification = state.intentBrief?.confirmation_status === "confirmed_with_clarification";
+
+  const cypher = `
+MERGE (o:PipelineOutcome {job_id: '${esc(state.jobId)}'})
+SET o.success = ${success},
+    o.gate_reached = '${esc(gateReached)}',
+    o.failure_category = '${esc(failureCategory)}',
+    o.failure_reason = ${state.errorMessage ? `'${esc(state.errorMessage.slice(0, 200))}'` : 'null'},
+    o.app_class = '${esc(appClass)}',
+    o.risk_class = '${esc(riskClass)}',
+    o.ambiguity_flags = ${JSON.stringify(ambiguityFlags)},
+    o.had_clarification = ${hadClarification},
+    o.intent_confirmed = ${!!state.intentConfirmed},
+    o.user_approved = ${!!state.userApproved},
+    o.feature_count = ${Object.keys(state.featureBridges || {}).length},
+    o.veto_count = ${(state.vetoResults || []).filter((v: any) => v.triggered).length},
+    o.created_at = '${now}'
+RETURN o.job_id
+  `.trim();
+
+  await safeWrite(cypher, `PipelineOutcome [${state.jobId}]`);
+}
+
 // ─── Main Node ───────────────────────────────────────────────────────
 
 /**
@@ -399,6 +447,9 @@ export async function graphUpdater(state: AESStateType): Promise<Partial<AESStat
     ) {
       await writeBuildRecord(state);
     }
+
+    // Always write pipeline outcome for failure distribution tracking
+    await writePipelineOutcome(state);
 
     console.log(`[graph-updater] Graph writes complete for gate=${gate}`);
   } catch (err: any) {
