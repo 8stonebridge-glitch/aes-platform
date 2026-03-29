@@ -28,6 +28,7 @@ export interface JobRecord {
   durability: DurabilityStatus;
   intentBrief?: IntentBrief;
   intentConfirmed?: boolean;
+  clarification?: string;
   appSpec?: AppSpec;
   appSpecDbId?: string;
   specValidationResults?: ValidationResult[];

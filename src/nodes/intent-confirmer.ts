@@ -3,8 +3,9 @@ import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 
 /**
- * Intent Confirmer — asks the user to confirm the classified intent.
- * Only runs when auto-confirm conditions are not met.
+ * Intent Confirmer — asks the user to confirm or clarify the classified intent.
+ * When ambiguity flags exist, sends clarifying questions to the user.
+ * The user's answers are merged into the intent for re-classification.
  */
 export async function intentConfirmer(
   state: AESStateType
@@ -21,16 +22,50 @@ export async function intentConfirmer(
   }
 
   const brief = state.intentBrief;
+  const questions = brief.clarifying_questions ?? [];
 
   store.addLog(state.jobId, {
     gate: "gate_0",
-    message: `Asking user to confirm: "${brief.confirmation_statement}"`,
+    message: questions.length > 0
+      ? `Asking user to clarify: ${questions.join("; ")}`
+      : `Asking user to confirm: "${brief.confirmation_statement}"`,
   });
 
-  // Ask user via CLI callback
-  const confirmed = await cb?.onNeedsConfirmation(brief.confirmation_statement);
+  // Ask user via callback — passes questions so the UI can show them
+  const confirmed = await cb?.onNeedsConfirmation(
+    brief.confirmation_statement,
+    questions,
+  );
 
   if (confirmed) {
+    // Check if the user provided clarification text (stored on the job by the confirm endpoint)
+    const job = store.get(state.jobId);
+    const clarification = job?.clarification as string | undefined;
+
+    if (clarification) {
+      cb?.onSuccess(`Clarification received — enriching intent`);
+      store.addLog(state.jobId, {
+        gate: "gate_0",
+        message: `User clarified: "${clarification.slice(0, 100)}"`,
+      });
+
+      // Merge clarification into the raw request for re-classification
+      const enrichedRequest = `${brief.raw_request}. ${clarification}`;
+
+      return {
+        intentConfirmed: true,
+        rawRequest: enrichedRequest,
+        intentBrief: {
+          ...brief,
+          raw_request: enrichedRequest,
+          user_clarification: clarification,
+          confirmation_status: "confirmed_with_clarification",
+          ambiguity_flags: [], // cleared — user answered
+          updated_at: new Date().toISOString(),
+        },
+      };
+    }
+
     cb?.onSuccess("Intent confirmed by user");
     store.addLog(state.jobId, {
       gate: "gate_0",
@@ -46,10 +81,10 @@ export async function intentConfirmer(
       },
     };
   } else {
-    cb?.onFail("Intent rejected by user");
+    cb?.onFail("Intent timed out waiting for confirmation");
     store.addLog(state.jobId, {
       gate: "gate_0",
-      message: "User rejected intent",
+      message: "Intent confirmation timed out",
     });
 
     return {
@@ -57,10 +92,10 @@ export async function intentConfirmer(
       currentGate: "failed" as const,
       intentBrief: {
         ...brief,
-        confirmation_status: "rejected",
+        confirmation_status: "timed_out",
         updated_at: new Date().toISOString(),
       },
-      errorMessage: "Intent rejected by user",
+      errorMessage: "Intent confirmation timed out — try again with more detail",
     };
   }
 }

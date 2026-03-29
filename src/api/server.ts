@@ -135,8 +135,8 @@ app.post("/api/build", async (req, res) => {
         setTimeout(() => { clearInterval(check); resolve(false); }, 300000);
       });
     },
-    onNeedsConfirmation: async (statement) => {
-      broadcastToJob(jobId, "needs_confirmation", { statement });
+    onNeedsConfirmation: async (statement, questions) => {
+      broadcastToJob(jobId, "needs_confirmation", { statement, questions: questions ?? [] });
       return new Promise((resolve) => {
         const store = getJobStore();
         const check = setInterval(() => {
@@ -209,8 +209,12 @@ app.post("/api/jobs/:id/confirm", (req, res) => {
     return;
   }
 
-  store.update(jobId, { intentConfirmed: true });
-  res.json({ confirmed: true });
+  const clarification = req.body?.clarification as string | undefined;
+  store.update(jobId, {
+    intentConfirmed: true,
+    clarification: clarification || undefined,
+  });
+  res.json({ confirmed: true, hasClarification: !!clarification });
 });
 
 // ─── GET /api/jobs/:id/design-brief — Get the design brief + Claude prompt ──

@@ -33,7 +33,7 @@ export interface GraphCallbacks {
   onPause: (message: string) => void;
   onFeatureStatus: (id: string, name: string, status: string) => void;
   onNeedsApproval: (prompt: string, data: any) => Promise<boolean>;
-  onNeedsConfirmation: (statement: string) => Promise<boolean>;
+  onNeedsConfirmation: (statement: string, questions?: string[]) => Promise<boolean>;
 }
 
 // Global callbacks reference for nodes to use

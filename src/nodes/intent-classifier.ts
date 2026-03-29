@@ -126,6 +126,27 @@ function detectAmbiguity(input: string, appClass: string): string[] {
   return flags;
 }
 
+/** Generate human-readable clarifying questions from ambiguity flags */
+function generateClarifyingQuestions(flags: string[], _input: string): string[] {
+  const questions: string[] = [];
+
+  for (const flag of flags) {
+    switch (flag) {
+      case "ambiguous_app_class":
+        questions.push("What type of app is this? (e.g. dashboard, marketplace, chat app, portal, wallet, workflow tool)");
+        break;
+      case "ambiguous_primary_user":
+        questions.push("Who is the primary user? (e.g. consumers, business admins, internal staff, both buyers and sellers)");
+        break;
+      case "ambiguous_core_workflow":
+        questions.push("What is the main thing a user does in this app? (e.g. send messages, manage orders, track deliveries, submit requests)");
+        break;
+    }
+  }
+
+  return questions;
+}
+
 function inferCoreOutcome(input: string, appClass: string): string {
   const outcomes: Record<string, string> = {
     internal_ops_tool: "manage internal operations and data",
@@ -183,6 +204,8 @@ export function keywordClassifyIntent(rawRequest: string, requestId: string): an
     confirmationStatus = "pending";
   }
 
+  const clarifyingQuestions = generateClarifyingQuestions(ambiguityFlags, input);
+
   return {
     request_id: requestId,
     raw_request: input,
@@ -195,6 +218,7 @@ export function keywordClassifyIntent(rawRequest: string, requestId: string): an
     explicit_inclusions: [],
     explicit_exclusions: [],
     ambiguity_flags: ambiguityFlags,
+    clarifying_questions: clarifyingQuestions,
     assumptions: [],
     confirmation_statement: confirmationStatement,
     confirmation_status: confirmationStatus,
@@ -262,10 +286,14 @@ async function llmClassifyIntent(rawRequest: string, requestId: string): Promise
     confirmationStatus = "pending";
   }
 
+  // Generate clarifying questions from any ambiguity flags the LLM detected
+  const clarifyingQuestions = generateClarifyingQuestions(result.ambiguity_flags || [], rawRequest);
+
   return {
     request_id: requestId,
     raw_request: rawRequest,
     ...result,
+    clarifying_questions: clarifyingQuestions,
     confirmation_status: confirmationStatus,
     schema_version: CURRENT_SCHEMA_VERSION,
     created_at: now,
