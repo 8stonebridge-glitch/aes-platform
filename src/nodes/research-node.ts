@@ -19,7 +19,7 @@ import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 
 const RESEARCH_API = process.env.AES_PERPLEXITY_URL ?? "http://localhost:3200";
-const RESEARCH_TIMEOUT_MS = 30_000;
+const RESEARCH_TIMEOUT_MS = 8_000;
 
 interface ResearchResult {
   query: string;
@@ -209,15 +209,20 @@ export async function researchNode(
   let successCount = 0;
   let failCount = 0;
 
-  for (const { query, category } of queries) {
-    cb?.onStep(`Researching: ${category}...`);
+  cb?.onStep(`Running ${queries.length} research queries in parallel...`);
 
-    // Try MCP research API first, then direct Perplexity, then skip
-    let research = await queryResearch(query, category);
-    if (!research) {
-      research = await queryPerplexityDirect(query);
-    }
+  const queryResults = await Promise.all(
+    queries.map(async ({ query, category }) => {
+      // Try MCP research API first, then direct Perplexity, then skip
+      let research = await queryResearch(query, category);
+      if (!research) {
+        research = await queryPerplexityDirect(query);
+      }
+      return { query, category, research };
+    })
+  );
 
+  for (const { query, category, research } of queryResults) {
     if (research && research.findings.length > 0) {
       results.push({
         query,
@@ -230,8 +235,11 @@ export async function researchNode(
       cb?.onStep(`${category}: ${research.findings.length} findings from ${research.sources.length} sources`);
     } else {
       failCount++;
-      cb?.onStep(`${category}: no results (API unavailable or empty)`);
     }
+  }
+
+  if (failCount > 0) {
+    cb?.onStep(`${failCount} research queries returned no results`);
   }
 
   // Organize findings by type for graphContext

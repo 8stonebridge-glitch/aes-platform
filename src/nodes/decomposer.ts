@@ -223,6 +223,36 @@ function deriveRoles(appClass: string): any[] {
       { role_id: "seller", name: "Seller", description: "Can list products and manage orders", scope: "account", inherits_from: [] },
       { role_id: "admin", name: "Marketplace Admin", description: "Platform management", scope: "global", inherits_from: [] },
     ],
+    messaging_platform: [
+      { role_id: "user", name: "User", description: "Can send/receive messages, create conversations", scope: "account", inherits_from: [] },
+      { role_id: "moderator", name: "Moderator", description: "Can moderate content and manage reports", scope: "org", inherits_from: ["user"] },
+      { role_id: "admin", name: "Admin", description: "Full platform access including user management", scope: "global", inherits_from: ["moderator"] },
+    ],
+    social_platform: [
+      { role_id: "user", name: "User", description: "Can post, comment, follow, and interact", scope: "account", inherits_from: [] },
+      { role_id: "moderator", name: "Moderator", description: "Can moderate content and manage community", scope: "org", inherits_from: ["user"] },
+      { role_id: "admin", name: "Admin", description: "Full platform management", scope: "global", inherits_from: ["moderator"] },
+    ],
+    scheduling_platform: [
+      { role_id: "client", name: "Client", description: "Can book appointments and manage bookings", scope: "self", inherits_from: [] },
+      { role_id: "staff", name: "Staff", description: "Can manage availability and view bookings", scope: "account", inherits_from: [] },
+      { role_id: "admin", name: "Admin", description: "Full access to settings, staff, and reporting", scope: "org", inherits_from: ["staff"] },
+    ],
+    education_platform: [
+      { role_id: "student", name: "Student", description: "Can enroll in courses, complete lessons, take quizzes", scope: "account", inherits_from: [] },
+      { role_id: "instructor", name: "Instructor", description: "Can create and manage courses", scope: "org", inherits_from: [] },
+      { role_id: "admin", name: "Admin", description: "Platform management and reporting", scope: "global", inherits_from: ["instructor"] },
+    ],
+    project_management: [
+      { role_id: "member", name: "Team Member", description: "Can view and update tasks assigned to them", scope: "account", inherits_from: [] },
+      { role_id: "manager", name: "Project Manager", description: "Can create projects, assign tasks, manage sprints", scope: "org", inherits_from: ["member"] },
+      { role_id: "admin", name: "Admin", description: "Full access including workspace settings", scope: "global", inherits_from: ["manager"] },
+    ],
+    crm_system: [
+      { role_id: "rep", name: "Sales Rep", description: "Can manage contacts, leads, and deals", scope: "account", inherits_from: [] },
+      { role_id: "manager", name: "Sales Manager", description: "Can view team pipeline and reporting", scope: "org", inherits_from: ["rep"] },
+      { role_id: "admin", name: "Admin", description: "Full CRM access and configuration", scope: "global", inherits_from: ["manager"] },
+    ],
   };
 
   return rolesByClass[appClass] || [
@@ -321,12 +351,85 @@ export function templateDecompose(state: AESStateType): { appSpec: any; featureB
     cb?.onWarn(`No template found for ${appClass} — using minimal defaults`);
   }
 
-  // Derive features from template or defaults
-  const featureDescriptions = template?.baseline_features || [
-    "User dashboard",
-    "Settings page",
-    "Role-based access control",
-  ];
+  // Derive features from template or class-specific defaults
+  const classDefaults: Record<string, string[]> = {
+    messaging_platform: [
+      "User authentication and profiles",
+      "Direct messaging (1-to-1 conversations)",
+      "Group conversations",
+      "Real-time message delivery and read receipts",
+      "Media and file attachments",
+      "Push notifications",
+      "Message search",
+      "Contact list and user discovery",
+      "Conversation settings and muting",
+      "Admin moderation dashboard",
+    ],
+    social_platform: [
+      "User authentication and profiles",
+      "News feed and content posting",
+      "Comments and reactions",
+      "Follow/unfollow and friend connections",
+      "Notifications",
+      "Media upload and gallery",
+      "Search and discovery",
+      "Content moderation dashboard",
+      "User settings and privacy controls",
+    ],
+    scheduling_platform: [
+      "User authentication and profiles",
+      "Service and event type management",
+      "Availability and calendar management",
+      "Booking and appointment creation",
+      "Appointment reminders and notifications",
+      "Client self-service booking page",
+      "Staff schedule dashboard",
+      "Payment and deposit collection",
+      "Cancellation and rescheduling",
+      "Admin reporting dashboard",
+    ],
+    education_platform: [
+      "User authentication and profiles",
+      "Course creation and management",
+      "Lesson and module builder",
+      "Student enrollment and progress tracking",
+      "Quiz and assessment engine",
+      "Discussion forums",
+      "Notifications and reminders",
+      "Instructor dashboard",
+      "Admin reporting and analytics",
+    ],
+    project_management: [
+      "User authentication and profiles",
+      "Project and workspace creation",
+      "Task creation and assignment",
+      "Kanban board view",
+      "Sprint planning and backlog management",
+      "Comments and activity feed",
+      "Notifications",
+      "Dashboard and reporting",
+      "Team member management",
+    ],
+    crm_system: [
+      "User authentication and profiles",
+      "Contact and company management",
+      "Lead capture and scoring",
+      "Deal pipeline and stages",
+      "Activity logging (calls, emails, meetings)",
+      "Task and follow-up reminders",
+      "Sales dashboard and reporting",
+      "Email integration",
+      "Admin settings and team management",
+    ],
+  };
+
+  const featureDescriptions = template?.baseline_features
+    || classDefaults[appClass]
+    || [
+      "User dashboard",
+      "Settings page",
+      "Role-based access control",
+    ];
 
   const features = featureDescriptions.map((desc, i) =>
     featureFromDescription(desc, i, appClass)

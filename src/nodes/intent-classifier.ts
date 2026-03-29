@@ -19,6 +19,13 @@ const APP_CLASS_KEYWORDS: Record<string, string[]> = {
   property_management_system: ["property", "real estate", "tenant", "landlord", "rental"],
   logistics_operations_system: ["logistics", "shipping", "delivery", "fleet", "tracking", "dispatch"],
   compliance_case_management: ["compliance", "case", "audit", "regulatory", "investigation"],
+  messaging_platform: ["messaging", "message", "chat", "inbox", "conversation", "direct message", "dm", "slack", "discord", "telegram"],
+  social_platform: ["social", "feed", "post", "comment", "follow", "profile", "social network", "community"],
+  scheduling_platform: ["booking", "appointment", "schedule", "calendar", "reservation", "availability"],
+  education_platform: ["course", "learning", "student", "teacher", "classroom", "quiz", "lesson", "lms"],
+  healthcare_system: ["patient", "doctor", "clinic", "appointment", "medical", "health", "ehr", "telehealth"],
+  project_management: ["project", "task", "kanban", "sprint", "ticket", "backlog", "jira", "trello"],
+  crm_system: ["crm", "lead", "contact", "pipeline", "deal", "sales", "prospect"],
 };
 
 const RISK_KEYWORDS: Record<string, string[]> = {
@@ -138,6 +145,13 @@ function inferCoreOutcome(input: string, appClass: string): string {
     property_management_system: "managing properties, tenants, and leases",
     logistics_operations_system: "tracking and managing deliveries",
     compliance_case_management: "managing compliance cases and investigations",
+    messaging_platform: "real-time messaging, conversations, and notifications",
+    social_platform: "social networking, content sharing, and community interaction",
+    scheduling_platform: "booking, scheduling, and availability management",
+    education_platform: "online learning, courses, and student management",
+    healthcare_system: "patient care, appointments, and medical records",
+    project_management: "project tracking, task management, and team collaboration",
+    crm_system: "customer relationship management and sales pipeline",
     other: "custom application",
   };
 
@@ -156,6 +170,13 @@ function inferPrimaryUsers(appClass: string): string[] {
     property_management_system: ["property managers", "tenants"],
     logistics_operations_system: ["dispatchers", "drivers", "operations managers"],
     compliance_case_management: ["compliance officers", "case managers", "auditors"],
+    messaging_platform: ["users", "administrators"],
+    social_platform: ["users", "content moderators", "administrators"],
+    scheduling_platform: ["clients", "staff", "administrators"],
+    education_platform: ["students", "instructors", "administrators"],
+    healthcare_system: ["patients", "healthcare providers", "administrators"],
+    project_management: ["team members", "project managers", "administrators"],
+    crm_system: ["sales representatives", "managers", "administrators"],
     other: ["users"],
   };
 
