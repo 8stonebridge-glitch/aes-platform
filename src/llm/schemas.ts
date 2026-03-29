@@ -6,20 +6,8 @@ import { z } from "zod";
 
 export const IntentBriefSchema = z.object({
   inferred_app_class: z
-    .enum([
-      "internal_ops_tool",
-      "customer_portal",
-      "fintech_wallet",
-      "digital_banking_portal",
-      "banking_operations_system",
-      "marketplace",
-      "workflow_approval_system",
-      "property_management_system",
-      "logistics_operations_system",
-      "compliance_case_management",
-      "other",
-    ])
-    .describe("The type of application being requested"),
+    .string()
+    .describe("The type of application being requested, as a snake_case identifier. Use a descriptive name like 'messaging_platform', 'fitness_tracker', 'recipe_sharing_app', etc. Use well-known categories when they fit (internal_ops_tool, customer_portal, fintech_wallet, marketplace, workflow_approval_system) but do NOT force-fit — use a descriptive name that actually matches the intent."),
   inferred_primary_users: z
     .array(z.string())
     .min(1)
@@ -36,10 +24,8 @@ export const IntentBriefSchema = z.object({
       "Risk classification. Use 'regulated' for anything involving money, banking, or financial compliance"
     ),
   inferred_integrations: z
-    .array(
-      z.enum(["payments", "email", "sms", "storage", "maps", "analytics"])
-    )
-    .describe("External integrations needed"),
+    .array(z.string())
+    .describe("External integrations needed (e.g. payments, email, sms, storage, maps, analytics, websockets, push_notifications, oauth, etc.)"),
   explicit_inclusions: z
     .array(z.string())
     .describe("Features or requirements the user explicitly asked for"),

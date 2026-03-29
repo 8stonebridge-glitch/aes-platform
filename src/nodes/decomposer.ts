@@ -65,6 +65,85 @@ export function topologicalSort(features: any[], edges: any[]): string[] {
   return sorted;
 }
 
+// ─── Intent-derived feature reasoning ──────────────────────────────────
+// When there's no template match and no LLM, reason about features from
+// the raw request. This is the "figure it out" path.
+
+const DOMAIN_FEATURE_MAP: Record<string, string[]> = {
+  // Communication
+  messaging: ["Direct messaging", "Group conversations", "Real-time message delivery", "Message search", "Media and file attachments", "Push notifications", "Conversation list and inbox"],
+  chat: ["Real-time chat", "Chat rooms and channels", "Message history", "Typing indicators and read receipts", "File sharing", "Push notifications"],
+  email: ["Email inbox", "Compose and send email", "Folder management", "Search", "Attachments", "Contact management"],
+  // Social
+  social: ["User profiles", "News feed", "Posts and content creation", "Comments and reactions", "Follow/friend connections", "Notifications", "Content moderation"],
+  forum: ["Discussion threads", "Categories and tags", "User profiles and reputation", "Search", "Moderation tools", "Notifications"],
+  community: ["Member profiles", "Discussion boards", "Events and meetups", "Member directory", "Moderation", "Notifications"],
+  // Productivity
+  task: ["Task creation and editing", "Task assignment", "Due dates and reminders", "Status tracking", "Labels and categories", "Dashboard overview"],
+  project: ["Project workspaces", "Task board (Kanban/list)", "Team collaboration", "Timeline and milestones", "Comments and activity", "Reporting"],
+  note: ["Create and edit notes", "Folders and organization", "Search", "Tags and labels", "Rich text editing", "Sharing and collaboration"],
+  todo: ["Todo list creation", "Due dates and priorities", "Categories and labels", "Completion tracking", "Reminders", "Daily/weekly views"],
+  // Content
+  blog: ["Post editor", "Categories and tags", "Comments", "Author profiles", "Search", "RSS feed"],
+  wiki: ["Page creation and editing", "Revision history", "Search", "Categories and linking", "Permissions", "Table of contents"],
+  // Commerce
+  store: ["Product catalog", "Shopping cart", "Checkout and payments", "Order management", "Product search", "Customer accounts"],
+  inventory: ["Item tracking", "Stock levels", "Categories", "Low stock alerts", "Barcode/SKU management", "Reporting"],
+  // Media
+  video: ["Video upload and playback", "Video library", "Playlists", "Search", "Comments and likes", "User channels"],
+  music: ["Music player", "Playlists", "Library management", "Search and discovery", "Artist profiles", "Queue management"],
+  photo: ["Photo upload and gallery", "Albums", "Editing and filters", "Sharing", "Comments and likes", "Search"],
+  // Health & Fitness
+  fitness: ["Workout tracking", "Exercise library", "Progress charts", "Goals and milestones", "Activity history", "Profile and stats"],
+  health: ["Health dashboard", "Appointment scheduling", "Medical records", "Medication tracking", "Provider directory", "Notifications"],
+  // Other common types
+  recipe: ["Recipe creation and editing", "Ingredient lists", "Categories and tags", "Search and filtering", "Favorites and collections", "Meal planning"],
+  survey: ["Survey builder", "Question types", "Response collection", "Results and analytics", "Sharing and distribution", "Export"],
+  voting: ["Poll creation", "Voting interface", "Results visualization", "Voter verification", "Categories", "Notifications"],
+  weather: ["Current conditions", "Forecast display", "Location management", "Alerts and warnings", "Historical data", "Settings"],
+  finance: ["Account overview", "Transaction tracking", "Budgeting", "Reports and charts", "Categories", "Goals"],
+  news: ["Article feed", "Categories and topics", "Search", "Bookmarks and reading list", "Notifications", "Share"],
+  game: ["Game interface", "User profiles and scores", "Leaderboard", "Multiplayer matchmaking", "Settings", "Achievements"],
+  booking: ["Service catalog", "Availability calendar", "Booking flow", "Confirmation and reminders", "Cancellation and rescheduling", "Payment collection"],
+};
+
+function deriveFeatureDescriptionsFromIntent(rawRequest: string, appClass: string): string[] {
+  const lower = rawRequest.toLowerCase();
+
+  // Try to match domain keywords from the raw request
+  for (const [domain, features] of Object.entries(DOMAIN_FEATURE_MAP)) {
+    if (lower.includes(domain)) {
+      return [
+        "User authentication and profiles",
+        ...features,
+        "Settings and preferences",
+        "Admin dashboard",
+      ];
+    }
+  }
+
+  // If nothing matched, extract what the user actually said and build around it
+  // "build a X app" → derive core feature from X
+  const typeMatch = lower.match(/\b(?:build|create|make|develop)\s+(?:a|an|the)\s+(.+?)(?:\s+app(?:lication)?|\s+platform|\s+system|\s+tool)?\s*$/);
+  const appType = typeMatch?.[1]?.trim() || appClass.replace(/_/g, " ");
+
+  return [
+    "User authentication and profiles",
+    `${capitalize(appType)} dashboard`,
+    `Core ${appType} functionality`,
+    `${capitalize(appType)} management`,
+    "Search and filtering",
+    "Notifications",
+    "Settings and preferences",
+    "Admin panel",
+    "Role-based access control",
+  ];
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // ─── Template-based decomposer (fallback) ──────────────────────────────
 
 // Map a feature description string into a typed feature object
@@ -425,11 +504,7 @@ export function templateDecompose(state: AESStateType): { appSpec: any; featureB
 
   const featureDescriptions = template?.baseline_features
     || classDefaults[appClass]
-    || [
-      "User dashboard",
-      "Settings page",
-      "Role-based access control",
-    ];
+    || deriveFeatureDescriptionsFromIntent(state.rawRequest, appClass);
 
   const features = featureDescriptions.map((desc, i) =>
     featureFromDescription(desc, i, appClass)

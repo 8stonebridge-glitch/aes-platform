@@ -51,7 +51,17 @@ const INTEGRATION_KEYWORDS: Record<string, string[]> = {
 };
 
 const AMBIGUITY_CHECKS: Record<string, (input: string, appClass: string) => boolean> = {
-  ambiguous_app_class: (input, appClass) => appClass === "other",
+  // Only flag app_class as ambiguous if the input is genuinely vague —
+  // "build a messaging app" is clear even if we don't have a keyword category.
+  // Short, generic requests like "build an app" or "make something" are ambiguous.
+  ambiguous_app_class: (input, appClass) => {
+    if (appClass !== "other") return false;
+    // If the user named a specific type of app, it's not ambiguous
+    const hasSpecificType = /\b(messaging|chat|social|booking|scheduling|crm|project|task|learning|education|health|inventory|tracking|blog|forum|wiki|game|music|video|photo|recipe|weather|fitness|finance|news|voting|survey|todo|note)\b/i.test(input);
+    if (hasSpecificType) return false;
+    // Very short inputs with no specifics are ambiguous
+    return input.split(/\s+/).length < 5;
+  },
   ambiguous_primary_user: (input) => {
     const hasUser = /\b(for|by|used by)\s+\w+/i.test(input);
     return !hasUser && input.split(" ").length < 8;
@@ -134,6 +144,18 @@ function detectAmbiguity(input: string, appClass: string): string[] {
 }
 
 function inferCoreOutcome(input: string, appClass: string): string {
+  // For unknown classes, derive the outcome from the raw request itself
+  if (appClass === "other") {
+    // Extract the app type from "build a X app" / "create a X" patterns
+    const typeMatch = input.match(/\b(?:build|create|make|develop)\s+(?:a|an|the)\s+(.+?)(?:\s+app(?:lication)?|\s+platform|\s+system|\s+tool)?$/i);
+    if (typeMatch) {
+      return typeMatch[1].trim().toLowerCase();
+    }
+    // Fall back to using the input itself as the outcome description
+    const cleaned = input.replace(/^(build|create|make|develop|i want|i need)\s+(a|an|the)\s+/i, "").trim();
+    return cleaned.length > 5 ? cleaned.toLowerCase() : "custom application";
+  }
+
   const outcomes: Record<string, string> = {
     internal_ops_tool: "manage internal operations and data",
     customer_portal: "self-service account and activity management",
@@ -197,8 +219,11 @@ export function keywordClassifyIntent(rawRequest: string, requestId: string): an
 
   const confirmationStatement = `You want a ${appClass.replace(/_/g, " ")} for ${primaryUsers.join(" and ")}, focused on ${coreOutcome}, delivered as ${platforms.join(" + ")}${integrations.length > 0 ? `, with ${integrations.join(", ")}` : ""} — correct?`;
 
+  // Auto-confirm if the intent is clear — don't require a known app_class.
+  // A specific request like "build a messaging app" is clear even if we
+  // classify it as "other". Only block on genuine ambiguity or high risk.
   let confirmationStatus: string;
-  if (ambiguityFlags.length === 0 && riskClass === "low") {
+  if (ambiguityFlags.length === 0 && (riskClass === "low" || riskClass === "medium")) {
     confirmationStatus = "auto_confirmed_low_ambiguity";
   } else {
     confirmationStatus = "pending";
@@ -229,26 +254,21 @@ export function keywordClassifyIntent(rawRequest: string, requestId: string): an
 
 const INTENT_CLASSIFIER_SYSTEM_PROMPT = `You are an intent classifier for a governed software factory. Given a natural-language app description, classify it into a structured intent brief.
 
-App class categories:
-- internal_ops_tool: Internal dashboards, admin panels, back-office tools
-- customer_portal: Customer-facing self-service portals
-- fintech_wallet: Money transfer, payment, wallet apps
-- digital_banking_portal: Retail/digital banking interfaces
-- banking_operations_system: Core banking, operations systems
-- marketplace: Two-sided marketplaces, e-commerce
-- workflow_approval_system: Approval workflows, request management
-- property_management_system: Real estate, tenant, rental management
-- logistics_operations_system: Shipping, delivery, fleet tracking
-- compliance_case_management: Compliance, audit, regulatory case management
-- other: If none of the above clearly match
+For inferred_app_class, use a descriptive snake_case name that accurately describes the app. Examples:
+- messaging_platform, social_network, fitness_tracker, recipe_sharing_app
+- internal_ops_tool, customer_portal, fintech_wallet, marketplace
+- project_management, crm_system, booking_platform, education_platform
+Use whatever name best fits — do NOT force the intent into a predefined category.
 
 Risk classification:
 - regulated: Anything involving money, banking, financial transactions, compliance
 - high: Enterprise systems, security-sensitive apps
 - medium: Customer-facing, marketplace, external-facing apps
-- low: Internal tools, dashboards, simple approval workflows
+- low: Internal tools, dashboards, simple approval workflows, social apps, content apps
 
-Be precise. Extract explicit requirements vs inferences. Flag genuine ambiguities — don't flag things that are clearly implied. Generate a natural confirmation statement.
+Ambiguity: Only flag GENUINE ambiguity — things that are truly unclear. "Build a messaging app" is NOT ambiguous, the user clearly wants a messaging app. "Build an app" IS ambiguous. Don't flag things that are clearly implied by the app type.
+
+Be precise. Extract explicit requirements vs inferences. Generate a natural confirmation statement.
 
 Platforms must always include "web". Add "pwa" if mobile/offline is mentioned. Add "admin_console" if admin management is needed.`;
 
@@ -275,9 +295,9 @@ async function llmClassifyIntent(rawRequest: string, requestId: string): Promise
   // Build full IntentBrief with fields the LLM doesn't generate
   const now = new Date().toISOString();
 
-  // Determine confirmation status using same logic as keyword classifier
+  // Determine confirmation status — auto-confirm if intent is clear
   let confirmationStatus: string;
-  if (result.ambiguity_flags.length === 0 && result.inferred_risk_class === "low") {
+  if (result.ambiguity_flags.length === 0 && (result.inferred_risk_class === "low" || result.inferred_risk_class === "medium")) {
     confirmationStatus = "auto_confirmed_low_ambiguity";
   } else {
     confirmationStatus = "pending";
