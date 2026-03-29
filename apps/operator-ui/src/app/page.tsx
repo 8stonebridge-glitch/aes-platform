@@ -431,6 +431,8 @@ function BuildsTab({
   needsApproval,
   approvalData,
   sseMessages,
+  sseConnected,
+  pipelineMessage,
   onSubmitIntent,
   onApprove,
   onConfirm,
