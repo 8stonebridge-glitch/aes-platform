@@ -836,7 +836,8 @@ app.get("/api/health", (_req, res) => {
 const PORT = parseInt(process.env.PORT || process.env.AES_PORT || "3100");
 
 export function startServer() {
-  app.listen(PORT, () => {
+  // Bind to :: (IPv6 + IPv4) for Railway private networking compatibility
+  app.listen(PORT, "::", () => {
     console.log(`AES Platform API running on http://localhost:${PORT}`);
     console.log(`  POST /api/build                          — Start a build`);
     console.log(`  GET  /api/jobs/:id/stream                — SSE stream`);
