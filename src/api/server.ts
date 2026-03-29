@@ -166,7 +166,8 @@ app.post("/api/build", async (req, res) => {
     syncJobToConvex(jobId);
 
     // Push pipeline outcome to Hermes for behavioral analysis
-    const hermesUrl = process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
+    // Prefer internal Railway URL for container-to-container communication
+    const hermesUrl = process.env.HERMES_INTERNAL_URL || process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
     if (hermesUrl) {
       const store = getJobStore();
       const job = store.get(jobId);
@@ -694,7 +695,8 @@ app.get("/api/self-audit", async (_req, res) => {
     }
 
     // Push suggestions to Hermes if available
-    const hermesUrl = process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
+    // Prefer internal Railway URL for container-to-container communication
+    const hermesUrl = process.env.HERMES_INTERNAL_URL || process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
     if (hermesUrl && suggestions.length > 0) {
       fetch(`${hermesUrl}/suggestions/ingest`, {
         method: "POST",
