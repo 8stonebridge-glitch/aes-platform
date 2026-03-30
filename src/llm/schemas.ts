@@ -105,7 +105,7 @@ const PermissionSchema = z.object({
   role_id: z.string().describe("Must reference a declared role_id"),
   resource: z.string().describe("Must be a valid feature_id"),
   effect: z.enum(["allow", "deny"]),
-  condition: z.string().optional(),
+  condition: z.string().default("none"),
 });
 
 const ActorSchema = z.object({
@@ -123,9 +123,9 @@ const IntegrationSchema = z.object({
   provider: z.string(),
   purpose: z.string(),
   fallback_defined: z.literal(true),
-  fallback_behavior: z.string().optional(),
+  fallback_behavior: z.string().default("Queue and retry on failure"),
   retry_policy_defined: z.boolean(),
-  user_visible_failure_state: z.string().optional(),
+  user_visible_failure_state: z.string().default("Service temporarily unavailable"),
 });
 
 const AcceptanceTestSchema = z.object({
