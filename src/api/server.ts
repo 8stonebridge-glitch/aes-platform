@@ -893,7 +893,7 @@ app.get("/api/health", (_req, res) => {
   const sem = getLLMSemaphoreStats();
   res.json({
     status: "ok",
-    version: "v14",
+    version: "v15",
     build_id: BUILD_ID,
     booted_at: BOOT_TIME,
     math_layer: true,
