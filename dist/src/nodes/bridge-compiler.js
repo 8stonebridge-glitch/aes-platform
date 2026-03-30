@@ -106,8 +106,9 @@ function deduplicateRequirements(reqs) {
  * Iterates through features in build order.
  */
 function compileBridge(feature, appSpec, catalogMatches, buildIndex) {
-    const featureLower = feature.name.toLowerCase();
-    const featureSlug = feature.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
+    const featureName = feature?.name ?? feature?.feature_id ?? "unknown-feature";
+    const featureLower = featureName.toLowerCase();
+    const featureSlug = featureLower.replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
     // Ensure outcome is never empty — fallback to a derived value
     const outcome = (feature.outcome && feature.outcome.trim())
         ? feature.outcome.trim()
@@ -551,7 +552,7 @@ export async function bridgeCompiler(state) {
         });
         bridge.math = mathFields;
         // Boost confidence if graph has a reusable bridge for this feature
-        const featureNameLower = feature.name.toLowerCase();
+        const featureNameLower = (feature?.name ?? feature?.feature_id ?? "").toLowerCase();
         const featureWords = featureNameLower.split(/[\s-_]+/).filter((w) => w.length > 2);
         const matchingPriorBridge = reusableBridges.find((rb) => {
             const rbName = (rb.feature_name || "").toLowerCase();

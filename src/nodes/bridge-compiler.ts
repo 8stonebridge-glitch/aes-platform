@@ -141,8 +141,9 @@ function compileBridge(
   catalogMatches: any[],
   buildIndex: number
 ): any {
-  const featureLower = feature.name.toLowerCase();
-  const featureSlug = feature.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
+  const featureName: string = feature?.name ?? feature?.feature_id ?? "unknown-feature";
+  const featureLower = featureName.toLowerCase();
+  const featureSlug = featureLower.replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
 
   // Ensure outcome is never empty — fallback to a derived value
   const outcome = (feature.outcome && feature.outcome.trim())
@@ -626,7 +627,7 @@ export async function bridgeCompiler(
     bridge.math = mathFields;
 
     // Boost confidence if graph has a reusable bridge for this feature
-    const featureNameLower = feature.name.toLowerCase();
+    const featureNameLower = (feature?.name ?? feature?.feature_id ?? "").toLowerCase();
     const featureWords = featureNameLower.split(/[\s-_]+/).filter((w: string) => w.length > 2);
     const matchingPriorBridge = reusableBridges.find((rb: any) => {
       const rbName = (rb.feature_name || "").toLowerCase();
