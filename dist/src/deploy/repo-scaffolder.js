@@ -1,0 +1,379 @@
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+/**
+ * Scaffolds a real Next.js + Clerk + Convex project in a workspace.
+ * This produces an actually buildable/deployable project, not stubs.
+ */
+export class RepoScaffolder {
+    scaffold(workspacePath, config) {
+        // 1. package.json
+        this.writePackageJson(workspacePath, config);
+        // 2. tsconfig.json
+        this.writeTsConfig(workspacePath);
+        // 3. next.config.mjs
+        this.writeNextConfig(workspacePath);
+        // 4. tailwind.config.ts
+        this.writeTailwindConfig(workspacePath);
+        // 5. postcss.config.mjs
+        this.writePostcssConfig(workspacePath);
+        // 6. .env.local.example
+        this.writeEnvExample(workspacePath);
+        // 7. Convex project structure
+        this.writeConvexBase(workspacePath);
+        // 8. Clerk middleware
+        this.writeClerkMiddleware(workspacePath);
+        // 9. App layout with Clerk + Convex providers
+        this.writeAppLayout(workspacePath, config);
+        // 10. Home page
+        this.writeHomePage(workspacePath, config);
+        // 11. Global CSS
+        this.writeGlobalCss(workspacePath);
+        // 12. .gitignore
+        this.writeGitignore(workspacePath);
+        // 13. AES workspace metadata
+        this.writeAesConfig(workspacePath, config);
+    }
+    ensureDir(filePath) {
+        const parts = filePath.split("/");
+        parts.pop();
+        const dir = parts.join("/");
+        if (dir) {
+            mkdirSync(dir, { recursive: true });
+        }
+    }
+    writePackageJson(base, config) {
+        writeFileSync(join(base, "package.json"), JSON.stringify({
+            name: config.app_slug,
+            version: "0.1.0",
+            private: true,
+            type: "module",
+            scripts: {
+                dev: "next dev",
+                build: "next build",
+                start: "next start",
+                lint: "next lint",
+            },
+            dependencies: {
+                "next": "^15.0.0",
+                "react": "^19.0.0",
+                "react-dom": "^19.0.0",
+                "@clerk/nextjs": "^6.0.0",
+                "convex": "^1.17.0",
+                "convex-helpers": "^0.1.0",
+            },
+            devDependencies: {
+                "typescript": "^5.7.0",
+                "@types/node": "^22.0.0",
+                "@types/react": "^19.0.0",
+                "@types/react-dom": "^19.0.0",
+                "tailwindcss": "^3.4.0",
+                "postcss": "^8.4.0",
+                "autoprefixer": "^10.4.0",
+                "vitest": "^2.0.0",
+            },
+        }, null, 2) + "\n");
+    }
+    writeTsConfig(base) {
+        writeFileSync(join(base, "tsconfig.json"), JSON.stringify({
+            compilerOptions: {
+                target: "ES2022",
+                lib: ["dom", "dom.iterable", "esnext"],
+                allowJs: true,
+                skipLibCheck: true,
+                strict: true,
+                noEmit: true,
+                esModuleInterop: true,
+                module: "esnext",
+                moduleResolution: "bundler",
+                resolveJsonModule: true,
+                isolatedModules: true,
+                jsx: "preserve",
+                incremental: true,
+                plugins: [{ name: "next" }],
+                paths: { "@/*": ["./*"] },
+            },
+            include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+            exclude: ["node_modules"],
+        }, null, 2) + "\n");
+    }
+    writeNextConfig(base) {
+        writeFileSync(join(base, "next.config.mjs"), `/** @type {import('next').NextConfig} */
+const nextConfig = {};
+export default nextConfig;
+`);
+    }
+    writeTailwindConfig(base) {
+        writeFileSync(join(base, "tailwind.config.ts"), `import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: [
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: { extend: {} },
+  plugins: [],
+};
+export default config;
+`);
+    }
+    writePostcssConfig(base) {
+        writeFileSync(join(base, "postcss.config.mjs"), `/** @type {import('postcss-load-config').Config} */
+const config = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+export default config;
+`);
+    }
+    writeEnvExample(base) {
+        writeFileSync(join(base, ".env.local.example"), `# Clerk (OPTIONAL — keyless mode works without these)
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+# CLERK_SECRET_KEY=sk_test_...
+
+# Convex
+NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
+CONVEX_DEPLOYMENT=dev:your-project
+`);
+    }
+    writeConvexBase(base) {
+        mkdirSync(join(base, "convex"), { recursive: true });
+        // convex/schema.ts - base schema with audit log
+        writeFileSync(join(base, "convex", "schema.ts"), `import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+/**
+ * Base schema for ${base.split("/").pop()}
+ * Generated by AES v12
+ *
+ * All tables include orgId for tenant isolation.
+ * Add feature-specific tables below the base tables.
+ */
+const schema = defineSchema({
+  // Audit log - tracks all significant actions
+  audit_logs: defineTable({
+    action: v.string(),
+    resource: v.string(),
+    resourceId: v.string(),
+    actorId: v.string(),
+    orgId: v.string(),
+    metadata: v.optional(v.any()),
+    timestamp: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_resource", ["resource", "resourceId"])
+    .index("by_actor", ["actorId"]),
+});
+
+export default schema;
+`);
+        // convex/tsconfig.json
+        writeFileSync(join(base, "convex", "tsconfig.json"), JSON.stringify({
+            compilerOptions: {
+                target: "ESNext",
+                lib: ["ES2021", "dom"],
+                module: "ESNext",
+                moduleResolution: "Bundler",
+                allowJs: true,
+                strict: true,
+                noEmit: true,
+                isolatedModules: true,
+                skipLibCheck: true,
+                paths: { "convex/_generated/*": ["./_generated/*"] },
+            },
+            include: ["./**/*.ts", "./**/*.tsx"],
+            exclude: ["./node_modules"],
+        }, null, 2) + "\n");
+        // convex/audit.ts - audit log mutation
+        writeFileSync(join(base, "convex", "audit.ts"), `import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+
+/**
+ * Log an audit event. Called by all mutations that modify data.
+ */
+export const log = mutation({
+  args: {
+    action: v.string(),
+    resource: v.string(),
+    resourceId: v.string(),
+    actorId: v.string(),
+    orgId: v.string(),
+    metadata: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("audit_logs", {
+      ...args,
+      timestamp: Date.now(),
+    });
+  },
+});
+
+/**
+ * List audit logs for an org, most recent first.
+ */
+export const list = query({
+  args: {
+    orgId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const logs = await ctx.db
+      .query("audit_logs")
+      .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
+      .order("desc")
+      .take(args.limit || 50);
+    return logs;
+  },
+});
+`);
+    }
+    writeClerkMiddleware(base) {
+        writeFileSync(join(base, "proxy.ts"), `import { clerkMiddleware } from '@clerk/nextjs/server'
+export default clerkMiddleware()
+export const config = {
+  matcher: [
+    '/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    '/(api|trpc)(.*)',
+  ],
+}
+`);
+    }
+    writeAppLayout(base, config) {
+        mkdirSync(join(base, "app"), { recursive: true });
+        writeFileSync(join(base, "app", "layout.tsx"), `import type { Metadata } from "next";
+import { ClerkProvider, SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
+import { ConvexClientProvider } from "./convex-provider";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "${config.app_name}",
+  description: "Built by AES v12 — Governed Software Factory",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <ClerkProvider>
+          <ConvexClientProvider>
+            <header className="flex justify-between items-center px-6 py-3 border-b">
+              <span className="font-semibold">${config.app_name}</span>
+              <div className="flex items-center gap-3">
+                <Show when="signed-out">
+                  <SignInButton />
+                  <SignUpButton />
+                </Show>
+                <Show when="signed-in">
+                  <UserButton />
+                </Show>
+              </div>
+            </header>
+            <main>{children}</main>
+          </ConvexClientProvider>
+        </ClerkProvider>
+      </body>
+    </html>
+  );
+}
+`);
+        // Convex provider — works with keyless Clerk too
+        writeFileSync(join(base, "app", "convex-provider.tsx"), `"use client";
+
+import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { useAuth } from "@clerk/nextjs";
+import { ConvexReactClient } from "convex/react";
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
+
+export function ConvexClientProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  if (!convex) {
+    // No Convex URL yet — render children without Convex
+    return <>{children}</>;
+  }
+
+  return (
+    <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+      {children}
+    </ConvexProviderWithClerk>
+  );
+}
+`);
+    }
+    writeHomePage(base, config) {
+        writeFileSync(join(base, "app", "page.tsx"), `import { auth } from "@clerk/nextjs/server";
+
+export default async function HomePage() {
+  const { userId } = await auth();
+
+  return (
+    <main className="min-h-screen flex flex-col items-center justify-center p-8">
+      <h1 className="text-4xl font-bold mb-4">${config.app_name}</h1>
+      <p className="text-gray-500 mb-8">Built by AES v12</p>
+
+      {userId ? (
+        <a
+          href="/dashboard"
+          className="bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800"
+        >
+          Go to Dashboard
+        </a>
+      ) : (
+        <p className="text-gray-400">Sign in to get started</p>
+      )}
+    </main>
+  );
+}
+`);
+    }
+    writeGlobalCss(base) {
+        writeFileSync(join(base, "app", "globals.css"), `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+`);
+    }
+    writeGitignore(base) {
+        writeFileSync(join(base, ".gitignore"), `node_modules/
+.next/
+dist/
+.env.local
+.env
+*.tsbuildinfo
+.vercel
+`);
+    }
+    writeAesConfig(base, config) {
+        mkdirSync(join(base, ".github"), { recursive: true });
+        writeFileSync(join(base, ".github", "aes-instructions.md"), `# AES Build Instructions
+
+This repo is managed by AES v12.
+
+## Stack
+- Next.js (App Router)
+- Convex (backend + database)
+- Clerk (auth + orgs)
+- Tailwind CSS
+- Vercel (deploy)
+
+## Conventions
+- All Convex queries filter by orgId
+- All mutations call audit.log
+- All routes under /app are protected by Clerk middleware
+- Feature code lives under app/<feature-slug>/
+- Convex functions live under convex/<feature-slug>/
+- Components live under components/<feature-slug>/
+- Tests live under tests/<feature-slug>/
+
+## App: ${config.app_name}
+`);
+    }
+}

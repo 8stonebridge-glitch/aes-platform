@@ -1,0 +1,10 @@
+export declare function logGate(gate: string, message: string): void;
+export declare function logStep(message: string): void;
+export declare function logSuccess(message: string): void;
+export declare function logFail(message: string): void;
+export declare function logWarn(message: string): void;
+export declare function logPause(message: string): void;
+export declare function logDivider(): void;
+export declare function logHeader(title: string): void;
+export declare function logKeyValue(key: string, value: string): void;
+export declare function logFeatureStatus(featureId: string, name: string, status: string): void;

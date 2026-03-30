@@ -1,0 +1,159 @@
+import { z } from "zod";
+export declare const IntentBriefSchema: z.ZodObject<{
+    inferred_app_class: z.ZodEnum<{
+        internal_ops_tool: "internal_ops_tool";
+        customer_portal: "customer_portal";
+        fintech_wallet: "fintech_wallet";
+        digital_banking_portal: "digital_banking_portal";
+        banking_operations_system: "banking_operations_system";
+        marketplace: "marketplace";
+        workflow_approval_system: "workflow_approval_system";
+        property_management_system: "property_management_system";
+        logistics_operations_system: "logistics_operations_system";
+        compliance_case_management: "compliance_case_management";
+        other: "other";
+    }>;
+    inferred_primary_users: z.ZodArray<z.ZodString>;
+    inferred_core_outcome: z.ZodString;
+    inferred_platforms: z.ZodArray<z.ZodEnum<{
+        web: "web";
+        pwa: "pwa";
+        admin_console: "admin_console";
+    }>>;
+    inferred_risk_class: z.ZodEnum<{
+        low: "low";
+        medium: "medium";
+        high: "high";
+        regulated: "regulated";
+    }>;
+    inferred_integrations: z.ZodArray<z.ZodEnum<{
+        payments: "payments";
+        email: "email";
+        sms: "sms";
+        storage: "storage";
+        maps: "maps";
+        analytics: "analytics";
+    }>>;
+    explicit_inclusions: z.ZodArray<z.ZodString>;
+    explicit_exclusions: z.ZodArray<z.ZodString>;
+    ambiguity_flags: z.ZodArray<z.ZodString>;
+    assumptions: z.ZodArray<z.ZodString>;
+    confirmation_statement: z.ZodString;
+}, z.core.$strip>;
+export declare const AppSpecSchema: z.ZodObject<{
+    title: z.ZodString;
+    summary: z.ZodString;
+    app_class: z.ZodString;
+    risk_class: z.ZodString;
+    target_users: z.ZodArray<z.ZodString>;
+    platforms: z.ZodArray<z.ZodString>;
+    actors: z.ZodArray<z.ZodObject<{
+        actor_id: z.ZodString;
+        name: z.ZodString;
+        actor_type: z.ZodEnum<{
+            system: "system";
+            admin: "admin";
+            end_user: "end_user";
+            operator: "operator";
+        }>;
+        role_ids: z.ZodArray<z.ZodString>;
+        description: z.ZodString;
+    }, z.core.$strip>>;
+    roles: z.ZodArray<z.ZodObject<{
+        role_id: z.ZodString;
+        name: z.ZodString;
+        description: z.ZodString;
+        scope: z.ZodEnum<{
+            org: "org";
+            global: "global";
+            account: "account";
+            self: "self";
+        }>;
+        inherits_from: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>;
+    permissions: z.ZodArray<z.ZodObject<{
+        permission_id: z.ZodString;
+        role_id: z.ZodString;
+        resource: z.ZodString;
+        effect: z.ZodEnum<{
+            allow: "allow";
+            deny: "deny";
+        }>;
+        condition: z.ZodDefault<z.ZodString>;
+    }, z.core.$strip>>;
+    features: z.ZodArray<z.ZodObject<{
+        feature_id: z.ZodString;
+        name: z.ZodString;
+        summary: z.ZodString;
+        description: z.ZodString;
+        priority: z.ZodEnum<{
+            low: "low";
+            medium: "medium";
+            high: "high";
+            critical: "critical";
+        }>;
+        status: z.ZodLiteral<"proposed">;
+        actor_ids: z.ZodArray<z.ZodString>;
+        entity_ids: z.ZodArray<z.ZodString>;
+        user_problem: z.ZodString;
+        outcome: z.ZodString;
+        destructive_actions: z.ZodArray<z.ZodObject<{
+            action_name: z.ZodString;
+            reversible: z.ZodBoolean;
+            confirmation_required: z.ZodBoolean;
+            audit_logged: z.ZodBoolean;
+        }, z.core.$strip>>;
+        audit_required: z.ZodBoolean;
+        offline_behavior_required: z.ZodBoolean;
+        external_dependencies: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>>;
+    integrations: z.ZodArray<z.ZodObject<{
+        integration_id: z.ZodString;
+        name: z.ZodString;
+        type: z.ZodString;
+        provider: z.ZodString;
+        purpose: z.ZodString;
+        fallback_defined: z.ZodLiteral<true>;
+        fallback_behavior: z.ZodDefault<z.ZodString>;
+        retry_policy_defined: z.ZodBoolean;
+        user_visible_failure_state: z.ZodDefault<z.ZodString>;
+    }, z.core.$strip>>;
+    acceptance_tests: z.ZodArray<z.ZodObject<{
+        test_id: z.ZodString;
+        name: z.ZodString;
+        type: z.ZodEnum<{
+            audit: "audit";
+            user_journey: "user_journey";
+            permission: "permission";
+            integration: "integration";
+        }>;
+        feature_id: z.ZodString;
+        description: z.ZodString;
+        pass_condition: z.ZodString;
+        priority: z.ZodEnum<{
+            low: "low";
+            medium: "medium";
+            high: "high";
+            critical: "critical";
+        }>;
+    }, z.core.$strip>>;
+    dependency_graph: z.ZodArray<z.ZodObject<{
+        from_feature_id: z.ZodString;
+        to_feature_id: z.ZodString;
+        type: z.ZodEnum<{
+            requires: "requires";
+            enhances: "enhances";
+            blocks: "blocks";
+        }>;
+        reason: z.ZodString;
+    }, z.core.$strip>>;
+    confidence: z.ZodObject<{
+        overall: z.ZodNumber;
+        intent_clarity: z.ZodNumber;
+        scope_completeness: z.ZodNumber;
+        dependency_clarity: z.ZodNumber;
+        integration_clarity: z.ZodNumber;
+        compliance_clarity: z.ZodNumber;
+        notes: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>;
+}, z.core.$strip>;
