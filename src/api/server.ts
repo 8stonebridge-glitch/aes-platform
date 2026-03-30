@@ -912,6 +912,48 @@ app.post("/api/debug/semaphore/reset", apiKeyAuth, (_req, res) => {
   res.json({ reset: true, stats: getLLMSemaphoreStats() });
 });
 
+app.get("/api/debug/neo4j", async (_req, res) => {
+  try {
+    const { getNeo4jService } = await import("../services/neo4j-service.js");
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+    if (!ok) {
+      return res.json({ connected: false, error: "Connection failed" });
+    }
+
+    // Test write
+    const testId = `probe-${Date.now()}`;
+    const writeResult = await neo4j.runCypher(
+      `CREATE (p:Probe {id: $id, ts: $ts}) RETURN p.id AS id`,
+      { id: testId, ts: new Date().toISOString() }
+    );
+
+    // Test read-back
+    const readResult = await neo4j.runCypher(
+      `MATCH (p:Probe {id: $id}) RETURN p.id AS id, p.ts AS ts`,
+      { id: testId }
+    );
+
+    // Count all PipelineOutcome nodes
+    const outcomeCount = await neo4j.runCypher(
+      `MATCH (o:PipelineOutcome) RETURN count(o) AS cnt`
+    );
+
+    // Cleanup
+    await neo4j.runCypher(`MATCH (p:Probe {id: $id}) DELETE p`, { id: testId });
+
+    res.json({
+      connected: true,
+      url: process.env.AES_NEO4J_URL || "default",
+      write_test: { wrote: writeResult.length > 0, read_back: readResult.length > 0 },
+      pipeline_outcomes: outcomeCount[0]?.cnt ?? 0,
+      test_id: testId,
+    });
+  } catch (err: any) {
+    res.json({ connected: false, error: err.message });
+  }
+});
+
 // ─── Start server ──────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT || process.env.AES_PORT || "3100");

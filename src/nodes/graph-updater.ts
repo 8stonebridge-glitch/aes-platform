@@ -26,12 +26,14 @@ function entityId(prefix: string, id: string): string {
 /**
  * Safely write a Cypher statement. Returns true on success, false on failure.
  */
-async function safeWrite(cypher: string, label: string): Promise<boolean> {
+async function safeWrite(cypher: string, label: string, params?: Record<string, unknown>): Promise<boolean> {
   const neo4j = getNeo4jService();
   try {
-    const rows = await neo4j.runCypher(cypher);
+    const rows = await neo4j.runCypher(cypher, params);
     if (rows.length > 0) {
       console.log(`[graph-updater] ${label}: OK`);
+    } else {
+      console.log(`[graph-updater] ${label}: executed (no rows returned)`);
     }
     return true;
   } catch (err: any) {
@@ -377,24 +379,41 @@ export async function writePipelineOutcome(state: AESStateType): Promise<void> {
   const hadClarification = state.intentBrief?.confirmation_status === "confirmed_with_clarification";
 
   const cypher = `
-MERGE (o:PipelineOutcome {job_id: '${esc(state.jobId)}'})
-SET o.success = ${success},
-    o.gate_reached = '${esc(gateReached)}',
-    o.failure_category = '${esc(failureCategory)}',
-    o.failure_reason = ${state.errorMessage ? `'${esc(state.errorMessage.slice(0, 200))}'` : 'null'},
-    o.app_class = '${esc(appClass)}',
-    o.risk_class = '${esc(riskClass)}',
-    o.ambiguity_flags = ${JSON.stringify(ambiguityFlags)},
-    o.had_clarification = ${hadClarification},
-    o.intent_confirmed = ${!!state.intentConfirmed},
-    o.user_approved = ${!!state.userApproved},
-    o.feature_count = ${Object.keys(state.featureBridges || {}).length},
-    o.veto_count = ${(state.vetoResults || []).filter((v: any) => v.triggered).length},
-    o.created_at = '${now}'
+MERGE (o:PipelineOutcome {job_id: $jobId})
+SET o.success = $success,
+    o.gate_reached = $gateReached,
+    o.failure_category = $failureCategory,
+    o.failure_reason = $failureReason,
+    o.app_class = $appClass,
+    o.risk_class = $riskClass,
+    o.ambiguity_flags = $ambiguityFlags,
+    o.had_clarification = $hadClarification,
+    o.intent_confirmed = $intentConfirmed,
+    o.user_approved = $userApproved,
+    o.feature_count = $featureCount,
+    o.veto_count = $vetoCount,
+    o.created_at = $createdAt
 RETURN o.job_id
   `.trim();
 
-  await safeWrite(cypher, `PipelineOutcome [${state.jobId}]`);
+  const params = {
+    jobId: state.jobId,
+    success,
+    gateReached,
+    failureCategory,
+    failureReason: state.errorMessage ? state.errorMessage.slice(0, 200) : null,
+    appClass,
+    riskClass,
+    ambiguityFlags,
+    hadClarification,
+    intentConfirmed: !!state.intentConfirmed,
+    userApproved: !!state.userApproved,
+    featureCount: Object.keys(state.featureBridges || {}).length,
+    vetoCount: (state.vetoResults || []).filter((v: any) => v.triggered).length,
+    createdAt: now,
+  };
+
+  await safeWrite(cypher, `PipelineOutcome [${state.jobId}]`, params);
 }
 
 // ─── Main Node ───────────────────────────────────────────────────────
