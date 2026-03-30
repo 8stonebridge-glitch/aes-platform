@@ -621,8 +621,10 @@ export async function decomposer(
       )];
       featureBuildOrder = topologicalSort(appSpec.features, appSpec.dependency_graph);
 
-      // Generate tests for new features
+      // Generate permissions and tests for new features
       const newFeatures = appSpec.features.slice(appSpec.features.length - added);
+      const newPermissions = derivePermissions(appSpec.roles, newFeatures);
+      appSpec.permissions = [...(appSpec.permissions || []), ...newPermissions];
       const newTests = deriveAcceptanceTests(newFeatures);
       appSpec.acceptance_tests = [...(appSpec.acceptance_tests || []), ...newTests];
 

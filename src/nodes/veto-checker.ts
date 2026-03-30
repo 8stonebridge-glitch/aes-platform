@@ -45,7 +45,8 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
   // 2. ROLE_BOUNDARY_NOT_DEFINED
   const featureActors = feature.actor_ids || [];
   const roleIds = new Set(appSpec.roles.map((r: any) => r.role_id));
-  const unmappedActors = featureActors.filter((a: string) => !roleIds.has(a) && a !== "end_user" && a !== "system");
+  const EXEMPT_ACTORS = new Set(["end_user", "system", "general_user", "user", "anonymous"]);
+  const unmappedActors = featureActors.filter((a: string) => !roleIds.has(a) && !EXEMPT_ACTORS.has(a));
   results.push({
     code: GateErrorCode.G3_ROLE_BOUNDARY_NOT_DEFINED,
     triggered: unmappedActors.length > 0,
