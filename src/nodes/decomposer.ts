@@ -496,8 +496,14 @@ Original Request: ${intentBrief.raw_request}`,
     updated_at: now,
   };
 
+  // Sanitize dependency graph — remove edges referencing non-existent features
+  const validFeatureIds = new Set(result.features.map((f: any) => f.feature_id));
+  appSpec.dependency_graph = (result.dependency_graph || []).filter(
+    (e: any) => validFeatureIds.has(e.from_feature_id) && validFeatureIds.has(e.to_feature_id)
+  );
+
   // Build feature order via topological sort of dependency_graph
-  const featureBuildOrder = topologicalSort(result.features, result.dependency_graph);
+  const featureBuildOrder = topologicalSort(result.features, appSpec.dependency_graph);
 
   return { appSpec, featureBuildOrder };
 }
