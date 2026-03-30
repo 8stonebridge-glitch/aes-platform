@@ -637,6 +637,21 @@ export async function decomposer(
     }
   }
 
+  // Gap-fill: ensure EVERY feature has at least one permission entry.
+  // The LLM sometimes omits permissions for features (e.g. notifications).
+  // Without this, Gate 3 G3_AUTH_NOT_DEFINED vetoes the feature.
+  const coveredFeatures = new Set(
+    (appSpec.permissions || []).map((p: any) => p.resource)
+  );
+  const uncoveredFeatures = appSpec.features.filter(
+    (f: any) => !coveredFeatures.has(f.feature_id)
+  );
+  if (uncoveredFeatures.length > 0) {
+    const gapPermissions = derivePermissions(appSpec.roles, uncoveredFeatures);
+    appSpec.permissions = [...(appSpec.permissions || []), ...gapPermissions];
+    cb?.onStep(`Gap-filled permissions for ${uncoveredFeatures.length} features: ${uncoveredFeatures.map((f: any) => f.name).join(", ")}`);
+  }
+
   // If failure history exists, add warnings as assumptions
   if (failureHistory.length > 0) {
     appSpec.risks = [
