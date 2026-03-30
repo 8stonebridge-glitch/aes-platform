@@ -605,7 +605,37 @@ app.get("/api/self-audit", async (_req, res) => {
     const failures = Number(totals[0]?.failures ?? 0);
 
     if (total === 0) {
-      return res.json({ suggestions: [], message: "No pipeline runs recorded yet" });
+      // Fall back to in-memory job data if Neo4j has no records
+      const store = getJobStore();
+      const allJobs = store.list();
+      if (allJobs.length === 0) {
+        return res.json({ suggestions: [], message: "No pipeline runs recorded yet" });
+      }
+      const memTotal = allJobs.length;
+      const memSuccesses = allJobs.filter((j: any) => j.currentGate === "complete").length;
+      const memFailures = allJobs.filter((j: any) => j.currentGate === "failed").length;
+      const memRate = memTotal > 0 ? ((memSuccesses / memTotal) * 100).toFixed(1) : "0";
+      const memGateBreakdown = allJobs
+        .filter((j: any) => j.currentGate === "failed")
+        .reduce((acc: any, j: any) => {
+          const gate = j.errorMessage?.includes("veto") ? "gate_3" : "unknown";
+          acc[gate] = (acc[gate] || 0) + 1;
+          return acc;
+        }, {});
+      return res.json({
+        total_runs: memTotal,
+        success_rate: `${memRate}%`,
+        failures: memFailures,
+        gate_breakdown: Object.entries(memGateBreakdown).map(([gate, cnt]) => ({ gate, category: "unknown", count: cnt })),
+        suggestions: memFailures > 0 ? [{
+          id: "sug-mem-1",
+          severity: "medium",
+          title: "Failure data from in-memory only (Neo4j has no PipelineOutcome records)",
+          detail: `${memFailures}/${memTotal} jobs failed. Pipeline outcome persistence was just fixed — future runs will write to Neo4j.`,
+          evidence: `In-memory: ${memSuccesses} success, ${memFailures} failed`,
+        }] : [],
+        source: "in-memory-fallback",
+      });
     }
 
     // Gate failure breakdown

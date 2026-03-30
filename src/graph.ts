@@ -13,7 +13,7 @@ import { vetoChecker } from "./nodes/veto-checker.js";
 import { builderDispatcher } from "./nodes/builder-dispatcher.js";
 import { validatorRunner } from "./nodes/validator-runner.js";
 import { deploymentHandler } from "./nodes/deployment-handler.js";
-import { graphUpdater } from "./nodes/graph-updater.js";
+import { graphUpdater, failureRecorder } from "./nodes/graph-updater.js";
 import { graphReader } from "./nodes/graph-reader.js";
 import { researchNode } from "./nodes/research-node.js";
 import { getJobStore } from "./store.js";
@@ -43,13 +43,13 @@ export function getCallbacks(): GraphCallbacks | null {
 }
 
 function routeAfterIntake(state: AESStateType): string {
-  if (state.errorMessage) return "__end__";
+  if (state.errorMessage) return "failure_recorder";
   return "graph_reader";
 }
 
 function routeAfterClassifier(state: AESStateType): string {
-  if (state.errorMessage) return "__end__";
-  if (!state.intentBrief) return "__end__";
+  if (state.errorMessage) return "failure_recorder";
+  if (!state.intentBrief) return "failure_recorder";
 
   const brief = state.intentBrief;
 
@@ -66,7 +66,7 @@ function routeAfterClassifier(state: AESStateType): string {
 }
 
 function routeAfterConfirmer(state: AESStateType): string {
-  if (!state.intentConfirmed) return "__end__";
+  if (!state.intentConfirmed) return "failure_recorder";
   return "research"; // Research before decomposition
 }
 
@@ -74,29 +74,29 @@ function routeAfterSpecValidator(state: AESStateType): string {
   const failed = (state.specValidationResults || []).filter((r: any) => !r.passed);
   if (failed.length > 0) {
     // Retry or fail
-    if ((state.specRetryCount || 0) >= 3) return "__end__";
+    if ((state.specRetryCount || 0) >= 3) return "failure_recorder";
     return "decomposer"; // Re-derive
   }
   return "user_approval";
 }
 
 function routeAfterUserApproval(state: AESStateType): string {
-  if (!state.userApproved) return "__end__";
+  if (!state.userApproved) return "failure_recorder";
   return "catalog_searcher";
 }
 
 function routeAfterVetoChecker(state: AESStateType): string {
-  if (state.errorMessage) return "__end__";
+  if (state.errorMessage) return "failure_recorder";
   return "graph_updater_pre_build";
 }
 
 function routeAfterBuilderDispatcher(state: AESStateType): string {
-  if (state.errorMessage) return "__end__";
+  if (state.errorMessage) return "failure_recorder";
   return "validator_runner";
 }
 
 function routeAfterValidatorRunner(state: AESStateType): string {
-  if (state.errorMessage) return "__end__";
+  if (state.errorMessage) return "failure_recorder";
   return "deployment_handler";
 }
 
@@ -138,6 +138,9 @@ export function buildAESGraph() {
   graph.addNode("graph_updater_pre_build", graphUpdater);
   graph.addNode("graph_updater_post_deploy", graphUpdater);
 
+  // Failure recorder — lightweight node that persists PipelineOutcome on early exits
+  graph.addNode("failure_recorder", failureRecorder);
+
   // Entry
   graph.addEdge("__start__", "intake");
 
@@ -171,6 +174,9 @@ export function buildAESGraph() {
 
   // Graph updater (post-deploy): build record → end
   graph.addEdge("graph_updater_post_deploy", "__end__");
+
+  // Failure recorder: persist outcome → end
+  graph.addEdge("failure_recorder", "__end__");
 
   return graph.compile();
 }
@@ -218,18 +224,35 @@ export async function runGraph(
     createdAt: new Date().toISOString(),
   });
 
+  // Build graph fresh per invocation to avoid state leaks between runs
   const graph = buildAESGraph();
 
-  // Run the graph
-  const result = await graph.invoke({
-    jobId: input.jobId,
-    requestId: input.requestId,
-    rawRequest: input.rawRequest,
-    currentGate: "gate_0",
-    targetPath: input.targetPath ?? null,
-    deployTarget: input.deployTarget ?? "local",
-    designMode: input.designMode ?? "auto",
-  });
+  // Run the graph with error boundary to ensure cleanup
+  let result: AESStateType;
+  try {
+    result = await graph.invoke({
+      jobId: input.jobId,
+      requestId: input.requestId,
+      rawRequest: input.rawRequest,
+      currentGate: "gate_0",
+      targetPath: input.targetPath ?? null,
+      deployTarget: input.deployTarget ?? "local",
+      designMode: input.designMode ?? "auto",
+    });
+  } catch (err: any) {
+    // Ensure cleanup even on unhandled graph errors
+    _callbacks = null;
+    const neo4jSvc = getNeo4jService();
+    if (neo4jSvc.isConnected()) {
+      await neo4jSvc.close().catch(() => {});
+    }
+    // Mark job as failed in store
+    store.update(input.jobId, {
+      currentGate: "failed",
+      errorMessage: `Pipeline error: ${err.message}`,
+    } as any);
+    throw err;
+  }
 
   // Update store with final state
   store.update(input.jobId, result);

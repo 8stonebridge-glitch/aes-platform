@@ -353,7 +353,7 @@ RETURN b.entity_id
  * Pipeline Outcome — write a queryable record of every pipeline run.
  * Enables failure distribution analysis and self-audit.
  */
-async function writePipelineOutcome(state: AESStateType): Promise<void> {
+export async function writePipelineOutcome(state: AESStateType): Promise<void> {
   const now = ts();
   const success = !state.errorMessage && state.currentGate !== "failed";
   const gateReached = state.currentGate || "gate_0";
@@ -457,5 +457,23 @@ export async function graphUpdater(state: AESStateType): Promise<Partial<AESStat
   }
 
   // Never modify pipeline state — this is a side-effect-only node
+  return {};
+}
+
+/**
+ * Lightweight failure recorder — writes only PipelineOutcome to Neo4j.
+ * Used on early-exit failure paths that bypass the full graph-updater.
+ */
+export async function failureRecorder(state: AESStateType): Promise<Partial<AESStateType>> {
+  try {
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+    if (ok) {
+      await writePipelineOutcome(state);
+      console.log(`[failure-recorder] PipelineOutcome written for ${state.jobId} (gate=${state.currentGate})`);
+    }
+  } catch (err: any) {
+    console.warn(`[failure-recorder] Failed to write outcome: ${err.message}`);
+  }
   return {};
 }
