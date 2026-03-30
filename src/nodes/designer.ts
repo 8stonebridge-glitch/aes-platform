@@ -33,7 +33,7 @@ import type {
 } from "../types/design-evidence.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { getLLM, isLLMAvailable } from "../llm/provider.js";
+import { getLLM, isLLMAvailable, safeLLMCall } from "../llm/provider.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -191,11 +191,12 @@ async function llmDesign(
     .map((r: any) => `- ${r.name} (${r.role_id}): ${r.scope || ""}`)
     .join("\n");
 
-  const result = await llm.invoke([
-    { role: "system", content: DESIGNER_SYSTEM_PROMPT },
-    {
-      role: "user",
-      content: `Application: ${appSpec.title || "Untitled"}
+  const result = await safeLLMCall("designer", () =>
+    llm.invoke([
+      { role: "system", content: DESIGNER_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: `Application: ${appSpec.title || "Untitled"}
 App Class: ${appSpec.app_class || "unknown"}
 Target Users: ${(appSpec.target_users || []).join(", ")}
 Platforms: ${(appSpec.platforms || []).join(", ")}
@@ -209,8 +210,13 @@ ${roles}
 Generate the DesignEvidence JSON. Include every feature as at least one screen. Generate realistic components, data views, forms, actions, and states.
 
 Return ONLY valid JSON — no markdown, no explanation.`,
-    },
-  ]);
+      },
+    ])
+  );
+
+  if (!result) {
+    throw new Error("LLM design generation timed out or failed");
+  }
 
   const content = typeof result === "string"
     ? result

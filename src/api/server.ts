@@ -3,10 +3,42 @@ import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { runGraph, type GraphCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { getLLMSemaphoreStats, resetLLMSemaphore } from "../llm/provider.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ─── API key authentication middleware ─────────────────────────────
+const AES_API_KEY = process.env.AES_API_KEY;
+
+function apiKeyAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  // Skip auth if no API key is configured (local development)
+  if (!AES_API_KEY) {
+    next();
+    return;
+  }
+
+  // Allow health check without auth
+  if (req.method === "GET" && req.path === "/api/health") {
+    next();
+    return;
+  }
+
+  const authHeader = req.headers.authorization;
+  const apiKeyHeader = req.headers["x-api-key"] as string | undefined;
+
+  const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : apiKeyHeader;
+
+  if (token === AES_API_KEY) {
+    next();
+    return;
+  }
+
+  res.status(401).json({ error: "Unauthorized" });
+}
+
+app.use(apiKeyAuth);
 
 // Active job streams (Server-Sent Events)
 const jobStreams = new Map<string, express.Response[]>();
@@ -828,7 +860,26 @@ const BUILD_ID = `b-${Date.now().toString(36)}`;
 const BOOT_TIME = new Date().toISOString();
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", version: "v13", build_id: BUILD_ID, booted_at: BOOT_TIME, math_layer: true });
+  const sem = getLLMSemaphoreStats();
+  res.json({
+    status: "ok",
+    version: "v14",
+    build_id: BUILD_ID,
+    booted_at: BOOT_TIME,
+    math_layer: true,
+    llm_slots: { active: sem.activeSlots, max: sem.maxSlots, queued: sem.queueLength },
+  });
+});
+
+// ─── Debug / admin endpoints ──────────────────────────────────────
+
+app.get("/api/debug/semaphore", apiKeyAuth, (_req, res) => {
+  res.json(getLLMSemaphoreStats());
+});
+
+app.post("/api/debug/semaphore/reset", apiKeyAuth, (_req, res) => {
+  resetLLMSemaphore();
+  res.json({ reset: true, stats: getLLMSemaphoreStats() });
 });
 
 // ─── Start server ──────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { getLLM, isLLMAvailable } from "../llm/provider.js";
+import { getLLM, isLLMAvailable, safeLLMCall } from "../llm/provider.js";
 import { AppSpecSchema } from "../llm/schemas.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import { applyDesignEvidenceToSpec } from "../services/design-evidence-loader.js";
@@ -457,14 +457,15 @@ ${failures.map((r: any) => `- ${r.code}: ${r.reason}`).join("\n")}
 You MUST fix all of these issues.`;
   }
 
-  const result = await structured.invoke([
-    {
-      role: "system",
-      content: DECOMPOSER_SYSTEM_PROMPT + retryContext,
-    },
-    {
-      role: "user",
-      content: `Classified intent:
+  const result = await safeLLMCall("decomposer", () =>
+    structured.invoke([
+      {
+        role: "system",
+        content: DECOMPOSER_SYSTEM_PROMPT + retryContext,
+      },
+      {
+        role: "user",
+        content: `Classified intent:
 App Class: ${intentBrief.inferred_app_class}
 Core Outcome: ${intentBrief.inferred_core_outcome}
 Primary Users: ${intentBrief.inferred_primary_users.join(", ")}
@@ -476,7 +477,11 @@ Explicit Exclusions: ${intentBrief.explicit_exclusions?.join(", ") || "none"}
 Assumptions: ${intentBrief.assumptions?.join(", ") || "none"}
 Original Request: ${intentBrief.raw_request}`,
     },
-  ]);
+  ]));
+
+  if (!result) {
+    throw new Error("LLM decomposition timed out or failed");
+  }
 
   // Add system-level fields the LLM doesn't generate
   const now = new Date().toISOString();

@@ -5,7 +5,7 @@
  * unavailable so the caller can fall back to its template path.
  */
 
-import { getLLM, isLLMAvailable } from "./provider.js";
+import { getLLM, isLLMAvailable, acquireLLMSlot, releaseLLMSlot } from "./provider.js";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -26,28 +26,59 @@ interface AppContext {
   permissions?: { role_id: string; resource: string; effect: string }[];
 }
 
+const LLM_TIMEOUT_MS = 30_000;
+
+/** Race a promise against a timeout; resolves to null on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+/** Basic validation: reject empty, too-short, or LLM-refusal responses. */
+function validateCodeResponse(text: string): boolean {
+  if (!text || text.length < 50) return false;
+  const trimmed = text.trimStart();
+  if (/^(I |Sorry|I'm sorry|I cannot|I can't|Unfortunately)/i.test(trimmed)) return false;
+  return true;
+}
+
 async function callLLM(systemPrompt: string, userPrompt: string): Promise<string | null> {
   if (!isLLMAvailable()) return null;
 
   const llm = getLLM();
   if (!llm) return null;
 
+  const slotId = await acquireLLMSlot("code-gen");
   try {
-    const response = await llm.invoke([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]);
+    const response = await withTimeout(
+      llm.invoke([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ]),
+      LLM_TIMEOUT_MS,
+    );
+
+    if (!response) return null; // timed out
+
     const text = typeof response.content === "string"
       ? response.content
       : String(response.content);
 
     // Strip markdown fences if present
-    return text
+    const cleaned = text
       .replace(/^```(?:typescript|tsx|ts|jsx)?\n?/m, "")
       .replace(/\n?```\s*$/m, "")
       .trim();
+
+    if (!validateCodeResponse(cleaned)) return null;
+
+    return cleaned;
   } catch {
     return null;
+  } finally {
+    releaseLLMSlot(slotId);
   }
 }
 

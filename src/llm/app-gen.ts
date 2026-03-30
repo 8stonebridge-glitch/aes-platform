@@ -5,7 +5,7 @@
  * unavailable so the caller can fall back to its template path.
  */
 
-import { getLLM, isLLMAvailable } from "./provider.js";
+import { getLLM, isLLMAvailable, safeLLMCall } from "./provider.js";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -15,23 +15,24 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
   const llm = getLLM();
   if (!llm) return null;
 
-  try {
-    const response = await llm.invoke([
+  const response = await safeLLMCall("app-gen", () =>
+    llm.invoke([
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
-    ]);
-    const text = typeof response.content === "string"
-      ? response.content
-      : String(response.content);
+    ])
+  );
 
-    // Strip markdown fences if present
-    return text
-      .replace(/^```(?:typescript|tsx|ts|jsx)?\\n?/m, "")
-      .replace(/\\n?```\\s*$/m, "")
-      .trim();
-  } catch {
-    return null;
-  }
+  if (!response) return null;
+
+  const text = typeof response.content === "string"
+    ? response.content
+    : String(response.content);
+
+  // Strip markdown fences if present
+  return text
+    .replace(/^```(?:typescript|tsx|ts|jsx)?\\n?/m, "")
+    .replace(/\\n?```\\s*$/m, "")
+    .trim();
 }
 
 const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.`;

@@ -2,7 +2,7 @@ import type { AESStateType } from "../state.js";
 import { randomUUID } from "node:crypto";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
-import { getLLM, isLLMAvailable } from "../llm/provider.js";
+import { getLLM, isLLMAvailable, safeLLMCall } from "../llm/provider.js";
 import { IntentBriefSchema } from "../llm/schemas.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 
@@ -259,16 +259,22 @@ async function llmClassifyIntent(rawRequest: string, requestId: string): Promise
   const llm = getLLM()!;
   const structured = llm.withStructuredOutput(IntentBriefSchema);
 
-  const result = await structured.invoke([
-    {
-      role: "system",
-      content: INTENT_CLASSIFIER_SYSTEM_PROMPT,
-    },
-    {
-      role: "user",
-      content: rawRequest,
-    },
-  ]);
+  const result = await safeLLMCall("intent-classifier", () =>
+    structured.invoke([
+      {
+        role: "system",
+        content: INTENT_CLASSIFIER_SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: rawRequest,
+      },
+    ])
+  );
+
+  if (!result) {
+    throw new Error("LLM intent classification timed out or failed");
+  }
 
   // Ensure "web" is always in platforms
   if (!result.inferred_platforms.includes("web")) {
