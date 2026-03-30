@@ -245,12 +245,11 @@ export async function deploymentHandler(
         envVars,
       );
 
-      cb?.onStep("Triggering deployment...");
-      const deployment = await vercel.triggerDeployment(project.name);
-
-      cb?.onStep("Waiting for deployment to be ready...");
-      const result = await vercel.waitForDeployment(
-        deployment.id,
+      cb?.onStep("Waiting for Vercel to pick up GitHub push and deploy...");
+      // Vercel auto-deploys when the GitHub-linked project receives a push.
+      // We poll the project's deployments until one is READY.
+      const result = await vercel.waitForProjectDeployment(
+        project.id,
         300000,
       ); // 5 min timeout
 

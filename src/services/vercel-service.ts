@@ -103,43 +103,65 @@ export class VercelService {
   /**
    * Trigger a deployment (Vercel auto-deploys on push, but this can force one).
    */
-  async triggerDeployment(
-    projectName: string,
-    gitRef: string = "main",
+  /**
+   * Poll the project's deployments list until one is READY (or ERROR).
+   *
+   * Vercel auto-deploys when a GitHub-linked project receives a push.
+   * We don't need to trigger manually — we just wait for the deployment
+   * Vercel creates in response to the GitHub push.
+   */
+  async waitForProjectDeployment(
+    projectId: string,
+    timeoutMs: number = 300000,
   ): Promise<{ id: string; url: string; readyState: string }> {
-    const endpoint = `https://api.vercel.com/v13/deployments${this.teamQuery()}`;
+    const startTime = Date.now();
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: projectName,
-        target: "production",
-        gitSource: {
-          type: "github",
-          ref: gitRef,
-        },
-      }),
-    });
+    // Give Vercel a few seconds to register the GitHub webhook before polling
+    await new Promise((resolve) => setTimeout(resolve, 8000));
 
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Vercel deploy failed (${response.status}): ${error}`);
+    while (Date.now() - startTime < timeoutMs) {
+      const endpoint = `https://api.vercel.com/v6/deployments?projectId=${projectId}&limit=5${this.teamQuery() ? "&" + this.teamQuery().slice(1) : ""}`;
+
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Vercel deployment list failed (${response.status})`);
+      }
+
+      const data = await response.json();
+      const deployments: any[] = data.deployments || [];
+
+      // Find the most recent deployment that is not CANCELED
+      const active = deployments.find(
+        (d) => d.state !== "CANCELED" && d.state !== "ERROR",
+      );
+      const errored = deployments.find((d) => d.state === "ERROR");
+
+      if (active?.state === "READY") {
+        return {
+          id: active.uid,
+          url: `https://${active.url}`,
+          readyState: "READY",
+        };
+      }
+
+      if (!active && errored) {
+        throw new Error(
+          `Deployment errored: ${errored.errorMessage || "unknown error"}`,
+        );
+      }
+
+      // Still building — wait and retry
+      await new Promise((resolve) => setTimeout(resolve, 8000));
     }
 
-    const deployment = await response.json();
-    return {
-      id: deployment.id,
-      url: `https://${deployment.url}`,
-      readyState: deployment.readyState,
-    };
+    throw new Error(`Deployment timed out after ${timeoutMs / 1000}s`);
   }
 
   /**
-   * Wait for a deployment to be ready (poll status).
+   * Wait for a specific deployment by ID to be ready (poll status).
    */
   async waitForDeployment(
     deploymentId: string,
@@ -155,9 +177,7 @@ export class VercelService {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `Vercel status check failed (${response.status})`,
-        );
+        throw new Error(`Vercel status check failed (${response.status})`);
       }
 
       const data = await response.json();
@@ -172,7 +192,6 @@ export class VercelService {
         );
       }
 
-      // Wait 5 seconds before polling again
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
