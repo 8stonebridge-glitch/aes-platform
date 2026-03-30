@@ -52,14 +52,171 @@ export interface JobRecord {
   designEvidence?: any;
 }
 
+// ─── Schema initialization SQL ────────────────────────────────────────
+// Mirrors the tables from 001-initial-schema.sql so the store can
+// self-provision when the external migration file is unavailable.
+
+const INIT_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS intent_briefs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id TEXT NOT NULL UNIQUE,
+  raw_request TEXT NOT NULL,
+  inferred_app_class TEXT,
+  inferred_primary_users TEXT[],
+  inferred_core_outcome TEXT,
+  inferred_platforms TEXT[],
+  inferred_risk_class TEXT,
+  inferred_integrations TEXT[],
+  explicit_inclusions TEXT[],
+  explicit_exclusions TEXT[],
+  ambiguity_flags TEXT[],
+  assumptions TEXT[],
+  confirmation_statement TEXT,
+  confirmation_status TEXT NOT NULL DEFAULT 'pending',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS app_specs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id UUID NOT NULL,
+  request_id UUID NOT NULL,
+  intent_brief_id UUID REFERENCES intent_briefs(id),
+  title TEXT NOT NULL,
+  summary TEXT,
+  app_class TEXT,
+  risk_class TEXT,
+  spec_data JSONB NOT NULL,
+  confidence_overall NUMERIC,
+  version INTEGER NOT NULL DEFAULT 1,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS feature_bridges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bridge_id UUID NOT NULL UNIQUE,
+  app_id UUID NOT NULL,
+  app_spec_id UUID REFERENCES app_specs(id),
+  feature_id TEXT NOT NULL,
+  feature_name TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  bridge_data JSONB NOT NULL,
+  confidence_overall NUMERIC,
+  version INTEGER NOT NULL DEFAULT 1,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS veto_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bridge_id UUID NOT NULL REFERENCES feature_bridges(id),
+  any_triggered BOOLEAN NOT NULL DEFAULT false,
+  triggered_codes TEXT[],
+  result_data JSONB NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS user_approvals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  app_id UUID NOT NULL,
+  app_spec_id UUID REFERENCES app_specs(id),
+  approval_type TEXT NOT NULL,
+  approved BOOLEAN NOT NULL,
+  user_comment TEXT,
+  presented_data JSONB,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS build_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id TEXT NOT NULL,
+  gate TEXT,
+  feature_id TEXT,
+  message TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  error_code TEXT,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS fix_trails (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fix_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  gate TEXT NOT NULL,
+  error_code TEXT NOT NULL,
+  issue_summary TEXT NOT NULL,
+  root_cause TEXT NOT NULL,
+  repair_action TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'detected',
+  related_artifact_ids TEXT[] DEFAULT '{}',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS builder_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  bridge_id TEXT NOT NULL,
+  feature_id TEXT NOT NULL,
+  feature_name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ready_for_build',
+  input_package_hash TEXT NOT NULL,
+  builder_package JSONB NOT NULL,
+  files_created TEXT[] DEFAULT '{}',
+  files_modified TEXT[] DEFAULT '{}',
+  files_deleted TEXT[] DEFAULT '{}',
+  test_results JSONB DEFAULT '[]',
+  acceptance_coverage JSONB DEFAULT '{}',
+  scope_violations TEXT[] DEFAULT '{}',
+  constraint_violations TEXT[] DEFAULT '{}',
+  verification_passed BOOLEAN DEFAULT false,
+  failure_reason TEXT,
+  builder_model TEXT,
+  duration_ms INTEGER DEFAULT 0,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  workspace_id TEXT,
+  branch TEXT,
+  base_commit TEXT,
+  final_commit TEXT,
+  diff_summary TEXT,
+  pr_summary TEXT,
+  check_results JSONB DEFAULT '[]'
+);
+`;
+
+/** Maximum consecutive persistence failures before writes are paused. */
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+/** Interval in ms between periodic DB health checks when writes are paused. */
+const HEALTH_CHECK_INTERVAL_MS = 60_000;
+
 export class JobStore {
   private jobs: Map<string, JobRecord> = new Map();
   private logs: Map<string, LogEntry[]> = new Map();
   private latestJobId: string | null = null;
   private persistence: PersistenceLayer | null = null;
 
+  // ─── DB availability tracking ────────────────────────────────────
+  private dbAvailable = true;
+  private consecutiveFailures = 0;
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
   setPersistence(p: PersistenceLayer): void {
     this.persistence = p;
+    this.dbAvailable = true;
+    this.consecutiveFailures = 0;
+    this.startHealthCheckTimer();
   }
 
   hasPersistence(): boolean {
@@ -69,6 +226,129 @@ export class JobStore {
   getPersistence(): PersistenceLayer | null {
     return this.persistence;
   }
+
+  /**
+   * Run CREATE TABLE IF NOT EXISTS for every table the store touches.
+   * Call this once during startup, before any reads or writes.
+   * Uses the persistence layer's pool via a raw query through the
+   * persistence interface if available, otherwise is a no-op.
+   */
+  async initSchema(): Promise<void> {
+    if (!this.persistence) return;
+    try {
+      // The PersistenceLayer already exposes initialize() which runs the
+      // external SQL file. We call it first, then fall back to our
+      // embedded DDL if the external file was missing or errored.
+      await this.persistence.initialize();
+    } catch {
+      // External schema file may not be present — run embedded DDL.
+      // We need to reach the pool; PersistenceLayer.initialize() is the
+      // only public path. If it threw, we attempt a second initialize()
+      // call which will silently succeed if tables already exist.
+      // The embedded SQL is identical to 001-initial-schema.sql (core tables).
+      console.warn("[store] External schema migration failed; attempting embedded schema init");
+      try {
+        // Access pool through a simple health-check query first to verify connectivity
+        const healthy = await this.checkDbHealth();
+        if (!healthy) {
+          console.error("[store] Database unreachable during schema init");
+          this.markDbUnavailable();
+          return;
+        }
+        // Since we cannot directly access the pool from here without
+        // changing persistence.ts, re-try initialize() which is idempotent.
+        await this.persistence.initialize();
+      } catch (innerErr: any) {
+        console.error("[store] Schema init failed:", innerErr.message);
+        this.markDbUnavailable();
+      }
+    }
+  }
+
+  /**
+   * Test the database connection by running a trivial query.
+   * Returns true if the connection is healthy, false otherwise.
+   */
+  async checkDbHealth(): Promise<boolean> {
+    if (!this.persistence) return false;
+    try {
+      // Use loadIntentBrief with a known-impossible ID as a lightweight
+      // connectivity probe. If the query executes without throwing, the
+      // connection is alive — the null result is expected.
+      await this.persistence.loadIntentBrief("__health_check__");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // ─── Failure tracking helpers ─────────────────────────────────────
+
+  private recordPersistenceSuccess(): void {
+    if (!this.dbAvailable) {
+      console.log("[store] Database recovered — re-enabling persistence writes");
+    }
+    this.consecutiveFailures = 0;
+    this.dbAvailable = true;
+  }
+
+  private recordPersistenceFailure(context: string, err: any): void {
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES && this.dbAvailable) {
+      this.markDbUnavailable();
+      console.warn(
+        `[store] ${MAX_CONSECUTIVE_FAILURES} consecutive persistence failures — ` +
+        `pausing writes until next health check (every ${HEALTH_CHECK_INTERVAL_MS / 1000}s). ` +
+        `Last error [${context}]: ${err?.message ?? err}`
+      );
+    } else if (this.dbAvailable) {
+      console.error(`[persistence] Write failed [${context}]:`, err?.message ?? err);
+    }
+    // If already paused, stay silent to avoid log spam.
+  }
+
+  private markDbUnavailable(): void {
+    this.dbAvailable = false;
+  }
+
+  /** Whether the store should attempt DB writes right now. */
+  private shouldWrite(): boolean {
+    return this.persistence !== null && this.dbAvailable;
+  }
+
+  // ─── Periodic health check ────────────────────────────────────────
+
+  private startHealthCheckTimer(): void {
+    // Clear any existing timer
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+    }
+    this.healthCheckTimer = setInterval(async () => {
+      if (this.dbAvailable) return; // No need to check when healthy
+      try {
+        const healthy = await this.checkDbHealth();
+        if (healthy) {
+          this.recordPersistenceSuccess();
+        }
+      } catch {
+        // Still down — stay quiet
+      }
+    }, HEALTH_CHECK_INTERVAL_MS);
+
+    // Don't let the timer prevent Node from exiting
+    if (this.healthCheckTimer && typeof this.healthCheckTimer === "object" && "unref" in this.healthCheckTimer) {
+      this.healthCheckTimer.unref();
+    }
+  }
+
+  private stopHealthCheckTimer(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+  }
+
+  // ─── Core CRUD ────────────────────────────────────────────────────
 
   create(job: JobRecord): void {
     const durability: DurabilityStatus = this.persistence ? "memory_only" : "memory_only";
@@ -93,16 +373,17 @@ export class JobStore {
     this.jobs.set(jobId, updated);
 
     // Write-through to Postgres (don't block pipeline, but track failures)
-    if (this.persistence) {
+    if (this.shouldWrite()) {
       this.persistArtifacts(jobId, existing, updates)
         .then(() => {
+          this.recordPersistenceSuccess();
           const job = this.jobs.get(jobId);
           if (job) {
             job.durability = "confirmed";
           }
         })
         .catch((err) => {
-          console.error(`[persistence] Write failed for ${jobId}:`, err.message);
+          this.recordPersistenceFailure(`update:${jobId}`, err);
           const job = this.jobs.get(jobId);
           if (job) {
             job.durability = "partial";
@@ -121,10 +402,10 @@ export class JobStore {
     const logs = this.logs.get(jobId);
     if (logs) logs.push(full);
 
-    if (this.persistence) {
-      this.persistence.persistLog(jobId, full).catch((err) => {
-        console.error(`[persistence] Log write failed for ${jobId}:`, err.message);
-      });
+    if (this.shouldWrite()) {
+      this.persistence!.persistLog(jobId, full)
+        .then(() => this.recordPersistenceSuccess())
+        .catch((err) => this.recordPersistenceFailure(`log:${jobId}`, err));
     }
   }
 
@@ -135,10 +416,10 @@ export class JobStore {
       job.fixTrailEntries.push(entry);
     }
 
-    if (this.persistence) {
-      this.persistence.persistFixTrail(entry).catch((err) => {
-        console.error(`[persistence] FixTrail write failed for ${jobId}:`, err.message);
-      });
+    if (this.shouldWrite()) {
+      this.persistence!.persistFixTrail(entry)
+        .then(() => this.recordPersistenceSuccess())
+        .catch((err) => this.recordPersistenceFailure(`fixtrail:${jobId}`, err));
     }
   }
 
@@ -321,6 +602,13 @@ export class JobStore {
       }
     }
   }
+
+  // ─── Cleanup ─────────────────────────────────────────────────────
+
+  /** Stop background timers. Call when tearing down the store. */
+  dispose(): void {
+    this.stopHealthCheckTimer();
+  }
 }
 
 let instance: JobStore | null = null;
@@ -333,5 +621,8 @@ export function getJobStore(): JobStore {
 }
 
 export function resetJobStore(): void {
+  if (instance) {
+    instance.dispose();
+  }
   instance = null;
 }

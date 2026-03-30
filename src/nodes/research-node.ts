@@ -18,7 +18,7 @@ import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 
-const RESEARCH_API = process.env.AES_PERPLEXITY_URL ?? "http://localhost:3200";
+const RESEARCH_API = process.env.AES_PERPLEXITY_URL || process.env.AES_RESEARCH_URL || "";
 const RESEARCH_TIMEOUT_MS = 30_000;
 
 interface ResearchResult {
@@ -87,7 +87,7 @@ async function queryPerplexityDirect(
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "llama-3.1-sonar-small-128k-online",
+        model: "sonar",
         messages: [
           {
             role: "system",
@@ -212,8 +212,11 @@ export async function researchNode(
   for (const { query, category } of queries) {
     cb?.onStep(`Researching: ${category}...`);
 
-    // Try MCP research API first, then direct Perplexity, then skip
-    let research = await queryResearch(query, category);
+    // Try MCP research API first (if configured), then direct Perplexity, then skip
+    let research: { findings: string[]; sources: string[] } | null = null;
+    if (RESEARCH_API) {
+      research = await queryResearch(query, category);
+    }
     if (!research) {
       research = await queryPerplexityDirect(query);
     }

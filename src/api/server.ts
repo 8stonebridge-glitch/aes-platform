@@ -939,6 +939,11 @@ app.get("/api/debug/neo4j", async (_req, res) => {
       `MATCH (o:PipelineOutcome) RETURN count(o) AS cnt`
     );
 
+    // List recent outcomes
+    const recentOutcomes = await neo4j.runCypher(
+      `MATCH (o:PipelineOutcome) RETURN o.job_id AS job, o.success AS success, o.gate_reached AS gate ORDER BY o.created_at DESC LIMIT 5`
+    );
+
     // Cleanup
     await neo4j.runCypher(`MATCH (p:Probe {id: $id}) DELETE p`, { id: testId });
 
@@ -947,6 +952,7 @@ app.get("/api/debug/neo4j", async (_req, res) => {
       url: process.env.AES_NEO4J_URL || "default",
       write_test: { wrote: writeResult.length > 0, read_back: readResult.length > 0 },
       pipeline_outcomes: outcomeCount[0]?.cnt ?? 0,
+      recent_outcomes: recentOutcomes,
       test_id: testId,
     });
   } catch (err: any) {
