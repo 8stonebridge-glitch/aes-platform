@@ -17,7 +17,7 @@ import type {
 } from "./types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
-export type DurabilityStatus = "confirmed" | "partial" | "memory_only";
+export type DurabilityStatus = "confirmed" | "partial" | "persisted" | "memory_only";
 
 export interface JobRecord {
   jobId: string;
@@ -201,6 +201,9 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 /** Interval in ms between periodic DB health checks when writes are paused. */
 const HEALTH_CHECK_INTERVAL_MS = 60_000;
 
+/** Max jobs to keep in memory before evicting oldest completed ones. */
+const MAX_IN_MEMORY_JOBS = 200;
+
 export class JobStore {
   private jobs: Map<string, JobRecord> = new Map();
   private logs: Map<string, LogEntry[]> = new Map();
@@ -211,6 +214,27 @@ export class JobStore {
   private dbAvailable = true;
   private consecutiveFailures = 0;
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Evict oldest completed jobs when the map exceeds MAX_IN_MEMORY_JOBS. */
+  private evictIfNeeded(): void {
+    if (this.jobs.size <= MAX_IN_MEMORY_JOBS) return;
+    const completed: string[] = [];
+    for (const [id, job] of this.jobs) {
+      const gate = (job as any).currentGate;
+      if (gate === "complete" || gate === "failed") completed.push(id);
+    }
+    // Sort by createdAt ascending (oldest first)
+    completed.sort((a, b) => {
+      const aT = this.jobs.get(a)?.createdAt || "";
+      const bT = this.jobs.get(b)?.createdAt || "";
+      return aT.localeCompare(bT);
+    });
+    const toEvict = completed.slice(0, this.jobs.size - MAX_IN_MEMORY_JOBS);
+    for (const id of toEvict) {
+      this.jobs.delete(id);
+      this.logs.delete(id);
+    }
+  }
 
   setPersistence(p: PersistenceLayer): void {
     this.persistence = p;
@@ -351,7 +375,8 @@ export class JobStore {
   // ─── Core CRUD ────────────────────────────────────────────────────
 
   create(job: JobRecord): void {
-    const durability: DurabilityStatus = this.persistence ? "memory_only" : "memory_only";
+    this.evictIfNeeded();
+    const durability: DurabilityStatus = this.persistence ? "persisted" : "memory_only";
     this.jobs.set(job.jobId, { ...job, durability, createdAt: new Date().toISOString() });
     this.logs.set(job.jobId, []);
     this.latestJobId = job.jobId;

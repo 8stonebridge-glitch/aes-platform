@@ -111,7 +111,8 @@ export async function safeLLMCall<T>(
   try {
     const result = await withLLMTimeout(fn(), timeoutMs);
     return result;
-  } catch {
+  } catch (err: any) {
+    console.error(`[LLM] ${label} failed: ${err?.message || err}`);
     return null;
   } finally {
     releaseLLMSlot(slotId);

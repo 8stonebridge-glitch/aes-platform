@@ -45,6 +45,17 @@ const jobStreams = new Map<string, express.Response[]>();
 
 // Event buffer — stores events so clients connecting late get a full replay
 const jobEventBuffer = new Map<string, { event: string; data: any }[]>();
+const MAX_EVENT_BUFFERS = 200;
+
+function evictEventBuffers(): void {
+  if (jobEventBuffer.size <= MAX_EVENT_BUFFERS) return;
+  const keys = [...jobEventBuffer.keys()];
+  const toRemove = keys.slice(0, keys.length - MAX_EVENT_BUFFERS);
+  for (const k of toRemove) {
+    jobEventBuffer.delete(k);
+    jobStreams.delete(k);
+  }
+}
 
 // ─── Convex sync — push status updates to Convex for real-time UI ───
 const CONVEX_SITE_URL = process.env.AES_CONVEX_SITE_URL || "";
@@ -91,7 +102,7 @@ function syncJobToConvex(jobId: string) {
 
 function broadcastToJob(jobId: string, event: string, data: any) {
   // Buffer the event for late-connecting clients
-  if (!jobEventBuffer.has(jobId)) jobEventBuffer.set(jobId, []);
+  if (!jobEventBuffer.has(jobId)) { evictEventBuffers(); jobEventBuffer.set(jobId, []); }
   jobEventBuffer.get(jobId)!.push({ event, data });
 
   // Send to currently connected clients
@@ -153,17 +164,18 @@ app.post("/api/build", async (req, res) => {
     onFeatureStatus: (id, name, status) => broadcastToJob(jobId, "feature", { id, name, status }),
     onNeedsApproval: async (prompt, data) => {
       broadcastToJob(jobId, "needs_approval", { prompt, data });
-      // Wait for approval via the approve endpoint
       return new Promise((resolve) => {
         const store = getJobStore();
         const check = setInterval(() => {
           const job = store.get(jobId);
-          if (job?.userApproved) {
+          if (job?.userApproved === true) {
             clearInterval(check);
             resolve(true);
+          } else if (job?.userApproved === false || job?.errorMessage) {
+            clearInterval(check);
+            resolve(false);
           }
         }, 500);
-        // Timeout after 5 minutes
         setTimeout(() => { clearInterval(check); resolve(false); }, 300000);
       });
     },
@@ -173,9 +185,12 @@ app.post("/api/build", async (req, res) => {
         const store = getJobStore();
         const check = setInterval(() => {
           const job = store.get(jobId);
-          if (job?.intentConfirmed) {
+          if (job?.intentConfirmed === true) {
             clearInterval(check);
             resolve(true);
+          } else if (job?.intentConfirmed === false || job?.errorMessage) {
+            clearInterval(check);
+            resolve(false);
           }
         }, 500);
         setTimeout(() => { clearInterval(check); resolve(false); }, 300000);

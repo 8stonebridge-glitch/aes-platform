@@ -35,6 +35,8 @@ export interface CloudflareDeployConfig {
   kvNamespaceId?: string;
   /** Optional: R2 bucket name to bind */
   r2BucketName?: string;
+  /** Workers subdomain (e.g. "your-subdomain" from your-subdomain.workers.dev). Falls back to env AES_CF_WORKERS_SUBDOMAIN. */
+  workersSubdomain?: string;
 }
 
 export interface CloudflareDeployResult {
@@ -324,7 +326,8 @@ export async function deployViaApi(
       },
     );
 
-    const previewUrl = `https://${appName}.${config.accountId}.workers.dev`;
+    const subdomain = config.workersSubdomain || process.env.AES_CF_WORKERS_SUBDOMAIN || config.accountId;
+    const previewUrl = `https://${appName}.${subdomain}.workers.dev`;
 
     return {
       success: true,

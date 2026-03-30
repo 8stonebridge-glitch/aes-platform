@@ -36,10 +36,23 @@ export interface GraphCallbacks {
   onNeedsConfirmation: (statement: string, questions?: string[]) => Promise<boolean>;
 }
 
-// Global callbacks reference for nodes to use
-let _callbacks: GraphCallbacks | null = null;
+// Per-job callbacks map — eliminates race condition when concurrent builds run
+const _callbacksMap = new Map<string, GraphCallbacks>();
+let _activeJobId: string | null = null;
+
 export function getCallbacks(): GraphCallbacks | null {
-  return _callbacks;
+  if (_activeJobId) return _callbacksMap.get(_activeJobId) ?? null;
+  // Fallback: return the most recently registered callbacks
+  const entries = [..._callbacksMap.values()];
+  return entries.length > 0 ? entries[entries.length - 1] : null;
+}
+
+export function getCallbacksForJob(jobId: string): GraphCallbacks | null {
+  return _callbacksMap.get(jobId) ?? null;
+}
+
+export function setActiveJob(jobId: string): void {
+  _activeJobId = jobId;
 }
 
 function routeAfterIntake(state: AESStateType): string {
@@ -100,7 +113,8 @@ function routeAfterValidatorRunner(state: AESStateType): string {
   return "deployment_handler";
 }
 
-function routeAfterDeploymentHandler(_state: AESStateType): string {
+function routeAfterDeploymentHandler(state: AESStateType): string {
+  if (state.errorMessage && state.currentGate === ("failed" as any)) return "failure_recorder";
   return "graph_updater_post_deploy"; // Write build record to Neo4j, then end
 }
 
@@ -194,7 +208,8 @@ export async function runGraph(
   },
   callbacks: GraphCallbacks
 ): Promise<AESStateType> {
-  _callbacks = callbacks;
+  _callbacksMap.set(input.jobId, callbacks);
+  _activeJobId = input.jobId;
 
   // Initialize persistence if Postgres is available
   const store = getJobStore();
@@ -220,7 +235,7 @@ export async function runGraph(
     currentGate: input.currentGate,
     targetPath: input.targetPath ?? null,
     deployTarget: input.deployTarget ?? "local",
-    durability: store.hasPersistence() ? "memory_only" : "memory_only",
+    durability: store.hasPersistence() ? "persisted" : "memory_only",
     createdAt: new Date().toISOString(),
   });
 
@@ -241,7 +256,8 @@ export async function runGraph(
     });
   } catch (err: any) {
     // Ensure cleanup even on unhandled graph errors
-    _callbacks = null;
+    _callbacksMap.delete(input.jobId);
+    if (_activeJobId === input.jobId) _activeJobId = null;
     const neo4jSvc = getNeo4jService();
     if (neo4jSvc.isConnected()) {
       await neo4jSvc.close().catch(() => {});
@@ -263,6 +279,7 @@ export async function runGraph(
     await neo4jSvc.close().catch(() => {});
   }
 
-  _callbacks = null;
+  _callbacksMap.delete(input.jobId);
+  if (_activeJobId === input.jobId) _activeJobId = null;
   return result;
 }

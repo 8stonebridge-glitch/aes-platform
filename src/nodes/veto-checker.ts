@@ -132,7 +132,7 @@ function checkVetoes(bridge: any, appSpec: any): VetoResult[] {
 
   // 9. AUDITABLE_ACTION_WITHOUT_AUDIT_LOG
   const auditRequired = feature.audit_required;
-  const hasAuditRule = bridge.applied_rules.some((r: any) => r.rule_id === "rule-audit");
+  const hasAuditRule = (bridge.applied_rules || []).some((r: any) => r.rule_id === "rule-audit");
   results.push({
     code: GateErrorCode.G3_AUDITABLE_ACTION_WITHOUT_AUDIT_LOG,
     triggered: auditRequired && !hasAuditRule,

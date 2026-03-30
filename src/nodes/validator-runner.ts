@@ -242,7 +242,7 @@ async function runTestGroup(
     const seedReq = SEED_REQUIREMENTS.find(s => s.test_id === test.test_id);
 
     try {
-      const hasSeeds = seedReq && seedReq.needs.length >= 0;
+      const hasSeeds = seedReq && seedReq.needs.length > 0;
       const hasPassCondition = test.pass_condition && test.pass_condition.length > 0;
       const hasDescription = test.description && test.description.length > 0;
 
