@@ -6,7 +6,7 @@
 
 import pg from "pg";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,14 +68,8 @@ export class PersistenceLayer {
   }
 
   async initialize(): Promise<void> {
-    // Run full schema migration (all tables, idempotent with IF NOT EXISTS)
-    try {
-      const __dirname = dirname(fileURLToPath(import.meta.url));
-      const sql = readFileSync(join(__dirname, "schema", "001-initial-schema.sql"), "utf-8");
-      await this.pool.query(sql);
-    } catch {
-      // Schema might already exist — that's fine
-    }
+    const sql = readFileSync(resolveSchemaPath(), "utf-8");
+    await this.pool.query(sql);
   }
 
   // ─── Gate 0: Intent Brief ──────────────────────────────────────────
@@ -83,7 +77,7 @@ export class PersistenceLayer {
   private intentBriefDbIds = new Map<string, string>();
 
   async persistIntentBrief(jobId: string, brief: IntentBrief): Promise<void> {
-    const requestId = ensureUUID(brief.request_id);
+    const requestId = ensureUUID(jobId);
     const result = await this.pool.query<{ id: string }>(
       `INSERT INTO intent_briefs (
         request_id, raw_request, inferred_app_class, inferred_primary_users,
@@ -105,14 +99,18 @@ export class PersistenceLayer {
       ]
     );
     if (result.rows[0]?.id) {
+      this.intentBriefDbIds.set(jobId, result.rows[0].id);
       this.intentBriefDbIds.set(brief.request_id, result.rows[0].id);
     }
   }
 
-  async updateIntentBriefStatus(requestId: string, status: string): Promise<void> {
+  async updateIntentBriefStatus(identifier: string, status: string): Promise<void> {
+    const normalized = ensureUUID(identifier);
     await this.pool.query(
-      `UPDATE intent_briefs SET confirmation_status = $1, updated_at = now() WHERE request_id = $2`,
-      [status, requestId]
+      `UPDATE intent_briefs
+       SET confirmation_status = $1, updated_at = now()
+       WHERE request_id = $2 OR request_id = $3`,
+      [status, identifier, normalized]
     );
   }
 
@@ -120,9 +118,10 @@ export class PersistenceLayer {
 
   async persistAppSpec(jobId: string, spec: AppSpec): Promise<string> {
     const appId = ensureUUID(spec.app_id);
-    const requestId = ensureUUID(spec.request_id);
+    const requestId = ensureUUID(jobId);
     // Use the actual DB ID from the intent_briefs insert, not a generated UUID
-    const intentBriefId = this.intentBriefDbIds.get(spec.intent_brief_id)
+    const intentBriefId = this.intentBriefDbIds.get(jobId)
+      || this.intentBriefDbIds.get(spec.intent_brief_id)
       || this.intentBriefDbIds.get(spec.request_id)
       || ensureUUID(spec.intent_brief_id);
     const rows = await this.pool.query<{ id: string }>(
@@ -297,17 +296,19 @@ export class PersistenceLayer {
   // ─── Load / Reconstruct ────────────────────────────────────────────
 
   async loadIntentBrief(requestId: string): Promise<IntentBrief | null> {
+    const normalized = ensureUUID(requestId);
     const res = await this.pool.query(
-      `SELECT * FROM intent_briefs WHERE request_id = $1 LIMIT 1`,
-      [requestId]
+      `SELECT * FROM intent_briefs WHERE request_id = $1 OR request_id = $2 LIMIT 1`,
+      [requestId, normalized]
     );
     return res.rows[0] || null;
   }
 
   async loadAppSpecByRequestId(requestId: string): Promise<AppSpec | null> {
+    const normalized = ensureUUID(requestId);
     const res = await this.pool.query(
       `SELECT spec_data FROM app_specs WHERE request_id = $1 ORDER BY version DESC LIMIT 1`,
-      [requestId]
+      [normalized]
     );
     if (!res.rows[0]) return null;
     return typeof res.rows[0].spec_data === "string"
@@ -379,9 +380,10 @@ export class PersistenceLayer {
   }
 
   async loadApproval(jobId: string): Promise<ApprovalRecord | null> {
+    const normalized = ensureUUID(jobId);
     const res = await this.pool.query(
       `SELECT * FROM user_approvals WHERE app_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [jobId]
+      [normalized]
     );
     if (!res.rows[0]) return null;
     const row = res.rows[0];
@@ -522,4 +524,19 @@ export class PersistenceLayer {
   async close(): Promise<void> {
     await this.pool.end();
   }
+}
+
+function resolveSchemaPath(): string {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(__dirname, "schema", "001-initial-schema.sql"),
+    join(__dirname, "..", "schema", "001-initial-schema.sql"),
+    join(__dirname, "..", "..", "src", "schema", "001-initial-schema.sql"),
+    join(process.cwd(), "src", "schema", "001-initial-schema.sql"),
+  ];
+
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (found) return found;
+
+  throw new Error(`AES schema file not found. Tried: ${candidates.join(", ")}`);
 }

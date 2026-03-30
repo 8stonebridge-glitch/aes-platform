@@ -731,6 +731,12 @@ export async function bridgeCompiler(
     gate: "gate_2",
     message: `${features.length} bridges compiled | Build order: ${buildOrder.join(" → ")}`,
   });
+  store.update(state.jobId, {
+    featureBridges: bridges,
+    featureBuildOrder: buildOrder,
+    featureBuildIndex: 0,
+    currentGate: "gate_2",
+  });
 
   cb?.onSuccess(`${features.length} feature bridges compiled`);
 

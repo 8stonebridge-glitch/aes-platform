@@ -399,6 +399,10 @@ export async function intentClassifier(
   });
 
   const intentConfirmed = brief.confirmation_status === "auto_confirmed_low_ambiguity";
+  store.update(jobId, {
+    intentBrief: brief,
+    intentConfirmed,
+  });
 
   if (intentConfirmed) {
     cb?.onSuccess(`Auto-confirmed: ${brief.inferred_app_class} (${usedLLM ? "LLM" : "keyword"})`);

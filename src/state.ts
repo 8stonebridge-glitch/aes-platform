@@ -19,10 +19,16 @@ export const AESState = Annotation.Root({
     default: () => null,
   }),
 
-  // Deploy target: "local" (write to disk) or "cloudflare" (Dynamic Workers)
-  deployTarget: Annotation<"local" | "cloudflare">({
+  // Deploy target: "local", "cloudflare", or "vercel"
+  deployTarget: Annotation<"local" | "cloudflare" | "vercel">({
     value: lastValue,
     default: () => "local",
+  }),
+
+  // Autonomous mode: skip manual confirm/approval pauses for unattended runs
+  autonomous: Annotation<boolean>({
+    value: lastValue,
+    default: () => false,
   }),
 
   // Cloudflare deploy result
@@ -39,6 +45,8 @@ export const AESState = Annotation.Root({
     | "gate_3"
     | "gate_4"
     | "gate_5"
+    | "research"
+    | "validation"
     | "building"
     | "deploying"
     | "complete"

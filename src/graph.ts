@@ -203,7 +203,8 @@ export async function runGraph(
     rawRequest: string;
     currentGate: "gate_0";
     targetPath?: string | null;
-    deployTarget?: "local" | "cloudflare";
+    deployTarget?: "local" | "cloudflare" | "vercel";
+    autonomous?: boolean;
     designMode?: "auto" | "paper";
   },
   callbacks: GraphCallbacks
@@ -235,6 +236,7 @@ export async function runGraph(
     currentGate: input.currentGate,
     targetPath: input.targetPath ?? null,
     deployTarget: input.deployTarget ?? "local",
+    autonomous: input.autonomous ?? false,
     durability: store.hasPersistence() ? "persisted" : "memory_only",
     createdAt: new Date().toISOString(),
   });
@@ -252,6 +254,7 @@ export async function runGraph(
       currentGate: "gate_0",
       targetPath: input.targetPath ?? null,
       deployTarget: input.deployTarget ?? "local",
+      autonomous: input.autonomous ?? false,
       designMode: input.designMode ?? "auto",
     });
   } catch (err: any) {
@@ -263,6 +266,7 @@ export async function runGraph(
       await neo4jSvc.close().catch(() => {});
     }
     // Mark job as failed in store
+    console.error(`[pipeline] FATAL error in job ${input.jobId}:`, err?.stack || err?.message || err);
     store.update(input.jobId, {
       currentGate: "failed",
       errorMessage: `Pipeline error: ${err.message}`,

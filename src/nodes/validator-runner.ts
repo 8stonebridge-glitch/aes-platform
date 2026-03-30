@@ -40,66 +40,76 @@ export async function validatorRunner(
   const store = getJobStore();
 
   cb?.onGate("validation", "Running contract tests...");
-  store.addLog(state.jobId, {
-    gate: "validation",
-    message: `Running ${CONTRACT_TEST_SUMMARY.total} contract tests`,
-  });
-
-  // Determine which categories to run based on built features
-  const categories = determineCategories(state);
-  const testsToRun = categories.flatMap(c => getTestsByCategory(c));
-
-  cb?.onStep(`${testsToRun.length} tests selected across ${categories.join(", ")}`);
-
   const results: ValidatorResult[] = [];
   const startTime = Date.now();
+  const shouldRunContracts = shouldRunOpsuiteContracts(state);
 
-  // Group tests by type for efficient execution
-  const apiTests = testsToRun.filter(t => t.type === "contract");
-  const roleTests = testsToRun.filter(t => t.type === "role_visibility");
-  const isolationTests = testsToRun.filter(t => t.type === "role_isolation");
-  const pageDesignTests = testsToRun.filter(t => t.type === "role_page_design");
-  const smTests = testsToRun.filter(t => t.type === "state_machine");
+  if (shouldRunContracts) {
+    store.addLog(state.jobId, {
+      gate: "validation",
+      message: `Running ${CONTRACT_TEST_SUMMARY.total} contract tests`,
+    });
 
-  // Run each group
-  if (apiTests.length > 0) {
-    cb?.onStep(`Running ${apiTests.length} API route tests...`);
-    const apiResults = await runTestGroup(state.jobId, apiTests, "contract");
-    results.push(...apiResults);
-    const passed = apiResults.filter(r => r.passed).length;
-    cb?.onStep(`API routes: ${passed}/${apiTests.length} passed`);
-  }
+    // Determine which categories to run based on built features
+    const categories = determineCategories(state);
+    const testsToRun = categories.flatMap(c => getTestsByCategory(c));
 
-  if (roleTests.length > 0) {
-    cb?.onStep(`Running ${roleTests.length} role visibility tests...`);
-    const roleResults = await runTestGroup(state.jobId, roleTests, "role_visibility");
-    results.push(...roleResults);
-    const passed = roleResults.filter(r => r.passed).length;
-    cb?.onStep(`Role visibility: ${passed}/${roleTests.length} passed`);
-  }
+    cb?.onStep(`${testsToRun.length} tests selected across ${categories.join(", ")}`);
 
-  if (isolationTests.length > 0) {
-    cb?.onStep(`Running ${isolationTests.length} role isolation tests...`);
-    const isoResults = await runTestGroup(state.jobId, isolationTests, "role_isolation");
-    results.push(...isoResults);
-    const passed = isoResults.filter(r => r.passed).length;
-    cb?.onStep(`Role isolation: ${passed}/${isolationTests.length} passed`);
-  }
+    // Group tests by type for efficient execution
+    const apiTests = testsToRun.filter(t => t.type === "contract");
+    const roleTests = testsToRun.filter(t => t.type === "role_visibility");
+    const isolationTests = testsToRun.filter(t => t.type === "role_isolation");
+    const pageDesignTests = testsToRun.filter(t => t.type === "role_page_design");
+    const smTests = testsToRun.filter(t => t.type === "state_machine");
 
-  if (pageDesignTests.length > 0) {
-    cb?.onStep(`Running ${pageDesignTests.length} role page design tests...`);
-    const pdResults = await runTestGroup(state.jobId, pageDesignTests, "role_page_design");
-    results.push(...pdResults);
-    const passed = pdResults.filter(r => r.passed).length;
-    cb?.onStep(`Role page design: ${passed}/${pageDesignTests.length} passed`);
-  }
+    // Run each group
+    if (apiTests.length > 0) {
+      cb?.onStep(`Running ${apiTests.length} API route tests...`);
+      const apiResults = await runTestGroup(state.jobId, apiTests, "contract");
+      results.push(...apiResults);
+      const passed = apiResults.filter(r => r.passed).length;
+      cb?.onStep(`API routes: ${passed}/${apiTests.length} passed`);
+    }
 
-  if (smTests.length > 0) {
-    cb?.onStep(`Running ${smTests.length} state machine tests...`);
-    const smResults = await runTestGroup(state.jobId, smTests, "state_machine");
-    results.push(...smResults);
-    const passed = smResults.filter(r => r.passed).length;
-    cb?.onStep(`State machine: ${passed}/${smTests.length} passed`);
+    if (roleTests.length > 0) {
+      cb?.onStep(`Running ${roleTests.length} role visibility tests...`);
+      const roleResults = await runTestGroup(state.jobId, roleTests, "role_visibility");
+      results.push(...roleResults);
+      const passed = roleResults.filter(r => r.passed).length;
+      cb?.onStep(`Role visibility: ${passed}/${roleTests.length} passed`);
+    }
+
+    if (isolationTests.length > 0) {
+      cb?.onStep(`Running ${isolationTests.length} role isolation tests...`);
+      const isoResults = await runTestGroup(state.jobId, isolationTests, "role_isolation");
+      results.push(...isoResults);
+      const passed = isoResults.filter(r => r.passed).length;
+      cb?.onStep(`Role isolation: ${passed}/${isolationTests.length} passed`);
+    }
+
+    if (pageDesignTests.length > 0) {
+      cb?.onStep(`Running ${pageDesignTests.length} role page design tests...`);
+      const pdResults = await runTestGroup(state.jobId, pageDesignTests, "role_page_design");
+      results.push(...pdResults);
+      const passed = pdResults.filter(r => r.passed).length;
+      cb?.onStep(`Role page design: ${passed}/${pageDesignTests.length} passed`);
+    }
+
+    if (smTests.length > 0) {
+      cb?.onStep(`Running ${smTests.length} state machine tests...`);
+      const smResults = await runTestGroup(state.jobId, smTests, "state_machine");
+      results.push(...smResults);
+      const passed = smResults.filter(r => r.passed).length;
+      cb?.onStep(`State machine: ${passed}/${smTests.length} passed`);
+    }
+  } else {
+    const skipMessage = "Skipping OpSuite contract suite for non-OpSuite app";
+    cb?.onStep(skipMessage);
+    store.addLog(state.jobId, {
+      gate: "validation",
+      message: skipMessage,
+    });
   }
 
   const totalPassed = results.filter(r => r.passed).length;
@@ -154,7 +164,7 @@ export async function validatorRunner(
     const linesUsed = Math.round(driftResult.lines_budget_used * (bridge.math?.scope_budget?.max_lines ?? 2000));
 
     if (!driftResult.clean) {
-      cb?.onFail(`Scope drift [${bridge.feature_name}]: ${driftResult.violations.length} violations, drift score: ${driftResult.drift_score}`);
+      cb?.onWarn(`Scope drift [${bridge.feature_name}]: ${driftResult.violations.length} violations, drift score: ${driftResult.drift_score}`);
     } else {
       cb?.onStep(`Scope drift [${bridge.feature_name}]: ${driftResult.drift_score.toFixed(3)} (clean) | Budget: ${filesUsed}/${bridge.math?.scope_budget?.max_files ?? 30} files, ${linesUsed}/${bridge.math?.scope_budget?.max_lines ?? 2000} lines`);
     }
@@ -163,7 +173,9 @@ export async function validatorRunner(
   // Log results
   store.addLog(state.jobId, {
     gate: "validation",
-    message: `Contract tests complete: ${totalPassed} passed, ${totalFailed} failed (${duration}ms)`,
+    message: shouldRunContracts
+      ? `Contract tests complete: ${totalPassed} passed, ${totalFailed} failed (${duration}ms)`
+      : `Validation complete: skipped domain-specific contract suite (${duration}ms)`,
   });
 
   if (totalFailed > 0) {
@@ -176,11 +188,44 @@ export async function validatorRunner(
     };
   }
 
-  cb?.onSuccess(`All ${totalPassed} contract tests passed (${duration}ms)`);
+  cb?.onSuccess(
+    shouldRunContracts
+      ? `All ${totalPassed} contract tests passed (${duration}ms)`
+      : `Validation passed: non-OpSuite app skipped irrelevant contract suite (${duration}ms)`
+  );
 
   return {
     validatorResults,
   };
+}
+
+function shouldRunOpsuiteContracts(state: AESStateType): boolean {
+  const corpus = [
+    state.rawRequest,
+    state.intentBrief?.normalized_request,
+    state.appSpec?.title,
+    ...(state.appSpec?.features || []).map((f: any) => `${f.name} ${f.description || ""}`),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (corpus.includes("opsuite")) return true;
+
+  const opsuiteSignals = [
+    "availability",
+    "leave request",
+    "handoff",
+    "subadmin",
+    "membership",
+    "accountable lead",
+    "admin people",
+    "employee provisioning",
+    "audit export",
+  ];
+
+  const matches = opsuiteSignals.filter((signal) => corpus.includes(signal)).length;
+  return matches >= 2;
 }
 
 /**

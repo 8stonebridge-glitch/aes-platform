@@ -31,9 +31,11 @@ import type {
   LayoutInfo,
   ExtractionMeta,
 } from "../types/design-evidence.js";
+import type { RawDesignEvidence } from "../types/raw-design-evidence.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { getLLM, isLLMAvailable, safeLLMCall } from "../llm/provider.js";
+import { normalizeDesignEvidence } from "../tools/design-normalize.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -228,21 +230,20 @@ Return ONLY valid JSON — no markdown, no explanation.`,
 
   const parsed = JSON.parse(jsonMatch[0]);
 
-  // Ensure required fields
-  return {
+  const rawEvidence: RawDesignEvidence = {
     evidence_id: `design-auto-${randomUUID().slice(0, 8)}`,
     source: {
       type: "manual",
       ref: "llm-auto-designer",
       name: `Auto-design for ${appSpec.title || "app"}`,
     },
-    screens: parsed.screens || [],
+    screens: Array.isArray(parsed.screens) ? parsed.screens : [],
     navigation: parsed.navigation || { primary_items: [], secondary_items: [], edges: [] },
-    components: parsed.components || [],
-    data_views: parsed.data_views || [],
-    forms: parsed.forms || [],
-    actions: parsed.actions || [],
-    states: parsed.states || [],
+    components: Array.isArray(parsed.components) ? parsed.components : [],
+    data_views: Array.isArray(parsed.data_views) ? parsed.data_views : [],
+    forms: Array.isArray(parsed.forms) ? parsed.forms : [],
+    actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+    states: Array.isArray(parsed.states) ? parsed.states : [],
     layout: parsed.layout || {
       pattern: "sidebar_main",
       responsive_notes: ["Desktop-first, responsive to tablet"],
@@ -256,6 +257,13 @@ Return ONLY valid JSON — no markdown, no explanation.`,
     },
     extracted_at: new Date().toISOString(),
   };
+
+  const normalized = normalizeDesignEvidence(rawEvidence);
+  if (normalized.screens.length === 0) {
+    throw new Error("LLM design produced no screens after normalization");
+  }
+
+  return normalized;
 }
 
 // ─── Template-based design generation (no LLM fallback) ──────────

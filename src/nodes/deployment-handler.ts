@@ -13,6 +13,7 @@
 
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
+import { getJobStore } from "../store.js";
 import {
   GithubService,
   isGithubConfigured,
@@ -31,13 +32,28 @@ export async function deploymentHandler(
   state: AESStateType,
 ): Promise<Partial<AESStateType>> {
   const cb = getCallbacks();
+  const store = getJobStore();
 
   cb?.onGate("deploying", "Deploying application...");
+  store.addLog(state.jobId, {
+    gate: "deploying",
+    message: `Starting deployment via ${
+      state.deployTarget === "cloudflare"
+        ? "cloudflare"
+        : state.deployTarget === "vercel"
+          ? "vercel"
+          : "github_vercel"
+    }`,
+  });
 
   // Check if we have build results with a workspace
   const appBuild = state.buildResults?.["__app__"];
   if (!appBuild) {
     cb?.onFail("No app build result found — cannot deploy");
+    store.addLog(state.jobId, {
+      gate: "deploying",
+      message: "Deployment aborted: no app build result found",
+    });
     return {
       currentGate: "failed" as any,
       errorMessage: "No app build result to deploy",
@@ -89,6 +105,10 @@ export async function deploymentHandler(
 
       if (result.success) {
         cb?.onSuccess(`Deployed to Cloudflare: ${result.previewUrl} (${result.fileCount} files, ${Math.round(result.bundleSize / 1024)}KB)`);
+        store.addLog(state.jobId, {
+          gate: "deploying",
+          message: `Cloudflare deploy succeeded: ${result.previewUrl}`,
+        });
         return {
           currentGate: "complete" as any,
           previewUrl: result.previewUrl,
@@ -96,8 +116,12 @@ export async function deploymentHandler(
         };
       } else {
         cb?.onWarn(`Cloudflare deploy failed: ${result.error}. Build complete but not deployed.`);
+        store.addLog(state.jobId, {
+          gate: "deploying",
+          message: `Cloudflare deploy failed: ${result.error}`,
+        });
         return {
-          currentGate: "complete" as any,
+          currentGate: "failed" as any,
           errorMessage: `Cloudflare deploy failed: ${result.error}`,
         };
       }
@@ -107,11 +131,33 @@ export async function deploymentHandler(
   // ── Local / Vercel / GitHub deploy path ──
   const hasGithub = isGithubConfigured();
   const hasVercel = isVercelConfigured();
+  const vercelRequested = state.deployTarget === "vercel";
+
+  if (vercelRequested && (!hasGithub || !hasVercel)) {
+    const missing = [
+      hasGithub ? null : "GITHUB_TOKEN",
+      hasVercel ? null : "VERCEL_TOKEN",
+    ].filter(Boolean).join(", ");
+    const message = `Vercel deployment requested but missing required config: ${missing}`;
+    cb?.onFail(message);
+    store.addLog(state.jobId, {
+      gate: "deploying",
+      message,
+    });
+    return {
+      currentGate: "failed" as any,
+      errorMessage: message,
+    };
+  }
 
   if (!hasGithub && !hasVercel) {
     cb?.onWarn(
       "No deployment services configured (GITHUB_TOKEN / VERCEL_TOKEN). Build complete but not deployed.",
     );
+    store.addLog(state.jobId, {
+      gate: "deploying",
+      message: "Deployment skipped: no GitHub or Vercel credentials configured",
+    });
     cb?.onSuccess(
       "Build complete. App ready in workspace but not deployed (set GITHUB_TOKEN and VERCEL_TOKEN to enable).",
     );
@@ -157,6 +203,16 @@ export async function deploymentHandler(
       }
     } catch (err: any) {
       cb?.onWarn(`GitHub push failed: ${err.message}`);
+      store.addLog(state.jobId, {
+        gate: "deploying",
+        message: `GitHub push failed: ${err.message}`,
+      });
+      if (vercelRequested) {
+        return {
+          currentGate: "failed" as any,
+          errorMessage: `GitHub push failed: ${err.message}`,
+        };
+      }
       // Continue — we can still try to complete without deployment
     }
   }
@@ -199,15 +255,43 @@ export async function deploymentHandler(
       ); // 5 min timeout
 
       deploymentUrl = result.url;
+      store.addLog(state.jobId, {
+        gate: "deploying",
+        message: `Vercel deploy succeeded: ${deploymentUrl}`,
+      });
       cb?.onSuccess(`Deployed to ${deploymentUrl}`);
     } catch (err: any) {
       cb?.onWarn(`Vercel deployment failed: ${err.message}`);
+      store.addLog(state.jobId, {
+        gate: "deploying",
+        message: `Vercel deploy failed: ${err.message}`,
+      });
+      if (vercelRequested) {
+        return {
+          currentGate: "failed" as any,
+          errorMessage: `Vercel deployment failed: ${err.message}`,
+        };
+      }
       // Don't fail the pipeline — the build succeeded, deploy is best-effort
     }
   } else if (hasVercel && !githubFullName) {
-    cb?.onWarn(
-      "Vercel deployment requires GitHub — code must be pushed to a repo first",
-    );
+    const message = "Vercel deployment requires GitHub — code must be pushed to a repo first";
+    if (vercelRequested) {
+      cb?.onFail(message);
+      store.addLog(state.jobId, {
+        gate: "deploying",
+        message,
+      });
+      return {
+        currentGate: "failed" as any,
+        errorMessage: message,
+      };
+    }
+    cb?.onWarn(message);
+    store.addLog(state.jobId, {
+      gate: "deploying",
+      message: "Deployment skipped: Vercel requires a GitHub repo",
+    });
   }
 
   // Build summary

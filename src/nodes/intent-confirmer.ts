@@ -1,6 +1,7 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { shouldAutoConfirmIntent } from "../autonomy.js";
 
 /**
  * Intent Confirmer — asks the user to confirm or clarify the classified intent.
@@ -23,6 +24,28 @@ export async function intentConfirmer(
 
   const brief = state.intentBrief;
   const questions = brief.clarifying_questions ?? [];
+
+  if (shouldAutoConfirmIntent(state)) {
+    cb?.onSuccess("Autonomous mode auto-confirmed intent");
+    store.addLog(state.jobId, {
+      gate: "gate_0",
+      message: questions.length > 0
+        ? `Autonomous mode auto-confirmed intent with ${questions.length} pending clarification question(s)`
+        : "Autonomous mode auto-confirmed intent",
+    });
+
+    return {
+      intentConfirmed: true,
+      intentBrief: {
+        ...brief,
+        confirmation_status:
+          brief.confirmation_status === "auto_confirmed_low_ambiguity"
+            ? brief.confirmation_status
+            : "confirmed",
+        updated_at: new Date().toISOString(),
+      },
+    };
+  }
 
   store.addLog(state.jobId, {
     gate: "gate_0",

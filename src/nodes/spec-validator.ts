@@ -208,10 +208,19 @@ export async function specValidator(
     gate: "gate_1",
     message: `Validation: ${passed.length}/${results.length} rules passed`,
   });
+  store.update(state.jobId, {
+    specValidationResults: results,
+    currentGate: "gate_1",
+  });
 
   if (failed.length > 0) {
     // Check retry count
     const retryCount = (state.specRetryCount || 0) + 1;
+    store.update(state.jobId, {
+      specValidationResults: results,
+      specRetryCount: retryCount,
+      currentGate: retryCount >= 3 ? "failed" : "gate_1",
+    });
 
     if (retryCount >= 3) {
       cb?.onFail("Max retries exceeded — spec blocked");
@@ -295,6 +304,10 @@ export async function specValidator(
   }
 
   cb?.onSuccess(`Validation passed: ${passed.length}/${results.length} rules`);
+  store.update(state.jobId, {
+    specValidationResults: results,
+    currentGate: "gate_1",
+  });
 
   return {
     specValidationResults: results,

@@ -65,8 +65,17 @@ export function extractDesignConstraintsForFeature(
 ): DesignConstraints | undefined {
   const featureNameLower = featureName.toLowerCase();
   const featureWords = featureNameLower.split(/[\s_-]+/).filter(w => w.length > 2);
+  const screens = Array.isArray(design.screens) ? design.screens : [];
+  const components = Array.isArray(design.components) ? design.components : [];
+  const dataViews = Array.isArray(design.data_views) ? design.data_views : [];
+  const forms = Array.isArray(design.forms) ? design.forms : [];
+  const actions = Array.isArray(design.actions) ? design.actions : [];
+  const states = Array.isArray(design.states) ? design.states : [];
+  const primaryNav = Array.isArray(design.navigation?.primary_items)
+    ? design.navigation.primary_items
+    : [];
 
-  const matchingScreens = design.screens.filter(s => {
+  const matchingScreens = screens.filter(s => {
     const screenNameLower = s.name.toLowerCase();
     const purposeLower = (s.purpose || "").toLowerCase();
 
@@ -92,30 +101,33 @@ export function extractDesignConstraintsForFeature(
       name: s.name,
       purpose: s.purpose,
     })),
-    required_components: design.components
-      .filter(c => c.screen_ids.some(id => screenIds.has(id)))
+    required_components: components
+      .filter(c => {
+        const componentScreens = Array.isArray(c.screen_ids) ? c.screen_ids : [];
+        return componentScreens.some(id => screenIds.has(id));
+      })
       .map(c => ({
         component_id: c.component_id,
         name: c.name,
         category: c.category,
       })),
-    required_data_views: design.data_views
+    required_data_views: dataViews
       .filter(d => screenIds.has(d.screen_id))
       .map(d => ({
         view_id: d.view_id,
         name: d.name,
         type: d.type,
-        columns: d.columns.map(c => c.name),
-        capabilities: d.capabilities,
+        columns: (Array.isArray(d.columns) ? d.columns : []).map(c => c.name),
+        capabilities: Array.isArray(d.capabilities) ? d.capabilities : [],
       })),
-    required_forms: design.forms
+    required_forms: forms
       .filter(f => screenIds.has(f.screen_id))
       .map(f => ({
         form_id: f.form_id,
         name: f.name,
-        fields: f.fields.map(fl => fl.name),
+        fields: (Array.isArray(f.fields) ? f.fields : []).map(fl => fl.name),
       })),
-    required_actions: design.actions
+    required_actions: actions
       .filter(a => screenIds.has(a.screen_id))
       .map(a => ({
         action_id: a.action_id,
@@ -123,14 +135,14 @@ export function extractDesignConstraintsForFeature(
         type: a.type,
         is_destructive: a.is_destructive,
       })),
-    required_states: design.states
+    required_states: states
       .filter(s => screenIds.has(s.screen_id))
       .map(s => ({
         state_id: s.state_id,
         type: s.type,
         screen_id: s.screen_id,
       })),
-    required_nav: design.navigation.primary_items
+    required_nav: primaryNav
       .filter(n => screenIds.has(n.target_screen_id))
       .map(n => ({
         label: n.label,

@@ -36,10 +36,9 @@ async function queryResearch(
   query: string,
   category: string,
 ): Promise<{ findings: string[]; sources: string[] } | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RESEARCH_TIMEOUT_MS);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), RESEARCH_TIMEOUT_MS);
-
     const res = await fetch(`${RESEARCH_API}/research`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -50,8 +49,6 @@ async function queryResearch(
       }),
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
 
     if (!res.ok) {
       return null;
@@ -64,6 +61,8 @@ async function queryResearch(
     };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -76,10 +75,9 @@ async function queryPerplexityDirect(
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) return null;
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RESEARCH_TIMEOUT_MS);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), RESEARCH_TIMEOUT_MS);
-
     const res = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: {
@@ -100,8 +98,6 @@ async function queryPerplexityDirect(
       signal: controller.signal,
     });
 
-    clearTimeout(timeout);
-
     if (!res.ok) return null;
 
     const data = await res.json() as any;
@@ -117,6 +113,8 @@ async function queryPerplexityDirect(
     return { findings, sources: citations };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

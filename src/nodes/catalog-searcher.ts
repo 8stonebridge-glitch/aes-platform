@@ -7,13 +7,23 @@ import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { GithubService, isGithubConfigured } from "../services/github-service.js";
 
-// Resolve catalog path relative to monorepo root (src/nodes/catalog-searcher.ts → ../../catalog)
+// Resolve catalog path relative to the project root in both src/ and dist/ runtimes.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const MONOREPO_ROOT = join(__dirname, "..", "..");
-const CATALOG_PACKAGES_DIR = join(MONOREPO_ROOT, "catalog", "packages");
-const CATALOG_PATTERNS_DIR = join(MONOREPO_ROOT, "catalog", "patterns");
-const CATALOG_TEMPLATES_DIR = join(MONOREPO_ROOT, "catalog", "templates");
+
+function resolveCatalogRoot(): string | null {
+  const candidates = [
+    join(__dirname, "..", ".."),
+    join(__dirname, "..", "..", ".."),
+    process.cwd(),
+  ];
+
+  for (const root of candidates) {
+    if (existsSync(join(root, "catalog"))) return root;
+  }
+
+  return null;
+}
 
 interface CatalogEntry {
   id: string;
@@ -37,9 +47,12 @@ function loadCatalogFromDir(dir: string): CatalogEntry[] {
 }
 
 function loadCatalog(): CatalogEntry[] {
-  const packages = loadCatalogFromDir(CATALOG_PACKAGES_DIR);
-  const patterns = loadCatalogFromDir(CATALOG_PATTERNS_DIR);
-  const templates = loadCatalogFromDir(CATALOG_TEMPLATES_DIR);
+  const catalogRoot = resolveCatalogRoot();
+  if (!catalogRoot) return [];
+
+  const packages = loadCatalogFromDir(join(catalogRoot, "catalog", "packages"));
+  const patterns = loadCatalogFromDir(join(catalogRoot, "catalog", "patterns"));
+  const templates = loadCatalogFromDir(join(catalogRoot, "catalog", "templates"));
   return [...packages, ...patterns, ...templates];
 }
 

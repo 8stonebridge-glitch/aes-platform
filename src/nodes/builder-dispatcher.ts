@@ -124,6 +124,11 @@ export async function builderDispatcher(
       buildResults[featureId] = featureRun;
     }
 
+    store.update(state.jobId, {
+      builderRuns: [result.run, ...Object.values(result.featureResults)],
+      buildResults,
+    });
+
     // ── P7: Run layered validation on AppBuilder results ──
     const pipeline = runValidationPipeline(
       buildResults,

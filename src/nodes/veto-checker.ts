@@ -301,6 +301,15 @@ export async function vetoChecker(
     cb?.onWarn(`${blockedFeatures.length} features blocked, ${clearedFeatures.length} features clear — proceeding with clear features`);
   }
 
+  store.update(state.jobId, {
+    featureBridges: bridges,
+    vetoResults: allVetoResults,
+    currentGate: allBlocked ? "failed" : "gate_3",
+    errorMessage: allBlocked
+      ? `All features blocked by vetoes: ${allVetoResults.filter((v) => v.triggered).map((v) => v.code).join(", ")}`
+      : null,
+  });
+
   return {
     featureBridges: bridges,
     vetoResults: allVetoResults,

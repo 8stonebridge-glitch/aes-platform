@@ -46,6 +46,8 @@ const jobStreams = new Map<string, express.Response[]>();
 // Event buffer — stores events so clients connecting late get a full replay
 const jobEventBuffer = new Map<string, { event: string; data: any }[]>();
 const MAX_EVENT_BUFFERS = 200;
+const APPROVAL_SIGNAL_APPROVED = "__approval_signal__:approved";
+const APPROVAL_SIGNAL_REJECTED = "__approval_signal__:rejected";
 
 function evictEventBuffers(): void {
   if (jobEventBuffer.size <= MAX_EVENT_BUFFERS) return;
@@ -83,6 +85,7 @@ function syncJobToConvex(jobId: string) {
     currentGate: job.currentGate,
     intentConfirmed: job.intentConfirmed,
     userApproved: job.userApproved,
+    autonomous: job.autonomous,
     targetPath: job.targetPath,
     deployTarget: job.deployTarget,
     previewUrl: job.previewUrl,
@@ -100,7 +103,42 @@ function syncJobToConvex(jobId: string) {
   });
 }
 
+async function readApprovalSignal(jobId: string): Promise<boolean | null> {
+  const store = getJobStore();
+  if (!store.hasPersistence()) return null;
+
+  try {
+    const logs = await store.loadLogsFromPostgres(jobId);
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const message = logs[i]?.message;
+      if (message === APPROVAL_SIGNAL_APPROVED) return true;
+      if (message === APPROVAL_SIGNAL_REJECTED) return false;
+    }
+  } catch {
+    // Cross-instance approval polling is best-effort.
+  }
+
+  return null;
+}
+
 function broadcastToJob(jobId: string, event: string, data: any) {
+  const store = getJobStore();
+
+  if (event === "gate" && typeof data?.gate === "string") {
+    store.update(jobId, { currentGate: data.gate });
+  } else if (event === "complete") {
+    store.update(jobId, {
+      currentGate: data?.error ? "failed" : "complete",
+      previewUrl: data?.previewUrl || null,
+      errorMessage: data?.error || null,
+    });
+  } else if (event === "error" || event === "fail") {
+    store.update(jobId, {
+      currentGate: "failed",
+      errorMessage: data?.message || "Pipeline failed",
+    });
+  }
+
   // Buffer the event for late-connecting clients
   if (!jobEventBuffer.has(jobId)) { evictEventBuffers(); jobEventBuffer.set(jobId, []); }
   jobEventBuffer.get(jobId)!.push({ event, data });
@@ -128,11 +166,19 @@ function broadcastToJob(jobId: string, event: string, data: any) {
 // ─── POST /api/build — Start a new build ───────────────────────────
 
 app.post("/api/build", async (req, res) => {
-  const { intent, targetPath, deployTarget, designMode } = req.body;
+  const { intent, targetPath, deployTarget, designMode, autonomous } = req.body;
   if (!intent || typeof intent !== "string") {
     res.status(400).json({ error: "intent is required" });
     return;
   }
+
+  const resolvedDeployTarget =
+    deployTarget === "cloudflare"
+      ? "cloudflare"
+      : deployTarget === "vercel"
+        ? "vercel"
+        : "local";
+  const autonomousMode = autonomous === true;
 
   const jobId = `j-${randomUUID().slice(0, 8)}`;
   const requestId = `req-${randomUUID().slice(0, 8)}`;
@@ -149,7 +195,8 @@ app.post("/api/build", async (req, res) => {
     intentConfirmed: false,
     userApproved: false,
     targetPath: resolvedTargetPath,
-    deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local",
+    deployTarget: resolvedDeployTarget,
+    autonomous: autonomousMode,
     features: [],
   });
 
@@ -165,18 +212,38 @@ app.post("/api/build", async (req, res) => {
     onNeedsApproval: async (prompt, data) => {
       broadcastToJob(jobId, "needs_approval", { prompt, data });
       return new Promise((resolve) => {
-        const store = getJobStore();
-        const check = setInterval(() => {
+        let settled = false;
+        const settle = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(value);
+        };
+
+        const poll = async () => {
+          if (settled) return;
+
+          const store = getJobStore();
           const job = store.get(jobId);
           if (job?.userApproved === true) {
-            clearInterval(check);
-            resolve(true);
+            settle(true);
+            return;
           } else if (job?.userApproved === false || job?.errorMessage) {
-            clearInterval(check);
-            resolve(false);
+            settle(false);
+            return;
           }
-        }, 500);
-        setTimeout(() => { clearInterval(check); resolve(false); }, 300000);
+
+          const persistedSignal = await readApprovalSignal(jobId);
+          if (persistedSignal !== null) {
+            settle(persistedSignal);
+            return;
+          }
+
+          setTimeout(() => { void poll(); }, 500);
+        };
+
+        const timeout = setTimeout(() => settle(false), 300000);
+        void poll();
       });
     },
     onNeedsConfirmation: async (statement, questions) => {
@@ -200,7 +267,16 @@ app.post("/api/build", async (req, res) => {
 
   try {
     const result = await runGraph(
-      { jobId, requestId, rawRequest: intent, currentGate: "gate_0", targetPath: resolvedTargetPath, deployTarget: deployTarget === "cloudflare" ? "cloudflare" : "local", designMode: designMode === "paper" ? "paper" : "auto" },
+      {
+        jobId,
+        requestId,
+        rawRequest: intent,
+        currentGate: "gate_0",
+        targetPath: resolvedTargetPath,
+        deployTarget: resolvedDeployTarget,
+        autonomous: autonomousMode,
+        designMode: designMode === "paper" ? "paper" : "auto",
+      },
       callbacks
     );
     broadcastToJob(jobId, "complete", {
@@ -347,21 +423,24 @@ app.post("/api/jobs/:id/approve", (req, res) => {
   const jobId = req.params.id;
   const store = getJobStore();
   const job = store.get(jobId);
-  if (!job) {
+  if (!job && !store.hasPersistence()) {
     res.status(404).json({ error: "Job not found" });
     return;
   }
 
-  store.update(jobId, { userApproved: true });
+  if (job) {
+    store.update(jobId, { userApproved: true });
+  }
+  store.addLog(jobId, { gate: "gate_1", message: APPROVAL_SIGNAL_APPROVED });
   res.json({ approved: true });
 });
 
 // ─── GET /api/jobs/:id — Get job status ────────────────────────────
 
-app.get("/api/jobs/:id", (req, res) => {
+app.get("/api/jobs/:id", async (req, res) => {
   const jobId = req.params.id;
   const store = getJobStore();
-  const job = store.get(jobId);
+  const job = store.get(jobId) || await store.loadFromPostgres(jobId);
   if (!job) {
     res.status(404).json({ error: "Job not found" });
     return;
@@ -372,6 +451,7 @@ app.get("/api/jobs/:id", (req, res) => {
     currentGate: job.currentGate,
     intentConfirmed: job.intentConfirmed,
     userApproved: job.userApproved,
+    autonomous: job.autonomous ?? false,
     targetPath: job.targetPath ?? null,
     deployTarget: job.deployTarget ?? "local",
     previewUrl: job.previewUrl ?? null,
@@ -400,6 +480,7 @@ app.get("/api/jobs", (_req, res) => {
     features: Object.keys(j.featureBridges || {}).length,
     intentConfirmed: j.intentConfirmed,
     userApproved: j.userApproved,
+    autonomous: j.autonomous ?? false,
     targetPath: j.targetPath ?? null,
     deployTarget: j.deployTarget ?? "local",
     previewUrl: j.previewUrl ?? null,
@@ -410,9 +491,12 @@ app.get("/api/jobs", (_req, res) => {
 
 // ─── GET /api/jobs/:id/logs — Get job logs ─────────────────────────
 
-app.get("/api/jobs/:id/logs", (req, res) => {
+app.get("/api/jobs/:id/logs", async (req, res) => {
   const jobId = req.params.id;
   const store = getJobStore();
+  if (!store.get(jobId)) {
+    await store.loadFromPostgres(jobId);
+  }
   const logs = store.getLogs(jobId);
   res.json(logs || []);
 });
@@ -485,10 +569,10 @@ app.get("/api/attention-queue", (_req, res) => {
 
 // ─── GET /api/jobs/:id/features — Full feature list with bridges ───
 
-app.get("/api/jobs/:id/features", (req, res) => {
+app.get("/api/jobs/:id/features", async (req, res) => {
   const jobId = req.params.id;
   const store = getJobStore();
-  const job = store.get(jobId);
+  const job = store.get(jobId) || await store.loadFromPostgres(jobId);
   if (!job) {
     res.status(404).json({ error: "Job not found" });
     return;
@@ -504,10 +588,10 @@ app.get("/api/jobs/:id/features", (req, res) => {
 
 // ─── GET /api/jobs/:id/audit — Full audit trail ────────────────────
 
-app.get("/api/jobs/:id/audit", (req, res) => {
+app.get("/api/jobs/:id/audit", async (req, res) => {
   const jobId = req.params.id;
   const store = getJobStore();
-  const job = store.get(jobId);
+  const job = store.get(jobId) || await store.loadFromPostgres(jobId);
   if (!job) {
     res.status(404).json({ error: "Job not found" });
     return;
@@ -979,7 +1063,27 @@ app.get("/api/debug/neo4j", async (_req, res) => {
 
 const PORT = parseInt(process.env.PORT || process.env.AES_PORT || "3100");
 
+async function initializePersistenceOnBoot(): Promise<void> {
+  const store = getJobStore();
+  if (store.hasPersistence()) return;
+
+  const pgUrl = process.env.AES_POSTGRES_URL;
+  if (!pgUrl) return;
+
+  try {
+    const { PersistenceLayer } = await import("../persistence.js");
+    const persistence = new PersistenceLayer(pgUrl);
+    await persistence.initialize();
+    store.setPersistence(persistence);
+    console.log("[persistence] Initialized AES Postgres schema");
+  } catch (err: any) {
+    console.warn(`[persistence] Bootstrap failed: ${err?.message || String(err)}`);
+  }
+}
+
 export function startServer() {
+  void initializePersistenceOnBoot();
+
   // Bind to :: (IPv6 + IPv4) for Railway private networking compatibility
   app.listen(PORT, "::", () => {
     console.log(`AES Platform API running on http://localhost:${PORT}`);

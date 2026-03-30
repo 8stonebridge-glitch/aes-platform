@@ -43,7 +43,8 @@ export interface JobRecord {
   fixTrailEntries?: FixTrailEntry[];
   builderRuns?: BuilderRunRecord[];
   targetPath?: string | null;
-  deployTarget?: "local" | "cloudflare";
+  deployTarget?: "local" | "cloudflare" | "vercel";
+  autonomous?: boolean;
   previewUrl?: string | null;
   deploymentUrl?: string | null;
   errorMessage?: string | null;
@@ -465,25 +466,29 @@ export class JobStore {
     const cached = this.jobs.get(jobId);
     if (cached) return cached;
 
+    const logs = await this.persistence.loadLogs(jobId);
     // Reconstruct from Postgres artifacts
     const brief = await this.persistence.loadIntentBrief(jobId);
-    if (!brief) return null;
+    if (!brief && logs.length === 0) return null;
 
     const job: JobRecord = {
       jobId,
-      requestId: brief.request_id,
-      rawRequest: brief.raw_request,
+      requestId: brief?.request_id || jobId,
+      rawRequest: brief?.raw_request || inferRawRequestFromLogs(logs) || "",
       currentGate: "unknown",
-      createdAt: brief.created_at,
+      createdAt: brief?.created_at || logs[0]?.timestamp || new Date().toISOString(),
       durability: "confirmed", // loaded from Postgres, so it's confirmed
-      intentBrief: brief,
-      intentConfirmed: brief.confirmation_status === "confirmed" ||
-        brief.confirmation_status === "auto_confirmed_low_ambiguity",
+      intentBrief: brief || undefined,
+      intentConfirmed: brief
+        ? brief.confirmation_status === "confirmed" ||
+          brief.confirmation_status === "auto_confirmed_low_ambiguity"
+        : logs.some((log) => /Classified as|Intent confirmed/i.test(log.message || "")),
     };
 
     // Try to load AppSpec
     // We need to find the app_id — check app_specs by request_id
-    const appSpecRow = await this.persistence.loadAppSpecByRequestId(jobId);
+    const appSpecLookupId = brief?.request_id || jobId;
+    const appSpecRow = await this.persistence.loadAppSpecByRequestId(appSpecLookupId);
     if (appSpecRow) {
       job.appSpec = appSpecRow;
       job.currentGate = "gate_1";
@@ -532,12 +537,14 @@ export class JobStore {
       job.builderRuns = builderRuns;
     }
 
+    if (logs.length > 0) {
+      this.logs.set(jobId, logs);
+      job.currentGate = deriveCurrentGateFromLogs(logs, job.currentGate);
+      job.userApproved = job.userApproved ?? logs.some((log) => log.message === "__approval_signal__:approved");
+    }
+
     // Cache it
     this.jobs.set(jobId, job);
-
-    // Load logs
-    const logs = await this.persistence.loadLogs(jobId);
-    this.logs.set(jobId, logs);
 
     return job;
   }
@@ -567,7 +574,7 @@ export class JobStore {
       await p.persistIntentBrief(jobId, updates.intentBrief);
     } else if (updates.intentBrief && before.intentBrief) {
       await p.updateIntentBriefStatus(
-        updates.intentBrief.request_id,
+        jobId,
         updates.intentBrief.confirmation_status
       );
     }
@@ -626,6 +633,15 @@ export class JobStore {
         await p.persistFixTrail(entry);
       }
     }
+
+    if (updates.builderRuns) {
+      const beforeRunIds = new Set((before.builderRuns || []).map((run) => run.run_id));
+      for (const run of updates.builderRuns) {
+        if (!beforeRunIds.has(run.run_id)) {
+          await p.persistBuilderRun(run);
+        }
+      }
+    }
   }
 
   // ─── Cleanup ─────────────────────────────────────────────────────
@@ -650,4 +666,16 @@ export function resetJobStore(): void {
     instance.dispose();
   }
   instance = null;
+}
+
+function inferRawRequestFromLogs(logs: LogEntry[]): string | null {
+  const rawLog = logs.find((log) => typeof log.message === "string" && log.message.startsWith("Raw request:"));
+  if (!rawLog?.message) return null;
+  const match = rawLog.message.match(/Raw request:\s*"([\s\S]+)"$/);
+  return match?.[1] || null;
+}
+
+function deriveCurrentGateFromLogs(logs: LogEntry[], fallback: string): string {
+  const lastGate = [...logs].reverse().find((log) => typeof log.gate === "string" && log.gate.length > 0)?.gate;
+  return lastGate || fallback;
 }

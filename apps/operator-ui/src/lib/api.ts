@@ -1,9 +1,17 @@
 // In dev, Next.js rewrites /api/* → localhost:4100/api/* (no CORS issues)
 // In prod, set NEXT_PUBLIC_AES_API_URL to the backend URL
 const BASE = process.env.NEXT_PUBLIC_AES_API_URL ?? "";
+const AES_API_KEY = process.env.NEXT_PUBLIC_AES_API_KEY;
+
+function authHeaders(): Record<string, string> {
+  return AES_API_KEY ? { "x-api-key": AES_API_KEY } : {};
+}
 
 export async function aesGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+  const res = await fetch(`${BASE}${path}`, {
+    cache: "no-store",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return res.json();
 }
@@ -14,7 +22,7 @@ export async function aesPost<T = unknown>(
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -316,7 +324,7 @@ export const orchestrator = {
   startBuild: async (intent: string, targetPath?: string, deployTarget?: "local" | "cloudflare"): Promise<OrchestratorJobResponse> => {
     const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/build`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ intent, targetPath: targetPath || undefined, deployTarget: deployTarget || "local" }),
     });
     if (!res.ok) {
@@ -328,14 +336,14 @@ export const orchestrator = {
 
   /** Get job status */
   jobStatus: async (jobId: string): Promise<OrchestratorJobStatus> => {
-    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}`, { cache: "no-store" });
+    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}`, { cache: "no-store", headers: authHeaders() });
     if (!res.ok) throw new Error(`GET /orchestrator/jobs/${jobId} → ${res.status}`);
     return res.json();
   },
 
   /** List all jobs */
   listJobs: async () => {
-    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs`, { cache: "no-store" });
+    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs`, { cache: "no-store", headers: authHeaders() });
     if (!res.ok) throw new Error(`GET /orchestrator/jobs → ${res.status}`);
     return res.json() as Promise<{
       jobId: string;
@@ -353,7 +361,7 @@ export const orchestrator = {
   confirmIntent: async (jobId: string): Promise<void> => {
     const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}/confirm`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
     });
     if (!res.ok) throw new Error(`POST confirm → ${res.status}`);
   },
@@ -362,7 +370,7 @@ export const orchestrator = {
   approvePlan: async (jobId: string): Promise<void> => {
     const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}/approve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
     });
     if (!res.ok) throw new Error(`POST approve → ${res.status}`);
   },
@@ -376,14 +384,14 @@ export const orchestrator = {
 
   /** Get job logs */
   jobLogs: async (jobId: string) => {
-    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}/logs`, { cache: "no-store" });
+    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/jobs/${jobId}/logs`, { cache: "no-store", headers: authHeaders() });
     if (!res.ok) throw new Error(`GET /orchestrator/jobs/${jobId}/logs → ${res.status}`);
     return res.json() as Promise<{ gate: string; message: string; timestamp: string }[]>;
   },
 
   /** Health check for orchestrator */
   health: async () => {
-    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/health`, { cache: "no-store" });
+    const res = await fetch(`${ORCH_BASE}${ORCH_PREFIX}/health`, { cache: "no-store", headers: authHeaders() });
     if (!res.ok) throw new Error(`GET /orchestrator/health → ${res.status}`);
     return res.json() as Promise<{ status: string; version: string }>;
   },

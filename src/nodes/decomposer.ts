@@ -576,11 +576,17 @@ export async function decomposer(
     featureBuildOrder = result.featureBuildOrder;
   }
 
-  // Enrich with graph-derived features not already in the spec
+  // Enrich with graph-derived features not already in the spec.
+  // Keep this intentionally conservative so prior graph context guides
+  // decomposition without silently expanding small apps into bloated specs.
   if (priorFeatures.length > 0) {
+    const baseFeatureCount = appSpec.features.length;
     const existingNames = new Set(
       appSpec.features.map((f: any) => f.name.toLowerCase())
     );
+    const maxGraphDerivedAdds =
+      baseFeatureCount <= 4 ? 0 : baseFeatureCount <= 8 ? 1 : Math.min(3, Math.max(1, Math.floor(baseFeatureCount / 4)));
+    const candidateFeatures: Array<{ prior: any; score: number }> = [];
     let added = 0;
 
     for (const prior of priorFeatures) {
@@ -596,24 +602,43 @@ export async function decomposer(
 
       // Check if this prior feature is relevant (shares words with existing features)
       const priorWords = priorName.split(/[\s-_]+/).filter((w: string) => w.length > 2);
+      let bestOverlap = 0;
       const isRelevant = appSpec.features.some((f: any) => {
         const fWords = f.name.toLowerCase().split(/[\s-_]+/);
-        return priorWords.some((pw: string) => fWords.some((fw: string) => fw.includes(pw) || pw.includes(fw)));
+        const overlap = priorWords.filter((pw: string) =>
+          fWords.some((fw: string) => fw === pw || fw.includes(pw) || pw.includes(fw))
+        ).length;
+        bestOverlap = Math.max(bestOverlap, overlap);
+        return overlap >= 2;
       });
 
       if (isRelevant && !existingNames.has(priorName)) {
-        const idx = appSpec.features.length;
-        const newFeature = featureFromDescription(
-          prior.name,
-          idx,
-          appSpec.app_class
-        );
-        newFeature.description += ` [graph-derived from prior build v${prior.version || 1}]`;
-        appSpec.features.push(newFeature);
-        existingNames.add(priorName);
-        added++;
-        cb?.onStep(`Graph-derived feature: ${prior.name}`);
+        candidateFeatures.push({ prior, score: bestOverlap });
       }
+    }
+
+    const selectedGraphDerived = candidateFeatures
+      .sort((a, b) => b.score - a.score || (a.prior.name || "").localeCompare(b.prior.name || ""))
+      .slice(0, maxGraphDerivedAdds);
+
+    for (const { prior } of selectedGraphDerived) {
+      const idx = appSpec.features.length;
+      const newFeature = featureFromDescription(
+        prior.name,
+        idx,
+        appSpec.app_class
+      );
+      newFeature.description += ` [graph-derived from prior build v${prior.version || 1}]`;
+      appSpec.features.push(newFeature);
+      existingNames.add((prior.name || "").toLowerCase());
+      added++;
+      cb?.onStep(`Graph-derived feature: ${prior.name}`);
+    }
+
+    if (candidateFeatures.length > selectedGraphDerived.length) {
+      cb?.onStep(
+        `Skipped ${candidateFeatures.length - selectedGraphDerived.length} low-priority graph-derived features to keep scope focused`
+      );
     }
 
     if (added > 0) {
@@ -652,6 +677,42 @@ export async function decomposer(
     cb?.onStep(`Gap-filled permissions for ${uncoveredFeatures.length} features: ${uncoveredFeatures.map((f: any) => f.name).join(", ")}`);
   }
 
+  // Gap-fill: ensure every feature actor_id resolves to a declared role.
+  // The LLM sometimes uses actor names like "admin" while declaring role_id "administrator",
+  // or invents actors that aren't in the roles list. This causes G1_ACTORS_WITHOUT_ROLES failures.
+  const EXEMPT_ACTORS = new Set(["end_user", "system", "general_user", "user", "anonymous"]);
+  const declaredRoleIds = new Set<string>(
+    appSpec.roles
+      .map((r: any) => r.role_id)
+      .filter((roleId: unknown): roleId is string => typeof roleId === "string" && roleId.length > 0)
+  );
+  const declaredRoleNames = new Map(appSpec.roles.map((r: any) => [r.name?.toLowerCase(), r.role_id]));
+
+  let actorFixCount = 0;
+  for (const f of appSpec.features) {
+    if (!f.actor_ids || f.actor_ids.length === 0) continue;
+    f.actor_ids = f.actor_ids.map((actorId: string) => {
+      if (EXEMPT_ACTORS.has(actorId) || declaredRoleIds.has(actorId)) return actorId;
+      // Try case-insensitive match on role_id
+      const lowerActor = actorId.toLowerCase();
+      for (const roleId of declaredRoleIds as Set<string>) {
+        if ((roleId as string).toLowerCase() === lowerActor) { actorFixCount++; return roleId; }
+      }
+      // Try match on role name
+      const nameMatch = declaredRoleNames.get(lowerActor);
+      if (nameMatch) { actorFixCount++; return nameMatch; }
+      // Last resort: assign first declared role
+      if (declaredRoleIds.size > 0) {
+        actorFixCount++;
+        return [...declaredRoleIds][0];
+      }
+      return actorId;
+    });
+  }
+  if (actorFixCount > 0) {
+    cb?.onStep(`Actor-role alignment: fixed ${actorFixCount} actor references to match declared roles`);
+  }
+
   // If failure history exists, add warnings as assumptions
   if (failureHistory.length > 0) {
     appSpec.risks = [
@@ -677,6 +738,11 @@ export async function decomposer(
     gate: "gate_1",
     message: `AppSpec generated: ${appSpec.features.length} features, ${appSpec.roles.length} roles, method: ${usedLLM ? "llm" : "template"}, confidence ${((appSpec.confidence?.overall ?? 0) * 100).toFixed(0)}%`,
   });
+  store.update(state.jobId, {
+    appSpec,
+    featureBuildOrder,
+    currentGate: "gate_1",
+  });
 
   // Apply design evidence constraints to features (if design evidence loaded)
   if (state.designEvidence) {
@@ -691,6 +757,7 @@ export async function decomposer(
           gate: "gate_1",
           message: `Design evidence → ${constraintsApplied} features got design constraints: ${featuresMatched.join(", ")}`,
         });
+        store.update(state.jobId, { appSpec });
       } else {
         cb?.onStep("Design evidence loaded but no features matched screen names — constraints skipped");
       }

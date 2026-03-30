@@ -1,6 +1,7 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { shouldAutoApprovePlan } from "../autonomy.js";
 
 /**
  * User Approval — pauses the graph for human approval of the full app plan.
@@ -17,6 +18,19 @@ export async function userApproval(
     return {
       currentGate: "failed" as const,
       errorMessage: "Missing AppSpec for approval",
+    };
+  }
+
+  if (shouldAutoApprovePlan(state)) {
+    cb?.onSuccess("Autonomous mode auto-approved app plan");
+    store.addLog(state.jobId, {
+      gate: "gate_1",
+      message: "Autonomous mode auto-approved app plan",
+    });
+
+    return {
+      userApproved: true,
+      currentGate: "gate_2" as const,
     };
   }
 

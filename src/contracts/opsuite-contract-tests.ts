@@ -153,8 +153,8 @@ export const API_ROUTE_TESTS: RequiredTest[] = [
     test_id: "ct-auth-no-session",
     name: "Any endpoint without session → 401",
     type: "contract",
-    description: "Call any protected endpoint with no auth cookie/token.",
-    pass_condition: "Status 401. Body has error message.",
+    description: "Call any protected endpoint without a Clerk session cookie or Bearer token. Seeds: valid Clerk session + user record.",
+    pass_condition: "Status 401. Body has error message. Clerk middleware rejects unauthenticated request.",
   },
   {
     test_id: "ct-auth-wrong-role",
@@ -799,7 +799,7 @@ export const SEED_REQUIREMENTS: SeedRequirement[] = [
   { test_id: "ct-people-delete", needs: ["user", "org", "membership:admin", "membership:employee"] },
   { test_id: "ct-export-tasks", needs: ["user", "org", "membership:admin", "task:open"] },
   { test_id: "ct-export-audit", needs: ["user", "org", "membership:admin", "task:open", "task_audit"] },
-  { test_id: "ct-auth-no-session", needs: [] },
+  { test_id: "ct-auth-no-session", needs: ["clerk_session", "user"] },
   { test_id: "ct-auth-wrong-role", needs: ["user", "org", "membership:employee"] },
 
   // Role visibility — all need 3 users with different roles
