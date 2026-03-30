@@ -418,12 +418,13 @@ CRITICAL VALIDATION RULES — your output MUST satisfy all of these:
 5. All dependency_graph from_feature_id and to_feature_id must exist in features
 6. Every feature with priority "critical" or "high" must have at least one acceptance_test targeting it (by feature_id)
 7. All integrations must have fallback_defined: true
-8. All actor_ids used in features must match a declared actor's actor_id (except "end_user" and "system" which are exempt)
+8. All actor_ids used in features must match a declared role's role_id (except "end_user", "system", "general_user", "user", and "anonymous" which are exempt)
+9. Every actor's actor_id MUST match a declared role_id. Do NOT invent actor_ids that have no matching role.
 
 ID CONVENTIONS:
 - feature_id: "f_" prefix, snake_case (e.g., "f_dashboard", "f_role_management")
-- role_id: snake_case (e.g., "admin", "submitter", "reviewer")
-- actor_id: snake_case matching role_ids (e.g., "admin", "submitter")
+- role_id: snake_case (e.g., "admin", "user", "moderator")
+- actor_id: MUST use the SAME string as the corresponding role_id (e.g., if role_id is "user", actor_id must be "user" — NOT "general_user")
 - permission_id: "p_" prefix (e.g., "p_admin_read_dashboard")
 - integration_id: "int_" prefix (e.g., "int_email")
 - test_id: "t_" prefix (e.g., "t_dashboard_happy_path")

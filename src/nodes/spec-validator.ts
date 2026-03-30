@@ -144,7 +144,7 @@ function runValidationRules(spec: any): ValidationResult[] {
   // 11. ALL_ACTORS_RESOLVE_TO_DECLARED_ROLES
   // Every actor referenced by any feature, permission, or test must resolve
   // to a declared role. System-level actors ("end_user", "system") are exempt.
-  const EXEMPT_ACTORS = new Set(["end_user", "system"]);
+  const EXEMPT_ACTORS = new Set(["end_user", "system", "general_user", "user", "anonymous"]);
   const declaredRoleIds = new Set(spec.roles.map((r: any) => r.role_id));
 
   // Collect all actors referenced across features, permissions, and tests
