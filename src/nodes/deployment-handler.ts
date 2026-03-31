@@ -60,12 +60,15 @@ export async function deploymentHandler(
     };
   }
 
-  // Derive app slug from AppSpec
-  const appSlug = (state.appSpec?.title || "aes-app")
+  // Derive app slug from AppSpec — include job ID suffix so each build
+  // gets a unique GitHub repo and Vercel project (avoids 409 conflicts).
+  const appSlugBase = (state.appSpec?.title || "aes-app")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
-    .substring(0, 50);
+    .substring(0, 42);
+  const jobSuffix = state.jobId.substring(0, 8);
+  const appSlug = `${appSlugBase}-${jobSuffix}`;
 
   const appDescription =
     state.appSpec?.summary ||
