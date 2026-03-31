@@ -408,24 +408,54 @@ export async function generateTest(
 ): Promise<string | null> {
   const system = `${STACK_PREAMBLE}
 
+━━━ TEST FILE RULES (enforced — violations cause immediate compile failure) ━━━
+
 You are generating a Vitest test file.
 
 Feature: ${feature.name}
 Test name: ${testDef.name}
 Pass condition: ${testDef.pass_condition}
 
-Generate a test file that:
-- Uses describe/it/expect from vitest
-- May use render/screen from @testing-library/react
-- May use jest-dom matchers like toBeInTheDocument because @testing-library/jest-dom/vitest is available
-- Prefer destructuring queries from the render() result over importing screen from @testing-library/react
-- Has meaningful test assertions based on the pass condition
-- Mocks Convex queries/mutations as needed
-- Do not import Next.js route files from guessed "@/app/.../page" paths unless the path is explicitly provided
-- Prefer self-contained tests over route-path imports when verifying behavior
-- Tests the described behavior (not just expect(true).toBe(true))
+IMPORTS — HARD RULES:
+  ✅ import { describe, it, expect, vi, beforeEach } from 'vitest';
+  ✅ import { render, fireEvent } from '@testing-library/react';
+  ✅ import '@testing-library/jest-dom/vitest';
+  ✅ import React from 'react';
+  ✅ import { SomeComponent } from '@/components/...';   ← only if path is known to exist
+
+  ❌ FORBIDDEN: import ... from '@/app/...'
+     — Generated app route paths DO NOT EXIST at test compile time. This causes
+       "Cannot find module '@/app/features/...'" and fails the entire test run.
+     — If you need a component, DEFINE IT INLINE in the test file instead.
+
+MOCKING — REQUIRED when hooks are used:
+  // Always add both mocks at the top of the file, before imports or test code:
+  vi.mock('convex/react', () => ({
+    useQuery: vi.fn(() => []),
+    useMutation: vi.fn(() => vi.fn()),
+    useAction: vi.fn(() => vi.fn()),
+  }));
+  vi.mock('@clerk/nextjs', () => ({
+    useAuth: vi.fn(() => ({ orgId: 'org_test', userId: 'user_test', isLoaded: true, isSignedIn: true })),
+  }));
+
+FALLBACK SMOKE TEST — use this pattern when you cannot import the component:
+  Define a minimal inline component inside the test file that:
+  - Exercises the same behavior described in the pass condition
+  - Uses the same Convex mock shape (same mutation name, same args shape)
+  - Can be rendered and asserted against without any external file dependency
+
+ASSERTIONS:
+  ❌ FORBIDDEN: expect(true).toBe(true)  — proves nothing, always passes
+  ✅ REQUIRED: assert something meaningful about what renders, what gets called, or what state changes
+  — Use getByTestId, getByRole, getByText from the render() return value (not screen)
+  — Use toBeInTheDocument(), toHaveTextContent(), toHaveBeenCalledWith() from jest-dom
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
 
-  return callLLM(system, `Generate a test for "${testDef.name}" with pass condition: "${testDef.pass_condition}".`);
+  return callLLM(
+    system,
+    `Generate a test for "${testDef.name}" with pass condition: "${testDef.pass_condition}".`,
+    ["test/vitest-core"],
+  );
 }

@@ -64,6 +64,18 @@ const HERMES_RECALL_SEEDS = [
     label: "Convex bare v.id",
     errorMessage: "Expected 1 arguments, but got 0. v.id()",
   },
+  {
+    label: "Test guessed app import",
+    errorMessage: "Cannot find module '@/app/",
+  },
+  {
+    label: "Test missing Convex mock",
+    errorMessage: "useQuery is not a function",
+  },
+  {
+    label: "Test missing Clerk mock",
+    errorMessage: "useAuth is not a function",
+  },
 ] as const;
 
 const contextCache = new Map<string, { value: string; expiresAt: number }>();
