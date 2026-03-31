@@ -5,15 +5,17 @@
  * unavailable so the caller can fall back to its template path.
  */
 import { getLLM, isLLMAvailable, safeLLMCall } from "./provider.js";
+import { getGenerationGroundTruthForPacks } from "./current-api-context.js";
 // ─── Shared helpers ──────────────────────────────────────────────────
-async function callLLM(systemPrompt, userPrompt) {
+async function callLLM(systemPrompt, userPrompt, contractPackIds = []) {
     if (!isLLMAvailable())
         return null;
     const llm = getLLM();
     if (!llm)
         return null;
+    const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
     const response = await safeLLMCall("app-gen", () => llm.invoke([
-        { role: "system", content: systemPrompt },
+        { role: "system", content: `${groundTruth}\n\n${systemPrompt}` },
         { role: "user", content: userPrompt },
     ]));
     if (!response)
@@ -27,7 +29,18 @@ async function callLLM(systemPrompt, userPrompt) {
         .replace(/\\n?```\\s*$/m, "")
         .trim();
 }
-const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.`;
+const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.
+
+Treat these library contracts as exact ground truth, not suggestions:
+- Clerk client contract: import useAuth from "@clerk/nextjs" only inside client components. useAuth() is a client hook and should destructure orgId, userId, isLoaded, isSignedIn, sessionId, orgRole, or orgSlug when needed. Never destructure org from useAuth().
+- Clerk server contract: import auth, currentUser, or clerkMiddleware from "@clerk/nextjs/server" only in server files. Use await auth() in server components, route handlers, and server actions. Never use useAuth() in a server file. If middleware is generated, use clerkMiddleware and never use authMiddleware or withClerkMiddleware.
+- Convex server contract: import query and mutation from "./_generated/server" and validators from "convex/values". Always write query({ args: { ... }, handler: async (ctx, args) => { ... } }) or mutation({ args: { ... }, handler: async (ctx, args) => { ... } }). Never destructure handler args directly in the function signature.
+- Convex auth contract: if a Convex server function needs auth, call const identity = await ctx.auth.getUserIdentity(); and handle the null case before reading identity.subject or any custom claims.
+- Convex client contract: import useQuery, useMutation, useAction, or usePaginatedQuery from "convex/react" only inside client components, and use api from "@/convex/_generated/api".
+- Next.js App Router contract: any file using useAuth(), next/navigation hooks, or convex/react hooks must begin with "use client" on line 1.
+- TypeScript contract: never emit implicit-any callback parameters. If a callback parameter would otherwise be untyped, annotate it explicitly or type the collection before mapping/filtering.
+
+Do not invent older APIs, deprecated helpers, or alternative return shapes.`;
 const AES_UI_RULES = `
 CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
 - Use <Button> from "@aes/ui" instead of <button>
@@ -125,13 +138,14 @@ Generate a "use client" dashboard page that:
 1. Shows a welcome message with the app title
 2. Has a grid of feature cards (one per feature) that link to the feature routes
 3. Each card has the feature name and a brief description
-4. Uses Card, CardHeader, CardContent from @aes/ui
-5. Uses useAuth() from @clerk/nextjs for org context
+4. Uses Card, CardHeader, CardContent, and Button from @aes/ui when needed
+5. Uses useAuth() from @clerk/nextjs with orgId (not org) because this is a client component
 6. Has a responsive grid layout (grid-cols-1 md:grid-cols-2 lg:grid-cols-3)
 7. Is a default export: export default function DashboardPage()
+8. Imports every @aes/ui component it renders
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate dashboard page for "${appSpec?.title || "App"}".`);
+    return callLLM(system, `Generate dashboard page for "${appSpec?.title || "App"}".`, ["clerk/client-auth"]);
 }
 /**
  * Generate the unified Convex schema for all features.
@@ -157,7 +171,10 @@ Generate a single schema file that:
 5. Every table has at minimum: .index("by_org", ["orgId"])
 6. Includes an audit_logs table with action, userId, orgId, resourceType, resourceId, details (optional), createdAt
 7. Uses defineSchema({...}) as the default export
-8. Uses proper Convex value types: v.string(), v.number(), v.boolean(), v.optional(), v.id(), etc.
+8. Uses proper Convex value types: v.string(), v.number(), v.boolean(), v.optional(v.string()), etc.
+9. Never emit bare validators that require inner arguments. In particular, never emit bare v.id(), v.optional(), or v.array().
+10. If the target table is unknown, use v.string() instead.
+11. Generates validators that match current Convex syntax and avoids legacy handler signatures or deprecated APIs
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     return callLLM(system, `Generate unified Convex schema for "${appSpec?.title || "App"}" with ${features.length} features.`);

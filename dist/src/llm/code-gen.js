@@ -5,6 +5,7 @@
  * unavailable so the caller can fall back to its template path.
  */
 import { getLLM, isLLMAvailable, acquireLLMSlot, releaseLLMSlot } from "./provider.js";
+import { getGenerationGroundTruthForPacks } from "./current-api-context.js";
 const LLM_TIMEOUT_MS = 30_000;
 /** Race a promise against a timeout; resolves to null on timeout. */
 function withTimeout(promise, ms) {
@@ -22,16 +23,17 @@ function validateCodeResponse(text) {
         return false;
     return true;
 }
-async function callLLM(systemPrompt, userPrompt) {
+async function callLLM(systemPrompt, userPrompt, contractPackIds = []) {
     if (!isLLMAvailable())
         return null;
     const llm = getLLM();
     if (!llm)
         return null;
+    const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
     const slotId = await acquireLLMSlot("code-gen");
     try {
         const response = await withTimeout(llm.invoke([
-            { role: "system", content: systemPrompt },
+            { role: "system", content: `${groundTruth}\n\n${systemPrompt}` },
             { role: "user", content: userPrompt },
         ]), LLM_TIMEOUT_MS);
         if (!response)
@@ -55,7 +57,105 @@ async function callLLM(systemPrompt, userPrompt) {
         releaseLLMSlot(slotId);
     }
 }
-const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.`;
+const STACK_PREAMBLE = `You are generating code for a Next.js 15 + Clerk + Convex + Tailwind CSS application.
+
+These are HARD RULES enforced by the compile gate. Any violation causes a TypeScript build failure.
+
+━━━ CONVEX SERVER (convex/*.ts files) ━━━
+
+IMPORTS:
+  import { query, mutation } from "../_generated/server";
+  import { v } from "convex/values";
+
+REQUIRED SHAPE — ALWAYS use the object form, never the shorthand:
+  ✅ export const list = query({
+       args: { orgId: v.string() },
+       handler: async (ctx, args) => {
+         return await ctx.db.query("myTable").withIndex("by_org", (q: any) => q.eq("orgId", args.orgId)).collect();
+       },
+     });
+
+  ❌ FORBIDDEN: export const list = query(async (ctx, args) => { ... })
+     — shorthand form causes "Parameter 'ctx' implicitly has an 'any' type" build failure.
+
+VALIDATORS — every arg must be typed. Forbidden:
+  ❌ args: any     ← compile error
+  ❌ v.id()        ← compile error, "Expected 1 arguments, but got 0"
+  ❌ v.optional()  ← compile error, "Expected 1 arguments, but got 0"
+  ❌ v.array()     ← compile error, "Expected 1 arguments, but got 0"
+
+Correct: v.string(), v.number(), v.boolean(), v.id("tableName"), v.optional(v.string()), v.array(v.string())
+
+CONVEX AUTH in server functions:
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new Error("Unauthenticated");
+  const userId = identity.subject;
+
+CONVEX QUERY CALLBACKS — always annotate:
+  .withIndex("by_org", (q: any) => q.eq("orgId", args.orgId))
+  .filter((q: any) => q.eq(q.field("status"), "active"))
+
+━━━ CONVEX SCHEMA (convex/schema.ts) ━━━
+
+IMPORTS:
+  import { defineSchema, defineTable } from "convex/server";
+  import { v } from "convex/values";
+
+  ✅ export default defineSchema({
+       items: defineTable({
+         orgId: v.string(),
+         createdBy: v.string(),
+         title: v.string(),
+         status: v.optional(v.string()),
+         createdAt: v.number(),
+         updatedAt: v.number(),
+       }).index("by_org", ["orgId"]).index("by_org_status", ["orgId", "status"]),
+     });
+
+  ❌ FORBIDDEN: defineTable()       ← "Expected 1 arguments, but got 0"
+  ❌ FORBIDDEN: defineTable(v.any()) ← use an explicit object shape, not v.any()
+
+Every table MUST include: orgId, createdBy, createdAt, updatedAt.
+
+━━━ CLERK CLIENT (client components) ━━━
+
+IMPORTS:
+  import { useAuth } from "@clerk/nextjs";
+
+ALLOWED destructuring: { orgId, userId, isLoaded, isSignedIn, sessionId, orgRole, orgSlug, getToken, signOut }
+
+  ✅ const { orgId, userId, isLoaded } = useAuth();
+  ❌ FORBIDDEN: const { org } = useAuth()  ← "org" DOES NOT EXIST on UseAuthReturn. Build failure.
+
+━━━ CLERK SERVER (server components, route handlers, middleware) ━━━
+
+IMPORTS:
+  import { auth, currentUser, clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+  ✅ const { userId, orgId } = await auth();
+  ❌ FORBIDDEN: authMiddleware       ← deprecated, build failure
+  ❌ FORBIDDEN: withClerkMiddleware  ← deprecated, build failure
+
+━━━ CONVEX REACT CLIENT (client components) ━━━
+
+IMPORTS:
+  import { useQuery, useMutation } from "convex/react";
+  import { api } from "@/convex/_generated/api";
+
+━━━ NEXT.JS APP ROUTER — "use client" DIRECTIVE ━━━
+
+A file MUST begin with "use client" on line 1 if it uses ANY of:
+  useAuth, useQuery, useMutation, useAction, useState, useEffect,
+  useRouter, useParams, usePathname, useSearchParams, usePaginatedQuery
+
+"use client" must be the absolute first line — before any imports.
+
+━━━ TYPESCRIPT ━━━
+
+Never emit implicit-any parameters. If a callback param would be untyped, annotate explicitly.
+JSX return type: never write JSX.Element explicitly. Let TypeScript infer the return type.
+
+Do not invent older APIs, deprecated helpers, or alternative return shapes.`;
 const AES_UI_RULES = `
 CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
 - Use <Button> from "@aes/ui" instead of <button>
@@ -83,12 +183,14 @@ App: ${appSpec.title} — ${appSpec.summary}
 
 Generate a TypeScript file that exports a Convex table definition using defineTable().
 The schema should have fields specific to this feature, not generic placeholders.
-Include proper field types (v.string(), v.number(), v.boolean(), v.id(), v.optional(), etc.).
+Include proper field types (v.string(), v.number(), v.boolean(), v.optional(v.string()), etc.).
+Never emit bare validators that require inner arguments. In particular, never emit bare v.id(), v.optional(), or v.array().
+If the relation target is unknown, use v.string() instead of guessing.
 Always include: createdBy (v.string()), orgId (v.string()), createdAt (v.number()), updatedAt (v.number()).
 Add indexes for orgId, status (if present), and createdAt.
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate the Convex schema for the "${feature.name}" feature.`);
+    return callLLM(system, `Generate the Convex schema for the "${feature.name}" feature.`, ["convex/schema-core"]);
 }
 export async function generateConvexQueries(feature, appSpec, schemaContent) {
     const system = `${STACK_PREAMBLE}
@@ -110,9 +212,11 @@ Generate query functions that:
 2. Include a "list" query and a "get" (by id) query
 3. Add any additional queries that make sense for this feature
 4. Use proper Convex query patterns (ctx.db.query, withIndex, etc.)
+5. Use the exact Convex object form: query({ args: { ... }, handler: async (ctx, args) => { ... } })
+6. Never destructure handler args in the function signature
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate Convex queries for "${feature.name}".`);
+    return callLLM(system, `Generate Convex queries for "${feature.name}".`, ["convex/query-core"]);
 }
 export async function generateConvexMutations(feature, appSpec, schemaContent) {
     const destructiveNote = feature.destructive_actions?.length
@@ -141,9 +245,12 @@ Generate mutation functions that:
 2. Include "create" and at least one update mutation
 3. Include mutations for any feature-specific workflows
 4. Use proper Convex mutation patterns
+5. Use the exact Convex object form: mutation({ args: { ... }, handler: async (ctx, args) => { ... } })
+6. Never destructure handler args in the function signature
+7. If auth is needed, call await ctx.auth.getUserIdentity() and handle null before using identity data
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate Convex mutations for "${feature.name}".`);
+    return callLLM(system, `Generate Convex mutations for "${feature.name}".`, ["convex/mutation-core"]);
 }
 export async function generatePage(feature, appSpec, capability, pageType) {
     const typeInstructions = {
@@ -183,12 +290,12 @@ App: ${appSpec.title} — ${appSpec.summary}
 ${typeInstructions[pageType]}
 
 The page should use:
-- useAuth() from @clerk/nextjs for orgId/userId
+- useAuth() from @clerk/nextjs for orgId/userId only because this is a client component
 - Convex hooks (useQuery/useMutation) from convex/react
 - Feature-specific field names derived from the feature description (NOT generic "title"/"description")
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`);
+    return callLLM(system, `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`, ["clerk/client-auth", "convex/query-core", "convex/mutation-core"]);
 }
 export async function generateComponent(feature, appSpec, componentType) {
     const system = `${STACK_PREAMBLE}
@@ -204,6 +311,7 @@ App: ${appSpec.title} — ${appSpec.summary}
 Generate a reusable component that:
 - Uses @aes/ui components (Badge for status, Card for containers, etc.)
 - Has proper TypeScript props interface
+- Never use explicit JSX namespace types like JSX.Element or Array<JSX.Element>; prefer inference
 - Is well-documented with JSDoc
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
@@ -220,8 +328,13 @@ Pass condition: ${testDef.pass_condition}
 
 Generate a test file that:
 - Uses describe/it/expect from vitest
+- May use render/screen from @testing-library/react
+- May use jest-dom matchers like toBeInTheDocument because @testing-library/jest-dom/vitest is available
+- Prefer destructuring queries from the render() result over importing screen from @testing-library/react
 - Has meaningful test assertions based on the pass condition
 - Mocks Convex queries/mutations as needed
+- Do not import Next.js route files from guessed "@/app/.../page" paths unless the path is explicitly provided
+- Prefer self-contained tests over route-path imports when verifying behavior
 - Tests the described behavior (not just expect(true).toBe(true))
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;

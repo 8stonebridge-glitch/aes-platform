@@ -43,6 +43,11 @@ export class GithubService {
             full_name: data.full_name,
             clone_url: data.clone_url,
             html_url: data.html_url,
+            name: data.name,
+            id: data.id,
+            owner_login: data.owner?.login,
+            owner_id: data.owner?.id,
+            default_branch: data.default_branch || "main",
         };
     }
     /**

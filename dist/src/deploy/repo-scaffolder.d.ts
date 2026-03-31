@@ -13,14 +13,18 @@ export declare class RepoScaffolder {
     private writePackageJson;
     private writeTsConfig;
     private writeNextConfig;
+    private writeNextEnv;
     private writeTailwindConfig;
     private writePostcssConfig;
     private writeEnvExample;
+    private writeVitestConfig;
+    private writeTestSetup;
     private writeConvexBase;
     private writeClerkMiddleware;
     private writeAppLayout;
     private writeHomePage;
     private writeGlobalCss;
+    private writeAesUiCompat;
     private writeGitignore;
     private writeAesConfig;
 }

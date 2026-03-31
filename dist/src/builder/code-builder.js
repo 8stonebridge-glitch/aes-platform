@@ -39,6 +39,136 @@ Writing a custom version of any @aes/ui component is a SCOPE VIOLATION.
 function hashPackage(pkg) {
     return createHash("sha256").update(JSON.stringify(pkg)).digest("hex").substring(0, 16);
 }
+function normalizeGeneratedSource(content) {
+    const trimmed = content.trim();
+    const fenced = trimmed.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
+    const normalized = fenced ? fenced[1] : trimmed;
+    return `${normalizeBareConvexIdValidators(normalizeJsxNamespaceTypes(normalized)).trim()}\n`;
+}
+function normalizeJsxNamespaceTypes(content) {
+    return content
+        .replace(/:\s*JSX\.Element\b/g, "")
+        .replace(/:\s*JSX\.Element\[\]/g, "")
+        .replace(/:\s*Array<JSX\.Element>/g, "")
+        .replace(/:\s*JSX\.Element\s*\|\s*null/g, "")
+        .replace(/:\s*JSX\.Element\s*\|\s*undefined/g, "");
+}
+function normalizeBareConvexIdValidators(content) {
+    return content
+        .replace(/v\.id\(\s*\)/g, "v.string()")
+        .replace(/v\.optional\(\s*\)/g, "v.optional(v.string())")
+        .replace(/v\.array\(\s*\)/g, "v.array(v.string())");
+}
+function ensureClientComponent(content) {
+    const normalized = normalizeJsxNamespaceTypes(normalizeGeneratedSource(content));
+    if (/^["']use client["'];?/.test(normalized))
+        return normalized;
+    return `"use client";\n${normalized}`;
+}
+const AES_UI_COMPONENTS = [
+    "Button",
+    "Input",
+    "Textarea",
+    "Select",
+    "Label",
+    "Table",
+    "TableHeader",
+    "TableBody",
+    "TableRow",
+    "TableCell",
+    "Card",
+    "CardHeader",
+    "CardContent",
+    "Badge",
+    "LoadingState",
+    "EmptyState",
+    "ErrorState",
+    "Toast",
+    "Dialog",
+    "DialogTrigger",
+    "DialogContent",
+    "DialogHeader",
+    "DialogTitle",
+    "DialogDescription",
+    "DialogFooter",
+];
+function ensureAesUiImports(content) {
+    const normalized = normalizeGeneratedSource(content);
+    const required = AES_UI_COMPONENTS.filter((name) => new RegExp(`(<${name}\\b|\\b${name}\\b)`).test(normalized));
+    if (required.length === 0)
+        return normalized;
+    const importRegex = /import\s*{([^}]*)}\s*from\s*["']@aes\/ui["'];?/;
+    const existingImport = normalized.match(importRegex);
+    if (existingImport) {
+        const existingNames = existingImport[1]
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean);
+        const merged = Array.from(new Set([...existingNames, ...required])).sort();
+        return normalized.replace(importRegex, `import { ${merged.join(", ")} } from "@aes/ui";`);
+    }
+    const lines = normalized.split("\n");
+    let insertAt = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i].trim();
+        if (line.startsWith("import ")) {
+            insertAt = i + 1;
+            continue;
+        }
+        if (line === '"use client";' || line === "'use client';" || line === "") {
+            insertAt = Math.max(insertAt, i + 1);
+            continue;
+        }
+        break;
+    }
+    lines.splice(insertAt, 0, `import { ${required.sort().join(", ")} } from "@aes/ui";`);
+    return `${lines.join("\n").trim()}\n`;
+}
+function normalizeClerkUseAuthBindings(content) {
+    let normalized = normalizeGeneratedSource(content);
+    if (!/useAuth\(\)/.test(normalized))
+        return normalized;
+    normalized = normalized.replace(/const\s*{\s*([^}]*)\borg\b([^}]*)}\s*=\s*useAuth\(\)\s*;/g, (_match, before, after) => {
+        const names = `${before},orgId,${after}`
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean)
+            .map((name) => (name === "org" ? "orgId" : name));
+        const deduped = Array.from(new Set(names));
+        return `const { ${deduped.join(", ")} } = useAuth();`;
+    });
+    if (/\bconst\s*{\s*[^}]*\borgId\b[^}]*}\s*=\s*useAuth\(\)\s*;/.test(normalized)) {
+        normalized = normalized.replace(/\borg\b/g, "orgId");
+    }
+    return normalized;
+}
+function normalizeConvexHandlerBindings(content) {
+    let normalized = normalizeGeneratedSource(content);
+    normalized = normalized.replace(/handler:\s*async\s*\(\s*ctx\s*,\s*{([^}]*)}\s*\)\s*=>\s*{/g, (_match, bindings) => {
+        const names = bindings
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean)
+            .join(", ");
+        return `handler: async (ctx, args: any) => {\n    const { ${names} } = args;`;
+    });
+    normalized = normalized.replace(/(export const \w+ = (?:query|mutation)\(\s*async\s*\(\s*ctx\s*,\s*){([^}]*)}(\s*\)\s*=>\s*{)/g, (_match, prefix, bindings, suffix) => {
+        const names = bindings
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean)
+            .join(", ");
+        return `${prefix}args: any${suffix}\n  const { ${names} } = args;`;
+    });
+    normalized = normalized.replace(/(export const \w+ = (?:query|mutation)\(\s*async\s*\()\s*ctx\s*(\s*,\s*args\s*)(\)\s*=>\s*{)/g, "$1ctx: any$2: any$3");
+    normalized = normalized.replace(/(export const \w+ = (?:query|mutation)\(\s*async\s*\()\s*ctx\s*(\)\s*=>\s*{)/g, "$1ctx: any$2");
+    normalized = normalized.replace(/handler:\s*async\s*\(\s*ctx\s*,\s*args\s*\)\s*=>\s*{/g, "handler: async (ctx: any, args: any) => {");
+    normalized = normalized.replace(/handler:\s*async\s*\(\s*ctx\s*,\s*args:\s*any\s*\)\s*=>\s*{/g, "handler: async (ctx: any, args: any) => {");
+    normalized = normalized.replace(/\.withIndex\(([^,]+),\s*\(\s*q\s*\)\s*=>/g, '.withIndex($1, (q: any) =>');
+    normalized = normalized.replace(/\.filter\(\s*\(\s*q\s*\)\s*=>/g, '.filter((q: any) =>');
+    normalized = normalized.replace(/\.order\(\s*\(\s*q\s*\)\s*=>/g, '.order((q: any) =>');
+    return normalized;
+}
 export class CodeBuilder {
     workspaceManager = new WorkspaceManager();
     async build(jobId, pkg, repoUrl, context) {
@@ -223,7 +353,7 @@ export const list = query({
     orgId: v.string(),
     status: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     let q = ctx.db
       .query("${tableName}")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId));
@@ -247,7 +377,7 @@ export const get = query({
     id: v.id("${tableName}"),
     orgId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const item = await ctx.db.get(args.id);
     if (!item || item.orgId !== args.orgId) return null;
     return item;
@@ -255,6 +385,7 @@ export const get = query({
 });
 `;
         }
+        queryContent = normalizeConvexHandlerBindings(queryContent);
         writeFileSync(queryPath, queryContent);
         // ── Mutations ──
         const mutationPath = join(basePath, "convex", featureSlug, "mutations.ts");
@@ -278,7 +409,7 @@ export const create = mutation({
     orgId: v.string(),
     createdBy: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const now = Date.now();
     const id = await ctx.db.insert("${tableName}", {
       title: args.title,
@@ -304,7 +435,7 @@ export const updateStatus = mutation({
     status: v.string(),
     orgId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const item = await ctx.db.get(args.id);
     if (!item || item.orgId !== args.orgId) {
       throw new Error("Not found or unauthorized");
@@ -318,6 +449,7 @@ export const updateStatus = mutation({
 });
 `;
         }
+        mutationContent = normalizeConvexHandlerBindings(mutationContent);
         writeFileSync(mutationPath, mutationContent);
     }
     // ─── Pages ──────────────────────────────────────────────────────────
@@ -342,6 +474,8 @@ export const updateStatus = mutation({
         let content = null;
         if (feature && appSpec) {
             content = await generatePage(feature, appSpec, cap, "form");
+            if (content)
+                content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(content)));
         }
         // Fallback to template
         if (!content) {
@@ -452,6 +586,8 @@ export default function ${pascalName}Page() {
         let content = null;
         if (feature && appSpec) {
             content = await generatePage(feature, appSpec, cap, "list");
+            if (content)
+                content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(content)));
         }
         // Fallback to template
         if (!content) {
@@ -549,6 +685,8 @@ export default function ${pascalName}Page() {
         let content = null;
         if (feature && appSpec) {
             content = await generatePage(feature, appSpec, cap, "detail");
+            if (content)
+                content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(content)));
         }
         // Fallback to template
         if (!content) {
@@ -686,7 +824,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     async writeTests(basePath, featureSlug, pkg, feature, fileContents) {
         for (const test of pkg.required_tests || []) {
             const testSlug = test.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-            const testPath = join(basePath, "tests", featureSlug, `${testSlug}.test.ts`);
+            const testPath = join(basePath, "tests", featureSlug, `${testSlug}.test.tsx`);
             this.ensureDir(testPath);
             // Try LLM first
             let content = null;

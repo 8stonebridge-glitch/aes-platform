@@ -32,6 +32,15 @@ function slugify(text) {
 function makeId(prefix, name) {
     return `${prefix}-${slugify(name)}`;
 }
+function fallbackNameFromId(value, fallback) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw)
+        return fallback;
+    return raw
+        .replace(/^[a-z]+-/, "")
+        .replace(/[-_]+/g, " ")
+        .trim() || fallback;
+}
 /** Valid category values for DesignComponent */
 const VALID_CATEGORIES = new Set([
     "data_display",
@@ -198,7 +207,10 @@ export function normalizeDesignEvidence(raw) {
     }
     // ── Build screens ──────────────────────────────────────────────
     const screens = (raw.screens ?? []).map((rs) => {
-        const screenId = rs.screen_id ?? rs.id ?? makeId("screen", rs.name);
+        const screenName = typeof rs.name === "string" && rs.name.trim().length > 0
+            ? rs.name.trim()
+            : fallbackNameFromId(rs.screen_id ?? rs.id, "Untitled Screen");
+        const screenId = rs.screen_id ?? rs.id ?? makeId("screen", screenName);
         // Normalize regions
         const regions = (rs.regions ?? []).map((r) => ({
             name: r.name,
@@ -276,7 +288,7 @@ export function normalizeDesignEvidence(raw) {
         }
         return {
             screen_id: screenId,
-            name: rs.name,
+            name: screenName,
             purpose: rs.purpose ?? "",
             artboard_ref: rs.artboard_ref,
             dimensions: rs.dimensions,

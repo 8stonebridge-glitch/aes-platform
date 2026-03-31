@@ -21,7 +21,7 @@ export declare function loadDesignEvidenceFromDisk(): Promise<DesignEvidence | n
  * - Feature name keyword match against screen purpose
  * - Falls back to undefined if no screens match
  */
-export declare function extractDesignConstraintsForFeature(design: DesignEvidence, featureName: string): DesignConstraints | undefined;
+export declare function extractDesignConstraintsForFeature(design: DesignEvidence, featureName: string | null | undefined): DesignConstraints | undefined;
 /**
  * Apply design constraints to all features in an appSpec.
  * Mutates the appSpec's design_constraints array and each feature's bridge

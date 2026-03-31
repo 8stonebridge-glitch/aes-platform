@@ -12,25 +12,32 @@ export class RepoScaffolder {
         this.writeTsConfig(workspacePath);
         // 3. next.config.mjs
         this.writeNextConfig(workspacePath);
-        // 4. tailwind.config.ts
+        // 4. next-env.d.ts
+        this.writeNextEnv(workspacePath);
+        // 5. tailwind.config.ts
         this.writeTailwindConfig(workspacePath);
-        // 5. postcss.config.mjs
+        // 6. postcss.config.mjs
         this.writePostcssConfig(workspacePath);
-        // 6. .env.local.example
+        // 7. .env.local.example
         this.writeEnvExample(workspacePath);
-        // 7. Convex project structure
+        // 8. Convex project structure
         this.writeConvexBase(workspacePath);
-        // 8. Clerk middleware
+        // 9. Clerk middleware
         this.writeClerkMiddleware(workspacePath);
-        // 9. App layout with Clerk + Convex providers
+        // 10. App layout with Clerk + Convex providers
         this.writeAppLayout(workspacePath, config);
-        // 10. Home page
+        // 11. Home page
         this.writeHomePage(workspacePath, config);
-        // 11. Global CSS
+        // 12. Global CSS
         this.writeGlobalCss(workspacePath);
-        // 12. .gitignore
+        // 13. Vitest config + test setup
+        this.writeVitestConfig(workspacePath);
+        this.writeTestSetup(workspacePath);
+        // 14. Local AES UI compatibility layer for standalone deploys
+        this.writeAesUiCompat(workspacePath);
+        // 15. .gitignore
         this.writeGitignore(workspacePath);
-        // 13. AES workspace metadata
+        // 16. AES workspace metadata
         this.writeAesConfig(workspacePath, config);
     }
     ensureDir(filePath) {
@@ -52,6 +59,7 @@ export class RepoScaffolder {
                 build: "next build",
                 start: "next start",
                 lint: "next lint",
+                test: "vitest run",
             },
             dependencies: {
                 "next": "^15.0.0",
@@ -60,15 +68,19 @@ export class RepoScaffolder {
                 "@clerk/nextjs": "^6.0.0",
                 "convex": "^1.17.0",
                 "convex-helpers": "^0.1.0",
+                "lucide-react": "^0.441.0",
             },
             devDependencies: {
                 "typescript": "^5.7.0",
                 "@types/node": "^22.0.0",
                 "@types/react": "^19.0.0",
                 "@types/react-dom": "^19.0.0",
+                "@testing-library/jest-dom": "^6.6.3",
+                "@testing-library/react": "^16.2.0",
                 "tailwindcss": "^3.4.0",
                 "postcss": "^8.4.0",
                 "autoprefixer": "^10.4.0",
+                "jsdom": "^25.0.1",
                 "vitest": "^2.0.0",
             },
         }, null, 2) + "\n");
@@ -89,8 +101,13 @@ export class RepoScaffolder {
                 isolatedModules: true,
                 jsx: "preserve",
                 incremental: true,
+                types: ["node", "react", "react-dom", "vitest/globals", "@testing-library/jest-dom"],
                 plugins: [{ name: "next" }],
-                paths: { "@/*": ["./*"] },
+                paths: {
+                    "@/*": ["./*"],
+                    "@aes/ui": ["./components/aes-ui/index"],
+                    "@aes/ui/*": ["./components/aes-ui/*"],
+                },
             },
             include: ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
             exclude: ["node_modules"],
@@ -100,6 +117,13 @@ export class RepoScaffolder {
         writeFileSync(join(base, "next.config.mjs"), `/** @type {import('next').NextConfig} */
 const nextConfig = {};
 export default nextConfig;
+`);
+    }
+    writeNextEnv(base) {
+        writeFileSync(join(base, "next-env.d.ts"), `/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited manually.
 `);
     }
     writeTailwindConfig(base) {
@@ -137,8 +161,26 @@ NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
 CONVEX_DEPLOYMENT=dev:your-project
 `);
     }
+    writeVitestConfig(base) {
+        writeFileSync(join(base, "vitest.config.ts"), `import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./tests/setup.ts"],
+  },
+});
+`);
+    }
+    writeTestSetup(base) {
+        mkdirSync(join(base, "tests"), { recursive: true });
+        writeFileSync(join(base, "tests", "setup.ts"), `import "@testing-library/jest-dom/vitest";
+`);
+    }
     writeConvexBase(base) {
         mkdirSync(join(base, "convex"), { recursive: true });
+        mkdirSync(join(base, "convex", "_generated"), { recursive: true });
         // convex/schema.ts - base schema with audit log
         writeFileSync(join(base, "convex", "schema.ts"), `import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
@@ -167,6 +209,36 @@ const schema = defineSchema({
 });
 
 export default schema;
+`);
+        writeFileSync(join(base, "convex", "_generated", "api.ts"), `/**
+ * Minimal AES-generated Convex API stub.
+ * Replaced by real Convex codegen in deployed environments that run \`npx convex dev\` or \`npx convex codegen\`.
+ */
+export const api = new Proxy({}, {
+  get(_target, feature: string | symbol) {
+    return new Proxy({}, {
+      get(_nestedTarget, fn: string | symbol) {
+        return \`\${String(feature)}:\${String(fn)}\`;
+      },
+    });
+  },
+}) as any;
+`);
+        writeFileSync(join(base, "convex", "_generated", "dataModel.ts"), `export type Id<TableName extends string = string> = string & { __tableName?: TableName };
+`);
+        writeFileSync(join(base, "convex", "_generated", "server.ts"), `type ConvexHandlerDefinition = {
+  args?: Record<string, unknown>;
+  handler: (...args: any[]) => any;
+  [key: string]: unknown;
+};
+
+export function query<T extends ConvexHandlerDefinition>(definition: T): T {
+  return definition;
+}
+
+export function mutation<T extends ConvexHandlerDefinition>(definition: T): T {
+  return definition;
+}
 `);
         // convex/tsconfig.json
         writeFileSync(join(base, "convex", "tsconfig.json"), JSON.stringify({
@@ -339,6 +411,322 @@ export default async function HomePage() {
         writeFileSync(join(base, "app", "globals.css"), `@tailwind base;
 @tailwind components;
 @tailwind utilities;
+`);
+    }
+    writeAesUiCompat(base) {
+        mkdirSync(join(base, "components", "aes-ui"), { recursive: true });
+        writeFileSync(join(base, "components", "aes-ui", "index.tsx"), `"use client";
+
+import type {
+  AnchorHTMLAttributes,
+  ButtonHTMLAttributes,
+  ComponentPropsWithoutRef,
+  ElementType,
+  HTMLAttributes,
+  LabelHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+  TableHTMLAttributes,
+  TdHTMLAttributes,
+  TextareaHTMLAttributes,
+  ThHTMLAttributes,
+  InputHTMLAttributes,
+} from "react";
+import React, { forwardRef } from "react";
+
+function cx(...parts: Array<string | false | null | undefined>): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+type ButtonLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
+  href: string;
+};
+type ButtonProps = (ButtonHTMLAttributes<HTMLButtonElement> | ButtonLinkProps) & {
+  className?: string;
+};
+export function Button({ className, ...props }: ButtonProps) {
+  const baseClassName = cx(
+    "inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+    className,
+  );
+
+  if ("href" in props && typeof props.href === "string") {
+    const { href, ...anchorProps } = props;
+    return (
+      <a href={href} className={baseClassName} {...anchorProps} />
+    );
+  }
+
+  const { type = "button", ...buttonProps } = props as ButtonHTMLAttributes<HTMLButtonElement>;
+  return (
+    <button
+      type={type as ButtonHTMLAttributes<HTMLButtonElement>["type"]}
+      className={baseClassName}
+      {...buttonProps}
+    />
+  );
+}
+
+type InputProps = InputHTMLAttributes<HTMLInputElement>;
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ className, ...props }, ref) => (
+    <input
+      ref={ref}
+      className={cx(
+        "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+Input.displayName = "Input";
+
+type TextareaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
+  ({ className, ...props }, ref) => (
+    <textarea
+      ref={ref}
+      className={cx(
+        "min-h-[120px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        className,
+      )}
+      {...props}
+    />
+  ),
+);
+Textarea.displayName = "Textarea";
+
+type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
+export const Select = forwardRef<HTMLSelectElement, SelectProps>(
+  ({ className, children, ...props }, ref) => (
+    <select
+      ref={ref}
+      className={cx(
+        "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </select>
+  ),
+);
+Select.displayName = "Select";
+
+type LabelProps = LabelHTMLAttributes<HTMLLabelElement>;
+export const Label = forwardRef<HTMLLabelElement, LabelProps>(
+  ({ className, ...props }, ref) => (
+    <label
+      ref={ref}
+      className={cx("mb-2 block text-sm font-medium text-slate-700", className)}
+      {...props}
+    />
+  ),
+);
+Label.displayName = "Label";
+
+type CardProps<T extends ElementType = "div"> = {
+  as?: T;
+  children?: ReactNode;
+  className?: string;
+} & Omit<ComponentPropsWithoutRef<T>, "as" | "className" | "children">;
+
+export function Card<T extends ElementType = "div">({
+  as,
+  className,
+  children,
+  ...props
+}: CardProps<T>) {
+  const Component = (as || "div") as ElementType;
+  return (
+    <Component
+      className={cx(
+        "block rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </Component>
+  );
+}
+
+export function CardHeader({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("border-b border-slate-100 px-5 py-4", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function CardContent({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("px-5 py-4", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function Badge({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </span>
+  );
+}
+
+export function LoadingState({
+  className,
+  children = "Loading...",
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function EmptyState({
+  className,
+  children = "Nothing here yet.",
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function ErrorState({
+  className,
+  children = "Something went wrong.",
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function Toast({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function Dialog({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cx("rounded-2xl border border-slate-200 bg-white p-5 shadow-xl", className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function Table({
+  className,
+  children,
+  ...props
+}: TableHTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="overflow-x-auto">
+      <table className={cx("min-w-full border-collapse text-sm", className)} {...props}>
+        {children}
+      </table>
+    </div>
+  );
+}
+
+export function TableHeader({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLTableSectionElement>) {
+  return (
+    <thead className={cx("border-b border-slate-200 text-left text-slate-500", className)} {...props}>
+      {children}
+    </thead>
+  );
+}
+
+export function TableBody({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLTableSectionElement>) {
+  return (
+    <tbody className={cx("divide-y divide-slate-100", className)} {...props}>
+      {children}
+    </tbody>
+  );
+}
+
+export function TableRow({
+  className,
+  children,
+  ...props
+}: HTMLAttributes<HTMLTableRowElement>) {
+  return (
+    <tr className={cx("hover:bg-slate-50", className)} {...props}>
+      {children}
+    </tr>
+  );
+}
+
+export function TableCell({
+  className,
+  children,
+  ...props
+}: TdHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <td className={cx("px-4 py-3 text-slate-700", className)} {...props}>
+      {children}
+    </td>
+  );
+}
+
+export function TableHead({
+  className,
+  children,
+  ...props
+}: ThHTMLAttributes<HTMLTableCellElement>) {
+  return (
+    <th className={cx("px-4 py-3 text-xs font-semibold uppercase tracking-wide", className)} {...props}>
+      {children}
+    </th>
+  );
+}
 `);
     }
     writeGitignore(base) {

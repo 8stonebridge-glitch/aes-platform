@@ -14,6 +14,11 @@ export declare class GithubService {
         full_name: string;
         clone_url: string;
         html_url: string;
+        name: string;
+        id: number;
+        owner_login: string;
+        owner_id: number;
+        default_branch: string;
     }>;
     /**
      * Fetch contents of a directory from a GitHub repo.

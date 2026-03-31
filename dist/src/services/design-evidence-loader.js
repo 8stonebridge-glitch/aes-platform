@@ -10,6 +10,7 @@ import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { normalizeDesignEvidence } from "../tools/design-normalize.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // At runtime, __dirname is dist/src/services/ — platform root is 3 levels up
@@ -31,17 +32,24 @@ export async function loadDesignEvidenceFromDisk() {
         const raw = await readFile(join(PLATFORM_ROOT, latest), "utf-8");
         const parsed = JSON.parse(raw);
         // Basic validation
-        if (!parsed.screens || !parsed.components || !parsed.evidence_id) {
+        if (!Array.isArray(parsed.screens) || !parsed.source) {
             console.warn(`[design-loader] ${latest} missing required fields, skipping`);
             return null;
         }
-        console.log(`[design-loader] Loaded design evidence from ${latest} (${parsed.screens.length} screens, ${parsed.components.length} components)`);
-        return parsed;
+        const normalized = normalizeDesignEvidence(parsed);
+        console.log(`[design-loader] Loaded design evidence from ${latest} (${normalized.screens.length} screens, ${normalized.components.length} components)`);
+        return normalized;
     }
     catch (err) {
         console.warn(`[design-loader] Failed to load design evidence: ${err.message}`);
         return null;
     }
+}
+function asTrimmedString(value, fallback = "") {
+    return typeof value === "string" ? value.trim() || fallback : fallback;
+}
+function listOfStrings(value) {
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0) : [];
 }
 /**
  * Extract design constraints for a specific feature by matching feature name
@@ -53,7 +61,7 @@ export async function loadDesignEvidenceFromDisk() {
  * - Falls back to undefined if no screens match
  */
 export function extractDesignConstraintsForFeature(design, featureName) {
-    const featureNameLower = featureName.toLowerCase();
+    const featureNameLower = asTrimmedString(featureName, "feature").toLowerCase();
     const featureWords = featureNameLower.split(/[\s_-]+/).filter(w => w.length > 2);
     const screens = Array.isArray(design.screens) ? design.screens : [];
     const components = Array.isArray(design.components) ? design.components : [];
@@ -65,8 +73,8 @@ export function extractDesignConstraintsForFeature(design, featureName) {
         ? design.navigation.primary_items
         : [];
     const matchingScreens = screens.filter(s => {
-        const screenNameLower = s.name.toLowerCase();
-        const purposeLower = (s.purpose || "").toLowerCase();
+        const screenNameLower = asTrimmedString(s?.name, asTrimmedString(s?.screen_id, "screen")).toLowerCase();
+        const purposeLower = asTrimmedString(s?.purpose).toLowerCase();
         // Direct substring match
         if (featureNameLower.includes(screenNameLower) || screenNameLower.includes(featureNameLower)) {
             return true;
@@ -77,60 +85,66 @@ export function extractDesignConstraintsForFeature(design, featureName) {
     });
     if (matchingScreens.length === 0)
         return undefined;
-    const screenIds = new Set(matchingScreens.map(s => s.screen_id));
+    const screenIds = new Set(matchingScreens
+        .map((s, index) => asTrimmedString(s?.screen_id, `screen-${index + 1}`))
+        .filter(Boolean));
     return {
         required_screens: matchingScreens.map(s => ({
-            screen_id: s.screen_id,
-            name: s.name,
-            purpose: s.purpose,
+            screen_id: asTrimmedString(s?.screen_id, "screen"),
+            name: asTrimmedString(s?.name, asTrimmedString(s?.screen_id, "Screen")),
+            purpose: asTrimmedString(s?.purpose),
         })),
         required_components: components
             .filter(c => {
-            const componentScreens = Array.isArray(c.screen_ids) ? c.screen_ids : [];
+            const componentScreens = listOfStrings(c?.screen_ids);
             return componentScreens.some(id => screenIds.has(id));
         })
             .map(c => ({
-            component_id: c.component_id,
-            name: c.name,
-            category: c.category,
+            component_id: asTrimmedString(c?.component_id, "component"),
+            name: asTrimmedString(c?.name, asTrimmedString(c?.component_id, "Component")),
+            category: asTrimmedString(c?.category, "other"),
         })),
         required_data_views: dataViews
-            .filter(d => screenIds.has(d.screen_id))
+            .filter(d => screenIds.has(asTrimmedString(d?.screen_id)))
             .map(d => ({
-            view_id: d.view_id,
-            name: d.name,
-            type: d.type,
-            columns: (Array.isArray(d.columns) ? d.columns : []).map(c => c.name),
-            capabilities: Array.isArray(d.capabilities) ? d.capabilities : [],
+            view_id: asTrimmedString(d?.view_id, "view"),
+            name: asTrimmedString(d?.name, asTrimmedString(d?.view_id, "View")),
+            type: asTrimmedString(d?.type, "custom"),
+            columns: (Array.isArray(d?.columns) ? d.columns : [])
+                .map(c => asTrimmedString(c?.name))
+                .filter(Boolean),
+            capabilities: listOfStrings(d?.capabilities),
         })),
         required_forms: forms
-            .filter(f => screenIds.has(f.screen_id))
+            .filter(f => screenIds.has(asTrimmedString(f?.screen_id)))
             .map(f => ({
-            form_id: f.form_id,
-            name: f.name,
-            fields: (Array.isArray(f.fields) ? f.fields : []).map(fl => fl.name),
+            form_id: asTrimmedString(f?.form_id, "form"),
+            name: asTrimmedString(f?.name, asTrimmedString(f?.form_id, "Form")),
+            fields: (Array.isArray(f?.fields) ? f.fields : [])
+                .map(fl => asTrimmedString(fl?.name))
+                .filter(Boolean),
         })),
         required_actions: actions
-            .filter(a => screenIds.has(a.screen_id))
+            .filter(a => screenIds.has(asTrimmedString(a?.screen_id)))
             .map(a => ({
-            action_id: a.action_id,
-            label: a.label,
-            type: a.type,
-            is_destructive: a.is_destructive,
+            action_id: asTrimmedString(a?.action_id, "action"),
+            label: asTrimmedString(a?.label, asTrimmedString(a?.action_id, "Action")),
+            type: asTrimmedString(a?.type, "custom"),
+            is_destructive: Boolean(a?.is_destructive),
         })),
         required_states: states
-            .filter(s => screenIds.has(s.screen_id))
+            .filter(s => screenIds.has(asTrimmedString(s?.screen_id)))
             .map(s => ({
-            state_id: s.state_id,
-            type: s.type,
-            screen_id: s.screen_id,
+            state_id: asTrimmedString(s?.state_id, "state"),
+            type: asTrimmedString(s?.type, "custom"),
+            screen_id: asTrimmedString(s?.screen_id, "screen"),
         })),
         required_nav: primaryNav
-            .filter(n => screenIds.has(n.target_screen_id))
+            .filter(n => screenIds.has(asTrimmedString(n?.target_screen_id)))
             .map(n => ({
-            label: n.label,
-            target_screen_id: n.target_screen_id,
-            level: n.level,
+            label: asTrimmedString(n?.label, "Navigate"),
+            target_screen_id: asTrimmedString(n?.target_screen_id, "screen"),
+            level: asTrimmedString(n?.level, "primary"),
         })),
     };
 }

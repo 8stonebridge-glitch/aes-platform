@@ -39,6 +39,26 @@ export interface JobRecord {
     designBrief?: any;
     designEvidence?: any;
 }
+interface HermesReleaseEvent {
+    artifactType: string;
+    rawMessage: string;
+    payload?: Record<string, unknown> | null;
+    source?: string;
+    sessionId?: string | null;
+    promotable?: boolean;
+    trafficClass?: "incident" | "coordination";
+}
+interface HermesRepairOutcomeEvent {
+    pattern: string;
+    category: string;
+    diagnosis: string;
+    fixAction: string;
+    fixType?: string;
+    filesChanged?: string[];
+    success: boolean;
+    errorSnippet: string;
+    service?: string;
+}
 export declare class JobStore {
     private jobs;
     private logs;
@@ -69,6 +89,12 @@ export declare class JobStore {
     private markDbUnavailable;
     /** Whether the store should attempt DB writes right now. */
     private shouldWrite;
+    private toSnapshot;
+    private pushSnapshotToHermes;
+    private postToHermes;
+    private postRepairOutcomeToHermes;
+    recordHermesReleaseEvent(event: HermesReleaseEvent): void;
+    recordHermesRepairOutcome(outcome: HermesRepairOutcomeEvent): void;
     private startHealthCheckTimer;
     private stopHealthCheckTimer;
     create(job: JobRecord): void;
@@ -85,6 +111,11 @@ export declare class JobStore {
         job_id: string;
         raw_request: string;
         created_at: string;
+        current_gate?: string | null;
+        deploy_target?: string | null;
+        autonomous?: boolean | null;
+        preview_url?: string | null;
+        updated_at?: string | null;
     }[]>;
     private persistArtifacts;
     /** Stop background timers. Call when tearing down the store. */
@@ -92,3 +123,4 @@ export declare class JobStore {
 }
 export declare function getJobStore(): JobStore;
 export declare function resetJobStore(): void;
+export {};
