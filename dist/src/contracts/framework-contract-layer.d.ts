@@ -1,6 +1,6 @@
 export type FrameworkId = "convex" | "clerk" | "nextjs" | "vercel";
 export type FrameworkCodeKind = "query" | "mutation" | "auth" | "middleware" | "route" | "page" | "schema" | "test";
-export type FrameworkContractPackId = "convex/query-core" | "convex/mutation-core" | "convex/schema-core" | "clerk/client-auth" | "clerk/server-auth" | "test/vitest-core";
+export type FrameworkContractPackId = "convex/query-core" | "convex/mutation-core" | "convex/schema-core" | "clerk/client-auth" | "clerk/server-auth" | "clerk/middleware" | "test/vitest-core";
 export interface ContractTemplate {
     id: string;
     title: string;

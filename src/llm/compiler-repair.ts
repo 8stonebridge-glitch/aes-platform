@@ -131,6 +131,105 @@ ${fixtures.join("\n\n")}
   return stripped.slice(0, lastImportIdx) + MOCK_HEADER + stripped.slice(lastImportIdx);
 }
 
+/**
+ * Deterministic regex repairs for Convex and Clerk files.
+ * These fix the most common generated-code violations without needing an LLM.
+ * Returns null if nothing changed.
+ */
+function repairConvexClerkPatterns(content: string, filePath: string): string | null {
+  let next = content;
+
+  const isConvex = /\/convex\//.test(filePath) && /\.(ts|tsx)$/.test(filePath);
+  const isMiddleware = /middleware\.ts$/.test(filePath);
+  const isTsx = /\.tsx$/.test(filePath);
+
+  // ── Convex files: fix bare v.id(), v.optional(), v.array() ──
+  if (isConvex) {
+    // bare v.id() → v.id("items") — use "items" as safe default; the table name
+    // will be corrected by context if the skeleton or schema is available
+    next = next.replace(/\bv\.id\(\)/g, 'v.id("items")');
+    // bare v.optional() → v.optional(v.string())
+    next = next.replace(/\bv\.optional\(\)/g, 'v.optional(v.string())');
+    // bare v.array() → v.array(v.string())
+    next = next.replace(/\bv\.array\(\)/g, 'v.array(v.string())');
+    // bare defineTable() → defineTable({ orgId: v.string(), ... })
+    next = next.replace(
+      /\bdefineTable\(\)/g,
+      'defineTable({ orgId: v.string(), createdBy: v.string(), createdAt: v.number(), updatedAt: v.number() })',
+    );
+
+    // ── Fix shorthand query/mutation form → object form ──
+    // Matches: export const foo = query(async (ctx, args) => {
+    next = next.replace(
+      /export\s+const\s+(\w+)\s*=\s*(query|mutation)\(\s*async\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*=>\s*\{/g,
+      (_m, name, fn, ctx, args) =>
+        `export const ${name} = ${fn}({\n  args: {},\n  returns: v.null(),\n  handler: async (${ctx}: any, ${args}: any) => {`,
+    );
+
+    // ── Inject missing returns: validator into object-form queries/mutations ──
+    // Matches query/mutation({ args: {...}, handler: ... }) without returns:
+    next = next.replace(
+      /((?:query|mutation)\(\s*\{[^}]*args\s*:\s*\{[^}]*\}\s*,)\s*(handler\s*:)/g,
+      (match, prefix, handler) => {
+        // Only inject if returns: isn't already present
+        if (/returns\s*:/.test(match)) return match;
+        return `${prefix}\n  returns: v.null(),\n  ${handler}`;
+      },
+    );
+  }
+
+  // ── Clerk: fix { org } → { orgId } in useAuth() destructuring ──
+  if (isTsx || isMiddleware) {
+    next = next.replace(
+      /const\s*\{([^}]*)\borg\b([^}]*)\}\s*=\s*useAuth\(\)\s*;/g,
+      (_match, before, after) => {
+        const names = `${before},orgId,${after}`
+          .split(",")
+          .map((n) => n.trim())
+          .filter(Boolean)
+          .map((n) => (n === "org" ? "orgId" : n));
+        const deduped = Array.from(new Set(names));
+        return `const { ${deduped.join(", ")} } = useAuth();`;
+      },
+    );
+    // Also fix any remaining bare `org.` references → `orgId`
+    // Only if we actually changed something above (org was destructured)
+    if (next !== content && /\borg\./.test(next)) {
+      next = next.replace(/\borg\./g, "orgId.");
+    }
+  }
+
+  // ── Clerk middleware: replace deprecated authMiddleware ──
+  if (isMiddleware) {
+    if (/\bauthMiddleware\b/.test(next) && !/\bclerkMiddleware\b/.test(next)) {
+      // Full file replacement — the deprecated pattern is too different to patch
+      next = `import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
+]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+  ],
+};
+`;
+    }
+  }
+
+  return next !== content ? next : null;
+}
+
 function loadCandidates(workspacePath: string, paths: string[]): RepairCandidate[] {
   return paths.flatMap((relativePath) => {
     try {
@@ -149,16 +248,26 @@ export async function repairFilesForCompilerErrors(args: {
   errorOutput: string;
   hermesHints?: string[];
 }): Promise<CompilerRepairResult> {
-  // ── Deterministic pre-repair: fix guessed @/app/ test imports without LLM ──
-  // This fires before acquiring the LLM slot and handles the most common test blocker.
+  // ── Deterministic pre-repair: fix common patterns without LLM ──
+  // Runs regex-based transforms for the most common blockers before acquiring the LLM slot.
   const deterministicChanged: string[] = [];
   const deterministicPaths = extractCandidatePaths(args.errorOutput);
   for (const relativePath of deterministicPaths) {
-    if (!/\.test\.(ts|tsx)$|\.spec\.(ts|tsx)$/.test(relativePath)) continue;
     try {
       const absPath = join(args.workspacePath, relativePath);
       const original = readFileSync(absPath, "utf-8");
-      const repaired = repairGuessedTestImports(original, relativePath);
+      let repaired: string | null = null;
+
+      // Test files: strip guessed @/app/ imports
+      if (/\.test\.(ts|tsx)$|\.spec\.(ts|tsx)$/.test(relativePath)) {
+        repaired = repairGuessedTestImports(original, relativePath);
+      }
+
+      // Convex/Clerk/middleware files: fix bare validators, shorthand forms, { org }, deprecated middleware
+      if (!repaired) {
+        repaired = repairConvexClerkPatterns(original, relativePath);
+      }
+
       if (repaired && repaired !== original) {
         writeFileSync(absPath, repaired.trimEnd() + "\n");
         deterministicChanged.push(relativePath);
@@ -171,7 +280,7 @@ export async function repairFilesForCompilerErrors(args: {
     return {
       repaired: true,
       filesChanged: deterministicChanged,
-      summary: `Deterministic repair: removed guessed @/app/ imports and injected inline fixtures in ${deterministicChanged.join(", ")}`,
+      summary: `Deterministic repair: fixed ${deterministicChanged.join(", ")} (bare validators, shorthand forms, deprecated patterns, or guessed imports)`,
     };
   }
 

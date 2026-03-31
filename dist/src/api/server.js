@@ -959,6 +959,155 @@ async function initializePersistenceOnBoot() {
         console.warn(`[persistence] Bootstrap failed: ${err?.message || String(err)}`);
     }
 }
+const CANARY_DEFINITIONS = {
+    "shoutout-board": {
+        slug: "shoutout-board",
+        title: "Team Shoutout Board",
+        description: "A team recognition app where org members can post shoutouts to colleagues. Features: create/list shoutouts by org, Clerk auth for user identity, org-scoped queries with withIndex, real-time list view.",
+        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/middleware"],
+    },
+    "inventory-tool": {
+        slug: "inventory-tool",
+        title: "Inventory Tracker",
+        description: "An inventory management tool with categories, items, and stock levels. Features: schema with typed ID relations between categories and items, withIndex access for filtered views, CRUD mutations, status badges.",
+        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/server-auth", "clerk/middleware"],
+    },
+    "ticket-portal": {
+        slug: "ticket-portal",
+        title: "Support Ticket Portal",
+        description: "A customer support ticket system with middleware-protected routes and server-side auth. Features: clerkMiddleware for route protection, server-side auth() in API routes, action handlers for ticket assignment, status transitions with audit trail.",
+        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/server-auth", "clerk/middleware"],
+    },
+};
+// GET /api/canary — list all canary definitions
+app.get("/api/canary", (_req, res) => {
+    res.json({
+        canaries: Object.values(CANARY_DEFINITIONS),
+        count: Object.keys(CANARY_DEFINITIONS).length,
+    });
+});
+// GET /api/canary/:slug — get a specific canary definition
+app.get("/api/canary/:slug", (req, res) => {
+    const canary = CANARY_DEFINITIONS[req.params.slug];
+    if (!canary) {
+        res.status(404).json({ error: `Unknown canary: ${req.params.slug}` });
+        return;
+    }
+    res.json(canary);
+});
+// POST /api/canary/:slug/run — trigger a canary build (submits to /api/build with autonomous=true)
+app.post("/api/canary/:slug/run", async (req, res) => {
+    const canary = CANARY_DEFINITIONS[req.params.slug];
+    if (!canary) {
+        res.status(404).json({ error: `Unknown canary: ${req.params.slug}` });
+        return;
+    }
+    const jobId = `canary-${canary.slug}-${randomUUID().substring(0, 8)}`;
+    const store = getJobStore();
+    const requestId = `canary-${randomUUID().slice(0, 8)}`;
+    // Sync initial state to Convex
+    pushToConvex("/push-status", {
+        jobId,
+        intent: canary.description,
+        currentGate: "gate_0",
+        intentConfirmed: false,
+        userApproved: false,
+        targetPath: null,
+        deployTarget: "vercel",
+        autonomous: true,
+        features: [],
+    });
+    // Run the pipeline in background
+    const callbacks = {
+        onGate: (gate, message) => broadcastToJob(jobId, "gate", { gate, message }),
+        onStep: (message) => broadcastToJob(jobId, "step", { message }),
+        onSuccess: (message) => broadcastToJob(jobId, "success", { message }),
+        onFail: (message) => broadcastToJob(jobId, "fail", { message }),
+        onWarn: (message) => broadcastToJob(jobId, "warn", { message }),
+        onPause: (message) => broadcastToJob(jobId, "pause", { message }),
+        onFeatureStatus: (id, name, status) => broadcastToJob(jobId, "feature", { id, name, status }),
+        onNeedsApproval: async () => true, // auto-approve for canary builds
+        onNeedsConfirmation: async () => true, // auto-confirm for canary builds
+    };
+    // Fire-and-forget — the canary runs asynchronously
+    void (async () => {
+        try {
+            const result = await runGraph({
+                jobId,
+                requestId,
+                rawRequest: canary.description,
+                currentGate: "gate_0",
+                deployTarget: "vercel",
+                autonomous: true,
+            }, callbacks);
+            broadcastToJob(jobId, "complete", {
+                gate: result.currentGate,
+                features: Object.keys(result.featureBridges || {}).length,
+                error: result.errorMessage,
+                previewUrl: result.previewUrl || null,
+                canary: canary.slug,
+            });
+            // Push canary outcome to Hermes
+            const hermesUrl = process.env.HERMES_INTERNAL_URL || process.env.HERMES_URL || process.env.NEXT_PUBLIC_HERMES_URL;
+            if (hermesUrl) {
+                fetch(`${hermesUrl}/pipeline-outcome`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        job_id: jobId,
+                        success: !result.errorMessage && result.currentGate !== "failed",
+                        gate_reached: result.currentGate,
+                        error_message: result.errorMessage || null,
+                        app_class: "canary",
+                        risk_class: "low",
+                        ambiguity_flags: [],
+                        intent_confirmed: true,
+                        user_approved: true,
+                        feature_count: Object.keys(result.featureBridges || {}).length,
+                    }),
+                }).catch(() => { });
+            }
+        }
+        catch (err) {
+            broadcastToJob(jobId, "error", { message: err.message, canary: canary.slug });
+        }
+    })();
+    res.status(202).json({
+        jobId,
+        canary: canary.slug,
+        message: `Canary build "${canary.title}" started`,
+        stream: `/api/jobs/${jobId}/stream`,
+    });
+});
+// GET /api/canary/:slug/results — get recent results for a specific canary
+app.get("/api/canary/:slug/results", (req, res) => {
+    const canary = CANARY_DEFINITIONS[req.params.slug];
+    if (!canary) {
+        res.status(404).json({ error: `Unknown canary: ${req.params.slug}` });
+        return;
+    }
+    const store = getJobStore();
+    const allJobs = store.list();
+    const canaryJobs = allJobs
+        .filter((j) => j.jobId.startsWith(`canary-${canary.slug}-`))
+        .slice(0, 20)
+        .map((j) => ({
+        jobId: j.jobId,
+        gate: j.currentGate,
+        error: j.errorMessage || null,
+        previewUrl: j.previewUrl || null,
+        createdAt: j.createdAt,
+    }));
+    const total = canaryJobs.length;
+    const successes = canaryJobs.filter((j) => j.gate === "complete" && !j.error).length;
+    res.json({
+        canary: canary.slug,
+        total,
+        successes,
+        successRate: total > 0 ? Math.round((successes / total) * 100) : 0,
+        jobs: canaryJobs,
+    });
+});
 export function startServer() {
     void initializePersistenceOnBoot();
     // Bind to :: (IPv6 + IPv4) for Railway private networking compatibility
@@ -978,6 +1127,9 @@ export function startServer() {
         console.log(`  POST /api/governance/escalations/:id/approve — Approve escalation`);
         console.log(`  POST /api/governance/escalations/:id/reject  — Reject escalation`);
         console.log(`  GET  /api/self-audit                     — Self-audit failure patterns`);
+        console.log(`  GET  /api/canary                         — List canary definitions`);
+        console.log(`  POST /api/canary/:slug/run               — Trigger canary build`);
+        console.log(`  GET  /api/canary/:slug/results           — Canary success rate`);
     });
     return app;
 }

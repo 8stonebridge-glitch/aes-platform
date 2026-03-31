@@ -292,7 +292,8 @@ export default defineSchema({
             stackSignals: ["convex"],
         },
         hardRules: [
-            "Use ONLY the object form: query({ args: { field: v.type() }, handler: async (ctx, args) => { ... } }). Never use the shorthand query(async (ctx, args) => ...) — it causes implicit-any compile errors.",
+            "Use ONLY the object form: query({ args: { field: v.type() }, returns: v.type(), handler: async (ctx, args) => { ... } }). Never use the shorthand query(async (ctx, args) => ...) — it causes implicit-any compile errors.",
+            "ALWAYS include a returns: validator. The model never generates this on its own, and omitting it causes implicit-any failures. Use v.null() for void returns, v.array(v.object({...})) for lists, v.union(v.object({...}), v.null()) for nullable single items.",
             "Every arg must have a typed validator: v.string(), v.number(), v.boolean(), v.id(\"tableName\"), v.optional(v.string()), etc. Never use args: any.",
             "v.id() without a table name argument is a compile error. Always write v.id(\"tableName\") with the actual table name.",
             "Use org-scoped reads through ctx.db.query(...).withIndex(...) when tenant isolation is required.",
@@ -318,6 +319,7 @@ export default defineSchema({
   args: {
     orgId: v.string(),
   },
+  returns: v.array(v.object({ _id: v.id("TABLE_NAME"), _creationTime: v.number(), orgId: v.string() })),
   handler: async (ctx: any, args: any) => {
     return await ctx.db
       .query("TABLE_NAME")
@@ -335,6 +337,7 @@ export default defineSchema({
     id: v.id("TABLE_NAME"),
     orgId: v.string(),
   },
+  returns: v.union(v.object({ _id: v.id("TABLE_NAME"), _creationTime: v.number(), orgId: v.string() }), v.null()),
   handler: async (ctx: any, args: any) => {
     const item = await ctx.db.get(args.id);
     if (!item || item.orgId !== args.orgId) return null;
@@ -396,7 +399,8 @@ export default defineSchema({
             stackSignals: ["convex"],
         },
         hardRules: [
-            "Use ONLY the object form: mutation({ args: { field: v.type() }, handler: async (ctx, args) => { ... } }). Never use the shorthand mutation(async (ctx, args) => ...) — it causes implicit-any compile errors.",
+            "Use ONLY the object form: mutation({ args: { field: v.type() }, returns: v.type(), handler: async (ctx, args) => { ... } }). Never use the shorthand mutation(async (ctx, args) => ...) — it causes implicit-any compile errors.",
+            "ALWAYS include a returns: validator. Use v.null() for void mutations, v.id(\"tableName\") for insert mutations that return the new ID.",
             "Every arg must have a typed validator. Never write args: any or omit the args object.",
             "v.id() without a table name argument is a compile error. Always write v.id(\"tableName\") with the actual table name.",
             "Never destructure handler args directly in the handler parameter — receive as args, then destructure inside the handler body.",
@@ -423,6 +427,7 @@ export default defineSchema({
     orgId: v.string(),
     createdBy: v.string(),
   },
+  returns: v.id("TABLE_NAME"),
   handler: async (ctx: any, args: any) => {
     const now = Date.now();
     return await ctx.db.insert("TABLE_NAME", {
@@ -447,6 +452,7 @@ export default defineSchema({
     orgId: v.string(),
     createdBy: v.string(),
   },
+  returns: v.id("kudos"),
   handler: async (ctx: any, args: any) => {
     const now = Date.now();
     return await ctx.db.insert("kudos", {
@@ -458,7 +464,7 @@ export default defineSchema({
     });
   },
 });`,
-                notes: ["Passed compile-gate shape for basic Convex writes."],
+                notes: ["Passed compile-gate shape for basic Convex writes. Includes returns: validator."],
                 passedChecks: ["tsc", "next-build"],
             },
         ],
@@ -628,6 +634,109 @@ export async function GET() {
             "Server files do not import useAuth()",
         ],
     },
+    "clerk/middleware": {
+        id: "clerk/middleware",
+        framework: "clerk",
+        area: "middleware",
+        versionTag: "v1",
+        status: "verified",
+        appliesWhen: {
+            fileGlobs: ["middleware.ts", "src/middleware.ts"],
+            codeKind: ["middleware"],
+            stackSignals: ["clerk", "middleware"],
+        },
+        hardRules: [
+            "Import clerkMiddleware and createRouteMatcher from '@clerk/nextjs/server'. Never import authMiddleware or withClerkMiddleware — they are removed in Clerk v6.",
+            "clerkMiddleware takes an async callback: clerkMiddleware(async (auth, req) => { ... }). The auth parameter is a function — call await auth.protect() to enforce authentication.",
+            "Use createRouteMatcher to define public routes: const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)', '/api/webhooks(.*)']). Call it with req inside the middleware callback.",
+            "Export the middleware as the default export and define a config with matcher that excludes static files and internal Next.js routes.",
+        ],
+        forbiddenPatterns: [
+            "authMiddleware — removed in Clerk v6, causes 'authMiddleware is not exported' build failure",
+            "withClerkMiddleware — removed in Clerk v6",
+            "export default authMiddleware({...}) — stale pattern from Clerk v4/v5",
+            "Non-async clerkMiddleware handler — the handler must be async",
+        ],
+        preferredImports: [
+            'import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";',
+        ],
+        templateSkeletons: [
+            {
+                id: "clerk-middleware-v6",
+                title: "Clerk v6 middleware with route matcher",
+                slotNotes: ["public route patterns"],
+                code: `import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/webhooks(.*)",
+]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: [
+    "/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)(.*)",
+  ],
+};`,
+            },
+        ],
+        verifiedPatterns: [
+            {
+                id: "clerk-middleware-v6-pattern",
+                title: "Approved Clerk v6 middleware",
+                codeKind: "middleware",
+                source: "curated",
+                code: `import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+
+const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isPublicRoute(req)) {
+    await auth.protect();
+  }
+});
+
+export const config = {
+  matcher: ["/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)", "/(api|trpc)(.*)"],
+};`,
+                passedChecks: ["tsc", "next-build"],
+            },
+        ],
+        repairRules: [
+            {
+                id: "clerk-middleware-deprecated-auth",
+                trigger: {
+                    errorRegex: "authMiddleware.*is not exported|authMiddleware is not a function",
+                    fileHint: "middleware\\.ts",
+                },
+                diagnosis: "Generated middleware uses deprecated authMiddleware from Clerk v4/v5. Clerk v6 exports clerkMiddleware instead.",
+                fixInstruction: "Replace the entire middleware file with the clerkMiddleware + createRouteMatcher pattern.",
+                replacementPatternId: "clerk-middleware-v6-pattern",
+            },
+            {
+                id: "clerk-middleware-deprecated-with",
+                trigger: {
+                    errorRegex: "withClerkMiddleware.*is not exported|withClerkMiddleware is not a function",
+                    fileHint: "middleware\\.ts",
+                },
+                diagnosis: "Generated middleware uses removed withClerkMiddleware. Clerk v6 uses clerkMiddleware.",
+                fixInstruction: "Replace with clerkMiddleware + createRouteMatcher pattern.",
+                replacementPatternId: "clerk-middleware-v6-pattern",
+            },
+        ],
+        testCases: [
+            "middleware.ts imports clerkMiddleware from @clerk/nextjs/server",
+            "middleware.ts does not import authMiddleware or withClerkMiddleware",
+            "middleware.ts exports a config with matcher",
+        ],
+    },
 };
 const SHARED_GUIDANCE = [
     "If the task cannot be expressed inside the loaded contract packs, return CONTRACT_CONFLICT instead of inventing a new API shape.",
@@ -691,6 +800,9 @@ export function getContractPackIdsForGeneration(args) {
     if (args.serverAuth) {
         ids.add("clerk/server-auth");
     }
+    if (args.codeKind === "middleware" || args.filePath?.match(/middleware\.ts$/)) {
+        ids.add("clerk/middleware");
+    }
     if (args.filePath?.includes("/convex/") && args.filePath.endsWith("queries.ts")) {
         ids.add("convex/query-core");
     }
@@ -718,8 +830,11 @@ export function detectContractPackIdsForFile(filePath, content) {
         ids.add("clerk/client-auth");
     }
     if (/@clerk\/nextjs\/server|clerkMiddleware|authMiddleware|withClerkMiddleware/.test(content) ||
-        /(\/middleware\.ts|\/proxy\.ts|\/route\.ts)$/.test(normalizedPath)) {
+        /(\/proxy\.ts|\/route\.ts)$/.test(normalizedPath)) {
         ids.add("clerk/server-auth");
+    }
+    if (/\/middleware\.ts$/.test(normalizedPath) || /clerkMiddleware|createRouteMatcher|authMiddleware/.test(content)) {
+        ids.add("clerk/middleware");
     }
     return Array.from(ids);
 }

@@ -15,6 +15,48 @@ export class CheckRunner {
         results.push(await this.runBuild(workspacePath));
         return results;
     }
+    /** Fast convex-only typecheck — catches bare v.id(), defineTable(), shorthand form errors
+     *  before running the full app typecheck (which is much slower).
+     */
+    async runConvexTypecheck(workspacePath) {
+        const start = Date.now();
+        const convexDir = join(workspacePath, "convex");
+        if (!existsSync(convexDir)) {
+            return { check: "convex-typecheck", passed: true, output: "", duration_ms: 0, skipped: true, skip_reason: "No convex/ directory" };
+        }
+        // Check if there's a tsconfig in convex/ or use the root one
+        const tsconfigFlag = existsSync(join(convexDir, "tsconfig.json"))
+            ? `--project ${join(convexDir, "tsconfig.json")}`
+            : "";
+        try {
+            // Type-check only convex/ files by including them explicitly
+            const cmd = tsconfigFlag
+                ? `npx tsc --noEmit ${tsconfigFlag} 2>&1`
+                : `npx tsc --noEmit --strict false 2>&1 | grep -E "^convex/" || true`;
+            const output = execSync(cmd, { cwd: workspacePath, timeout: 30000, stdio: "pipe" }).toString();
+            // If grep found convex/ errors, it's a failure
+            const hasConvexErrors = /^convex\/.*error TS/m.test(output);
+            return {
+                check: "convex-typecheck",
+                passed: !hasConvexErrors,
+                output: hasConvexErrors ? output : "",
+                duration_ms: Date.now() - start,
+                skipped: false,
+            };
+        }
+        catch (err) {
+            const output = err.stdout?.toString() || err.message;
+            // Filter to only convex/ errors
+            const convexErrors = output.split("\n").filter((l) => /^convex\//.test(l)).join("\n");
+            return {
+                check: "convex-typecheck",
+                passed: convexErrors.length === 0,
+                output: convexErrors || output,
+                duration_ms: Date.now() - start,
+                skipped: false,
+            };
+        }
+    }
     async runTypecheck(workspacePath) {
         const start = Date.now();
         // Check if tsconfig exists

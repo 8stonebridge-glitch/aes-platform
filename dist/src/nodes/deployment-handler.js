@@ -85,6 +85,18 @@ function normalizeBareConvexIdValidators(content) {
         .replace(/v\.array\(\s*\)/g, "v.array(v.string())");
     return { content: next, changed: next !== content };
 }
+function normalizeUnsupportedButtonLinkProps(content) {
+    let next = content;
+    next = next.replace(/<Button([^>]*?)\s+as=["']a["']([^>]*?)\s+href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/Button>/g, (_match, before, middle, href, after, children) => {
+        const attrs = `${before} ${middle} ${after}`
+            .replace(/\s+/g, " ")
+            .replace(/\b(as|href)=["'][^"']+["']/g, "")
+            .trim();
+        const buttonAttrs = attrs ? ` ${attrs}` : "";
+        return `<a href="${href}"><Button${buttonAttrs}>${children}</Button></a>`;
+    });
+    return { content: next, changed: next !== content };
+}
 function collectSourceFiles(root, extensions = [".ts", ".tsx"]) {
     const files = [];
     if (!existsSync(root))
@@ -403,6 +415,10 @@ function enforceSourceGuardrailsInWorkspace(workspacePath) {
                 next = bareConvexIds.content;
                 patterns.add("convex_bare_id_validator");
             }
+            const unsupportedButtonLinks = normalizeUnsupportedButtonLinkProps(next);
+            if (unsupportedButtonLinks.changed) {
+                next = unsupportedButtonLinks.content;
+            }
             const contractGuards = applyFrameworkContractGuardrails(filePath, next);
             if (contractGuards.changed) {
                 next = contractGuards.content;
@@ -554,9 +570,13 @@ async function runPredeployCompileGate(args) {
     }
     const pendingSuccesses = [];
     for (let attempt = 0; attempt <= PREDEPLOY_MAX_REPAIR_ATTEMPTS; attempt += 1) {
-        const typecheck = await checker.runTypecheck(workspacePath);
-        const build = typecheck.passed ? await checker.runBuild(workspacePath) : null;
-        const failingCheck = findFailingCheck([typecheck, ...(build ? [build] : [])]);
+        // Stage 1: convex-only typecheck (fast — catches bare v.id(), defineTable(), shorthand)
+        const convexCheck = await checker.runConvexTypecheck(workspacePath);
+        // Stage 2: full app typecheck (only if convex passes)
+        const typecheck = convexCheck.passed ? await checker.runTypecheck(workspacePath) : null;
+        // Stage 3: next build (only if typecheck passes)
+        const build = (typecheck?.passed) ? await checker.runBuild(workspacePath) : null;
+        const failingCheck = findFailingCheck([convexCheck, ...(typecheck ? [typecheck] : []), ...(build ? [build] : [])]);
         if (!failingCheck) {
             for (const success of pendingSuccesses) {
                 store.recordHermesRepairOutcome({

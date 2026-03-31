@@ -67,16 +67,28 @@ IMPORTS:
   import { query, mutation } from "../_generated/server";
   import { v } from "convex/values";
 
-REQUIRED SHAPE — ALWAYS use the object form, never the shorthand:
+REQUIRED SHAPE — ALWAYS use the object form with returns: validator:
   ✅ export const list = query({
        args: { orgId: v.string() },
+       returns: v.array(v.object({ _id: v.id("myTable"), _creationTime: v.number(), orgId: v.string(), title: v.string() })),
        handler: async (ctx, args) => {
          return await ctx.db.query("myTable").withIndex("by_org", (q: any) => q.eq("orgId", args.orgId)).collect();
        },
      });
 
+  ✅ export const create = mutation({
+       args: { orgId: v.string(), title: v.string(), createdBy: v.string() },
+       returns: v.id("myTable"),
+       handler: async (ctx, args) => {
+         return await ctx.db.insert("myTable", { ...args, createdAt: Date.now(), updatedAt: Date.now() });
+       },
+     });
+
   ❌ FORBIDDEN: export const list = query(async (ctx, args) => { ... })
      — shorthand form causes "Parameter 'ctx' implicitly has an 'any' type" build failure.
+
+  ❌ FORBIDDEN: omitting returns: validator — the model never generates this on its own.
+     Use v.null() for void, v.id("tableName") for inserts, v.array(v.object({...})) for lists.
 
 VALIDATORS — every arg must be typed. Forbidden:
   ❌ args: any     ← compile error
@@ -167,6 +179,7 @@ CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
 - Use <Label> from "@aes/ui" instead of <label>
 - Use <Select> from "@aes/ui" instead of <select>
 - Use <Dialog> from "@aes/ui" for confirmation dialogs
+- Do not pass href or as=\"a\" to Button. If navigation is needed, wrap Button inside <a> or use router/navigation separately.
 
 Import from "@aes/ui": { Button, Input, Textarea, Table, TableHeader, TableBody, TableRow, TableCell, Card, CardHeader, CardContent, Badge, Label, Select, Dialog }
 `;
@@ -212,8 +225,9 @@ Generate query functions that:
 2. Include a "list" query and a "get" (by id) query
 3. Add any additional queries that make sense for this feature
 4. Use proper Convex query patterns (ctx.db.query, withIndex, etc.)
-5. Use the exact Convex object form: query({ args: { ... }, handler: async (ctx, args) => { ... } })
-6. Never destructure handler args in the function signature
+5. Use the exact Convex object form: query({ args: { ... }, returns: v.type(), handler: async (ctx, args) => { ... } })
+6. ALWAYS include a returns: validator — v.array(v.object({...})) for list queries, v.union(v.object({...}), v.null()) for single-item queries
+7. Never destructure handler args in the function signature
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     return callLLM(system, `Generate Convex queries for "${feature.name}".`, ["convex/query-core"]);
@@ -245,9 +259,10 @@ Generate mutation functions that:
 2. Include "create" and at least one update mutation
 3. Include mutations for any feature-specific workflows
 4. Use proper Convex mutation patterns
-5. Use the exact Convex object form: mutation({ args: { ... }, handler: async (ctx, args) => { ... } })
-6. Never destructure handler args in the function signature
-7. If auth is needed, call await ctx.auth.getUserIdentity() and handle null before using identity data
+5. Use the exact Convex object form: mutation({ args: { ... }, returns: v.type(), handler: async (ctx, args) => { ... } })
+6. ALWAYS include a returns: validator — v.id("tableName") for insert mutations, v.null() for void mutations
+7. Never destructure handler args in the function signature
+8. If auth is needed, call await ctx.auth.getUserIdentity() and handle null before using identity data
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     return callLLM(system, `Generate Convex mutations for "${feature.name}".`, ["convex/mutation-core"]);
