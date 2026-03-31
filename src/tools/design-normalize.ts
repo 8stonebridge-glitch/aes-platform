@@ -67,6 +67,15 @@ function makeId(prefix: string, name: string): string {
   return `${prefix}-${slugify(name)}`;
 }
 
+function fallbackNameFromId(value: string | undefined, fallback: string): string {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return fallback;
+  return raw
+    .replace(/^[a-z]+-/, "")
+    .replace(/[-_]+/g, " ")
+    .trim() || fallback;
+}
+
 /** Valid category values for DesignComponent */
 const VALID_CATEGORIES = new Set([
   "data_display",
@@ -256,7 +265,10 @@ export function normalizeDesignEvidence(
   // ── Build screens ──────────────────────────────────────────────
 
   const screens: DesignScreen[] = (raw.screens ?? []).map((rs) => {
-    const screenId = rs.screen_id ?? rs.id ?? makeId("screen", rs.name);
+    const screenName = typeof rs.name === "string" && rs.name.trim().length > 0
+      ? rs.name.trim()
+      : fallbackNameFromId(rs.screen_id ?? rs.id, "Untitled Screen");
+    const screenId = rs.screen_id ?? rs.id ?? makeId("screen", screenName);
 
     // Normalize regions
     const regions: ScreenRegion[] = (rs.regions ?? []).map((r) => ({
@@ -341,7 +353,7 @@ export function normalizeDesignEvidence(
 
     return {
       screen_id: screenId,
-      name: rs.name,
+      name: screenName,
       purpose: rs.purpose ?? "",
       artboard_ref: rs.artboard_ref,
       dimensions: rs.dimensions,

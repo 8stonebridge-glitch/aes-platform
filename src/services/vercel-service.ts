@@ -14,6 +14,29 @@ export class VercelService {
     this.token = token;
   }
 
+  private async request<T>(
+    endpoint: string,
+    init?: RequestInit,
+  ): Promise<T> {
+    const response = await fetch(endpoint, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(
+        `Vercel request failed (${response.status}): ${error}`,
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
+
   /**
    * Build the query string suffix for team-scoped API calls.
    */
@@ -22,42 +45,53 @@ export class VercelService {
     return teamId ? `?teamId=${teamId}` : "";
   }
 
+  private withTeamQuery(
+    endpoint: string,
+    extraParams?: Record<string, string | number | boolean>,
+  ): string {
+    const params = new URLSearchParams();
+    const teamId = process.env.VERCEL_TEAM_ID;
+    if (teamId) params.set("teamId", teamId);
+    for (const [key, value] of Object.entries(extraParams || {})) {
+      params.set(key, String(value));
+    }
+    const query = params.toString();
+    return query ? `${endpoint}?${query}` : endpoint;
+  }
+
   /**
    * Create a Vercel project linked to a GitHub repo.
    */
   async createProject(
     name: string,
-    githubRepoFullName: string,
+    gitRepo: {
+      repo: string;
+      org: string;
+      repoId: number;
+      repoOwnerId: number;
+      productionBranch?: string;
+    },
     envVars?: Record<string, string>,
   ): Promise<{ id: string; name: string }> {
-    const endpoint = `https://api.vercel.com/v10/projects${this.teamQuery()}`;
+    const endpoint = this.withTeamQuery("https://api.vercel.com/v10/projects");
 
     const body: Record<string, unknown> = {
       name,
       framework: "nextjs",
       gitRepository: {
         type: "github",
-        repo: githubRepoFullName,
+        repo: gitRepo.repo,
+        org: gitRepo.org,
+        repoId: gitRepo.repoId,
+        repoOwnerId: gitRepo.repoOwnerId,
+        productionBranch: gitRepo.productionBranch || "main",
       },
     };
 
-    const response = await fetch(endpoint, {
+    const project = await this.request<{ id: string; name: string }>(endpoint, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify(body),
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(
-        `Vercel create project failed (${response.status}): ${error}`,
-      );
-    }
-
-    const project = await response.json();
 
     // Set environment variables if provided
     if (envVars && Object.keys(envVars).length > 0) {
@@ -74,7 +108,9 @@ export class VercelService {
     projectId: string,
     envVars: Record<string, string>,
   ): Promise<void> {
-    const endpoint = `https://api.vercel.com/v10/projects/${projectId}/env${this.teamQuery()}`;
+    const endpoint = this.withTeamQuery(
+      `https://api.vercel.com/v10/projects/${projectId}/env`,
+    );
 
     const envList = Object.entries(envVars).map(([key, value]) => ({
       key,
@@ -100,6 +136,47 @@ export class VercelService {
     }
   }
 
+  async createDeploymentFromGit(input: {
+    project: string;
+    repo: string;
+    org: string;
+    repoId: number;
+    repoOwnerId: number;
+    ref?: string;
+  }): Promise<{ id: string; url: string; readyState: string }> {
+    const endpoint = this.withTeamQuery(
+      "https://api.vercel.com/v13/deployments",
+      { forceNew: 1 },
+    );
+
+    const deployment = await this.request<{
+      id: string;
+      url: string;
+      readyState?: string;
+    }>(endpoint, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.project,
+        project: input.project,
+        target: "production",
+        gitSource: {
+          type: "github",
+          repo: input.repo,
+          org: input.org,
+          repoId: input.repoId,
+          repoOwnerId: input.repoOwnerId,
+          ref: input.ref || "main",
+        },
+      }),
+    });
+
+    return {
+      id: deployment.id,
+      url: `https://${deployment.url}`,
+      readyState: deployment.readyState || "INITIALIZING",
+    };
+  }
+
   /**
    * Trigger a deployment (Vercel auto-deploys on push, but this can force one).
    */
@@ -120,7 +197,10 @@ export class VercelService {
     await new Promise((resolve) => setTimeout(resolve, 8000));
 
     while (Date.now() - startTime < timeoutMs) {
-      const endpoint = `https://api.vercel.com/v6/deployments?projectId=${projectId}&limit=5${this.teamQuery() ? "&" + this.teamQuery().slice(1) : ""}`;
+      const endpoint = this.withTeamQuery(
+        "https://api.vercel.com/v6/deployments",
+        { projectId, limit: 5 },
+      );
 
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${this.token}` },
@@ -170,7 +250,9 @@ export class VercelService {
     const startTime = Date.now();
 
     while (Date.now() - startTime < timeoutMs) {
-      const endpoint = `https://api.vercel.com/v13/deployments/${deploymentId}${this.teamQuery()}`;
+      const endpoint = this.withTeamQuery(
+        `https://api.vercel.com/v13/deployments/${deploymentId}`,
+      );
 
       const response = await fetch(endpoint, {
         headers: { Authorization: `Bearer ${this.token}` },
@@ -196,6 +278,82 @@ export class VercelService {
     }
 
     throw new Error(`Deployment timed out after ${timeoutMs / 1000}s`);
+  }
+
+  /**
+   * Fetch recent deployment events for debugging failures.
+   */
+  async getDeploymentEvents(
+    deploymentId: string,
+    limit: number = 20,
+  ): Promise<string[]> {
+    const endpoint = this.withTeamQuery(
+      `https://api.vercel.com/v3/deployments/${deploymentId}/events`,
+      { direction: "backward", limit },
+    );
+
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Vercel events fetch failed (${response.status}): ${text}`,
+      );
+    }
+
+    const data = await response.json();
+    const events: any[] = Array.isArray(data) ? data : data?.events || [];
+    return events
+      .map((e) => {
+        const t = e?.created || e?.timestamp ? new Date(e.created || e.timestamp).toISOString() : "";
+        const m = e?.text || e?.payload?.text || e?.payload?.message || JSON.stringify(e?.payload || e);
+        const s = e?.type || "event";
+        return `[${t}] ${s}: ${m}`;
+      })
+      .filter(Boolean);
+  }
+
+  /**
+   * Fetch a tail of deployment events (v2) for build-log context.
+   * Best-effort: returns [] on errors.
+   */
+  async getDeploymentLogTail(
+    deploymentId: string,
+    limit: number = 50,
+  ): Promise<string[]> {
+    const endpoint = this.withTeamQuery(
+      `https://api.vercel.com/v3/deployments/${deploymentId}/events`,
+      { direction: "backward", limit },
+    );
+
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Vercel log tail failed (${response.status}): ${text}`,
+      );
+    }
+
+    const data = await response.json();
+    const events: any[] = Array.isArray(data) ? data : data?.events || [];
+    return events
+      .map((e) => {
+        const t = e?.created || e?.createdAt ? new Date(e.created || e.createdAt).toISOString() : "";
+        const msg =
+          e?.text ||
+          e?.payload?.text ||
+          e?.payload?.message ||
+          e?.payload?.error?.message ||
+          JSON.stringify(e?.payload || e);
+        const phase = e?.type || e?.phase || "event";
+        return `[${t}] ${phase}: ${msg}`;
+      })
+      .filter(Boolean);
   }
 }
 

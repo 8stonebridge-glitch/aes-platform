@@ -186,6 +186,20 @@ describe("normalizeDesignEvidence", () => {
       expect(result.screens[0].screen_id).toBe("screen-home");
     });
 
+    it("fills a missing screen name from the screen id", () => {
+      const raw = minimalRaw();
+      raw.screens = [
+        {
+          screen_id: "screen-appointment-booking",
+          name: "" as any,
+          purpose: "Book appointments",
+        },
+      ];
+      const result = normalizeDesignEvidence(raw);
+      expect(result.screens[0].name).toBe("appointment booking");
+      expect(result.screens[0].screen_id).toBe("screen-appointment-booking");
+    });
+
     it("resolves component id from 'id' field", () => {
       const result = normalizeDesignEvidence(rawWithOldFieldNames());
       const nav = result.components.find((c) => c.name === "Navigation");

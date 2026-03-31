@@ -57,6 +57,188 @@ function toPascalCase(str: string): string {
     .join("");
 }
 
+function normalizeGeneratedSource(content: string): string {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```$/);
+  const normalized = fenced ? fenced[1] : trimmed;
+  return `${normalizeBareConvexIdValidators(normalizeJsxNamespaceTypes(normalized)).trim()}\n`;
+}
+
+function normalizeJsxNamespaceTypes(content: string): string {
+  return content
+    .replace(/:\s*JSX\.Element\b/g, "")
+    .replace(/:\s*JSX\.Element\[\]/g, "")
+    .replace(/:\s*Array<JSX\.Element>/g, "")
+    .replace(/:\s*JSX\.Element\s*\|\s*null/g, "")
+    .replace(/:\s*JSX\.Element\s*\|\s*undefined/g, "");
+}
+
+function normalizeBareConvexIdValidators(content: string): string {
+  return content
+    .replace(/v\.id\(\s*\)/g, "v.string()")
+    .replace(/v\.optional\(\s*\)/g, "v.optional(v.string())")
+    .replace(/v\.array\(\s*\)/g, "v.array(v.string())");
+}
+
+function ensureClientComponent(content: string): string {
+  const normalized = normalizeGeneratedSource(content);
+  if (/^["']use client["'];?/.test(normalized)) return normalized;
+  return `"use client";\n${normalized}`;
+}
+
+const AES_UI_COMPONENTS = [
+  "Button",
+  "Input",
+  "Textarea",
+  "Select",
+  "Label",
+  "Table",
+  "TableHeader",
+  "TableBody",
+  "TableRow",
+  "TableCell",
+  "Card",
+  "CardHeader",
+  "CardContent",
+  "Badge",
+  "LoadingState",
+  "EmptyState",
+  "ErrorState",
+  "Toast",
+  "Dialog",
+  "DialogTrigger",
+  "DialogContent",
+  "DialogHeader",
+  "DialogTitle",
+  "DialogDescription",
+  "DialogFooter",
+] as const;
+
+function ensureAesUiImports(content: string): string {
+  const normalized = normalizeGeneratedSource(content);
+  const required = AES_UI_COMPONENTS.filter((name) =>
+    new RegExp(`(<${name}\\b|\\b${name}\\b)`).test(normalized),
+  );
+  if (required.length === 0) return normalized;
+
+  const importRegex = /import\s*{([^}]*)}\s*from\s*["']@aes\/ui["'];?/;
+  const existingImport = normalized.match(importRegex);
+  if (existingImport) {
+    const existingNames = existingImport[1]
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    const merged = Array.from(new Set([...existingNames, ...required])).sort();
+    return normalized.replace(importRegex, `import { ${merged.join(", ")} } from "@aes/ui";`);
+  }
+
+  const lines = normalized.split("\n");
+  let insertAt = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (line.startsWith("import ")) {
+      insertAt = i + 1;
+      continue;
+    }
+    if (line === '"use client";' || line === "'use client';" || line === "") {
+      insertAt = Math.max(insertAt, i + 1);
+      continue;
+    }
+    break;
+  }
+  lines.splice(insertAt, 0, `import { ${required.sort().join(", ")} } from "@aes/ui";`);
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function normalizeClerkUseAuthBindings(content: string): string {
+  let normalized = normalizeGeneratedSource(content);
+  if (!/useAuth\(\)/.test(normalized)) return normalized;
+
+  normalized = normalized.replace(
+    /const\s*{\s*([^}]*)\borg\b([^}]*)}\s*=\s*useAuth\(\)\s*;/g,
+    (_match, before, after) => {
+      const names = `${before},orgId,${after}`
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .map((name) => (name === "org" ? "orgId" : name));
+      const deduped = Array.from(new Set(names));
+      return `const { ${deduped.join(", ")} } = useAuth();`;
+    },
+  );
+
+  if (/\bconst\s*{\s*[^}]*\borgId\b[^}]*}\s*=\s*useAuth\(\)\s*;/.test(normalized)) {
+    normalized = normalized.replace(/\borg\b/g, "orgId");
+  }
+
+  return normalized;
+}
+
+function normalizeConvexHandlerBindings(content: string): string {
+  let normalized = normalizeGeneratedSource(content);
+
+  normalized = normalized.replace(
+    /handler:\s*async\s*\(\s*ctx\s*,\s*{([^}]*)}\s*\)\s*=>\s*{/g,
+    (_match, bindings) => {
+      const names = bindings
+        .split(",")
+        .map((name: string) => name.trim())
+        .filter(Boolean)
+        .join(", ");
+      return `handler: async (ctx, args: any) => {\n    const { ${names} } = args;`;
+    },
+  );
+
+  normalized = normalized.replace(
+    /(export const \w+ = (?:query|mutation)\(\s*async\s*\(\s*ctx\s*,\s*){([^}]*)}(\s*\)\s*=>\s*{)/g,
+    (_match, prefix, bindings, suffix) => {
+      const names = bindings
+        .split(",")
+        .map((name: string) => name.trim())
+        .filter(Boolean)
+        .join(", ");
+      return `${prefix}args: any${suffix}\n  const { ${names} } = args;`;
+    },
+  );
+
+  normalized = normalized.replace(
+    /(export const \w+ = (?:query|mutation)\(\s*async\s*\()\s*ctx\s*(\s*,\s*args\s*)(\)\s*=>\s*{)/g,
+    "$1ctx: any$2: any$3",
+  );
+
+  normalized = normalized.replace(
+    /(export const \w+ = (?:query|mutation)\(\s*async\s*\()\s*ctx\s*(\)\s*=>\s*{)/g,
+    "$1ctx: any$2",
+  );
+
+  normalized = normalized.replace(
+    /handler:\s*async\s*\(\s*ctx\s*,\s*args\s*\)\s*=>\s*{/g,
+    "handler: async (ctx: any, args: any) => {",
+  );
+
+  normalized = normalized.replace(
+    /handler:\s*async\s*\(\s*ctx\s*,\s*args:\s*any\s*\)\s*=>\s*{/g,
+    "handler: async (ctx: any, args: any) => {",
+  );
+
+  normalized = normalized.replace(
+    /\.withIndex\(([^,]+),\s*\(\s*q\s*\)\s*=>/g,
+    '.withIndex($1, (q: any) =>',
+  );
+
+  normalized = normalized.replace(
+    /\.filter\(\s*\(\s*q\s*\)\s*=>/g,
+    '.filter((q: any) =>',
+  );
+
+  normalized = normalized.replace(
+    /\.order\(\s*\(\s*q\s*\)\s*=>/g,
+    '.order((q: any) =>',
+  );
+
+  return normalized;
+}
+
 function templateLayout(appSpec: any): string {
   return `import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
@@ -560,8 +742,9 @@ export class AppBuilder {
       content = templateLayout(appSpec);
     }
 
-    writeFileSync(filePath, content);
-    fileContents[relative(basePath, filePath)] = content;
+    const normalized = normalizeGeneratedSource(content);
+    writeFileSync(filePath, normalized);
+    fileContents[relative(basePath, filePath)] = normalized;
   }
 
   private async generateSidebarFile(
@@ -580,8 +763,9 @@ export class AppBuilder {
       content = templateSidebar(appSpec);
     }
 
-    writeFileSync(filePath, content);
-    fileContents[relative(basePath, filePath)] = content;
+    const normalized = normalizeGeneratedSource(content);
+    writeFileSync(filePath, normalized);
+    fileContents[relative(basePath, filePath)] = normalized;
   }
 
   private async generateDashboardFile(
@@ -600,8 +784,9 @@ export class AppBuilder {
       content = templateDashboard(appSpec);
     }
 
-    writeFileSync(filePath, content);
-    fileContents[relative(basePath, filePath)] = content;
+    const normalized = ensureAesUiImports(normalizeClerkUseAuthBindings(content));
+    writeFileSync(filePath, normalized);
+    fileContents[relative(basePath, filePath)] = normalized;
   }
 
   private async generateSchemaFile(
@@ -620,8 +805,9 @@ export class AppBuilder {
       content = templateUnifiedSchema(appSpec);
     }
 
-    writeFileSync(filePath, content);
-    fileContents[relative(basePath, filePath)] = content;
+    const normalized = normalizeGeneratedSource(content);
+    writeFileSync(filePath, normalized);
+    fileContents[relative(basePath, filePath)] = normalized;
   }
 
   // ─── Phase 2: Build feature in-place ─────────────────────────────
@@ -691,9 +877,10 @@ export class AppBuilder {
     basePath: string,
   ): void {
     this.ensureDir(filePath);
-    writeFileSync(filePath, content);
+    const normalized = normalizeGeneratedSource(content);
+    writeFileSync(filePath, normalized);
     const relPath = relative(basePath, filePath);
-    fileContents[relPath] = content;
+    fileContents[relPath] = normalized;
   }
 
   private async writeConvexFunctions(
@@ -736,7 +923,7 @@ export const list = query({
     orgId: v.string(),
     status: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     let q = ctx.db
       .query("${tableName}")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId));
@@ -760,7 +947,7 @@ export const get = query({
     id: v.id("${tableName}"),
     orgId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const item = await ctx.db.get(args.id);
     if (!item || item.orgId !== args.orgId) return null;
     return item;
@@ -768,6 +955,7 @@ export const get = query({
 });
 `;
     }
+    queryContent = normalizeConvexHandlerBindings(queryContent);
     writeFileSync(queryPath, queryContent);
     if (fileContents) {
       fileContents[relative(basePath, queryPath)] = queryContent;
@@ -801,7 +989,7 @@ export const create = mutation({
     orgId: v.string(),
     createdBy: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const now = Date.now();
     const id = await ctx.db.insert("${tableName}", {
       title: args.title,
@@ -827,7 +1015,7 @@ export const updateStatus = mutation({
     status: v.string(),
     orgId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const item = await ctx.db.get(args.id);
     if (!item || item.orgId !== args.orgId) {
       throw new Error("Not found or unauthorized");
@@ -841,6 +1029,7 @@ export const updateStatus = mutation({
 });
 `;
     }
+    mutationContent = normalizeConvexHandlerBindings(mutationContent);
     writeFileSync(mutationPath, mutationContent);
     if (fileContents) {
       fileContents[relative(basePath, mutationPath)] = mutationContent;
@@ -886,7 +1075,8 @@ export const updateStatus = mutation({
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        content = await generatePage(feature, appSpec, cap, "form");
+        const generated = await generatePage(feature, appSpec, cap, "form");
+        content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
       }
@@ -988,6 +1178,7 @@ export default function ${pascalName}Page() {
 `;
     }
 
+    content = normalizeGeneratedSource(content);
     writeFileSync(pagePath, content);
     if (fileContents) {
       fileContents[relative(basePath, pagePath)] = content;
@@ -1011,7 +1202,8 @@ export default function ${pascalName}Page() {
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        content = await generatePage(feature, appSpec, cap, "list");
+        const generated = await generatePage(feature, appSpec, cap, "list");
+        content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
       }
@@ -1100,6 +1292,7 @@ export default function ${pascalName}Page() {
 `;
     }
 
+    content = normalizeGeneratedSource(content);
     writeFileSync(pagePath, content);
     if (fileContents) {
       fileContents[relative(basePath, pagePath)] = content;
@@ -1123,7 +1316,8 @@ export default function ${pascalName}Page() {
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        content = await generatePage(feature, appSpec, cap, "detail");
+        const generated = await generatePage(feature, appSpec, cap, "detail");
+        content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
       }
@@ -1208,6 +1402,7 @@ export default function ${pascalName}DetailPage() {
 `;
     }
 
+    content = normalizeGeneratedSource(content);
     writeFileSync(pagePath, content);
     if (fileContents) {
       fileContents[relative(basePath, pagePath)] = content;
@@ -1267,6 +1462,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
 `;
     }
 
+    content = normalizeGeneratedSource(content);
     writeFileSync(badgePath, content);
     if (fileContents) {
       fileContents[relative(basePath, badgePath)] = content;
@@ -1282,7 +1478,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   ): Promise<void> {
     for (const test of pkg.required_tests || []) {
       const testSlug = test.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const testPath = join(basePath, "tests", featureSlug, `${testSlug}.test.ts`);
+      const testPath = join(basePath, "tests", featureSlug, `${testSlug}.test.tsx`);
       this.ensureDir(testPath);
 
       let content: string | null = null;
@@ -1314,6 +1510,7 @@ describe("${test.name}", () => {
 `;
       }
 
+      content = normalizeJsxNamespaceTypes(normalizeGeneratedSource(content));
       writeFileSync(testPath, content);
       if (fileContents) {
         fileContents[relative(basePath, testPath)] = content;

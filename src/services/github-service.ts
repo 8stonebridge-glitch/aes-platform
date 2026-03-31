@@ -21,7 +21,16 @@ export class GithubService {
     name: string,
     description: string,
     isPrivate: boolean = false,
-  ): Promise<{ full_name: string; clone_url: string; html_url: string }> {
+  ): Promise<{
+    full_name: string;
+    clone_url: string;
+    html_url: string;
+    name: string;
+    id: number;
+    owner_login: string;
+    owner_id: number;
+    default_branch: string;
+  }> {
     const org = process.env.AES_GITHUB_ORG;
     const endpoint = org
       ? `https://api.github.com/orgs/${org}/repos`
@@ -54,6 +63,11 @@ export class GithubService {
       full_name: data.full_name,
       clone_url: data.clone_url,
       html_url: data.html_url,
+      name: data.name,
+      id: data.id,
+      owner_login: data.owner?.login,
+      owner_id: data.owner?.id,
+      default_branch: data.default_branch || "main",
     };
   }
 

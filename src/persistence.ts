@@ -52,6 +52,33 @@ import type {
 } from "./types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
+export interface JobSnapshotRow {
+  job_id: string;
+  request_id?: string | null;
+  raw_request?: string | null;
+  current_gate?: string | null;
+  intent_confirmed?: boolean | null;
+  user_approved?: boolean | null;
+  deploy_target?: string | null;
+  autonomous?: boolean | null;
+  target_path?: string | null;
+  preview_url?: string | null;
+  deployment_url?: string | null;
+  error_message?: string | null;
+  design_mode?: string | null;
+  design_brief?: any;
+  design_evidence?: any;
+  feature_build_order?: string[] | null;
+  feature_build_index?: number | null;
+  feature_bridges?: any;
+  validator_results?: any;
+  build_results?: any;
+  last_log_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  schema_version?: number | null;
+}
+
 export class PersistenceLayer {
   private pool: pg.Pool;
 
@@ -518,6 +545,100 @@ export class PersistenceLayer {
       diff_summary: r.diff_summary || null,
       pr_summary: r.pr_summary || null,
       check_results: r.check_results || [],
+    }));
+  }
+
+  // ─── Job Snapshots (runtime state) ───────────────────────────────
+
+  async persistJobSnapshot(jobId: string, snapshot: JobSnapshotRow): Promise<void> {
+    const now = new Date();
+    await this.pool.query(
+      `INSERT INTO job_snapshots (
+        job_id, request_id, raw_request, current_gate, intent_confirmed, user_approved,
+        deploy_target, autonomous, target_path, preview_url, deployment_url, error_message,
+        design_mode, design_brief, design_evidence, feature_build_order, feature_build_index,
+        feature_bridges, validator_results, build_results, last_log_at, schema_version, created_at, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+        $13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24
+      )
+      ON CONFLICT (job_id) DO UPDATE SET
+        request_id = EXCLUDED.request_id,
+        raw_request = EXCLUDED.raw_request,
+        current_gate = EXCLUDED.current_gate,
+        intent_confirmed = EXCLUDED.intent_confirmed,
+        user_approved = EXCLUDED.user_approved,
+        deploy_target = EXCLUDED.deploy_target,
+        autonomous = EXCLUDED.autonomous,
+        target_path = EXCLUDED.target_path,
+        preview_url = EXCLUDED.preview_url,
+        deployment_url = EXCLUDED.deployment_url,
+        error_message = EXCLUDED.error_message,
+        design_mode = EXCLUDED.design_mode,
+        design_brief = EXCLUDED.design_brief,
+        design_evidence = EXCLUDED.design_evidence,
+        feature_build_order = EXCLUDED.feature_build_order,
+        feature_build_index = EXCLUDED.feature_build_index,
+        feature_bridges = EXCLUDED.feature_bridges,
+        validator_results = EXCLUDED.validator_results,
+        build_results = EXCLUDED.build_results,
+        last_log_at = EXCLUDED.last_log_at,
+        schema_version = EXCLUDED.schema_version,
+        updated_at = now()
+      `,
+      [
+        jobId,
+        snapshot.request_id ?? jobId,
+        snapshot.raw_request ?? null,
+        snapshot.current_gate ?? null,
+        snapshot.intent_confirmed ?? null,
+        snapshot.user_approved ?? null,
+        snapshot.deploy_target ?? null,
+        snapshot.autonomous ?? null,
+        snapshot.target_path ?? null,
+        snapshot.preview_url ?? null,
+        snapshot.deployment_url ?? null,
+        snapshot.error_message ?? null,
+        snapshot.design_mode ?? null,
+        snapshot.design_brief ?? null,
+        snapshot.design_evidence ?? null,
+        snapshot.feature_build_order ?? null,
+        snapshot.feature_build_index ?? null,
+        snapshot.feature_bridges ?? null,
+        snapshot.validator_results ?? null,
+        snapshot.build_results ?? null,
+        snapshot.last_log_at ?? null,
+        snapshot.schema_version ?? CURRENT_SCHEMA_VERSION,
+        snapshot.created_at ? new Date(snapshot.created_at) : now,
+        snapshot.updated_at ? new Date(snapshot.updated_at) : now,
+      ]
+    );
+  }
+
+  async loadJobSnapshot(jobId: string): Promise<JobSnapshotRow | null> {
+    const res = await this.pool.query(
+      `SELECT * FROM job_snapshots WHERE job_id = $1 LIMIT 1`,
+      [jobId]
+    );
+    if (!res.rows[0]) return null;
+    const row = res.rows[0];
+    return {
+      ...row,
+      created_at: row.created_at?.toISOString(),
+      updated_at: row.updated_at?.toISOString(),
+      last_log_at: row.last_log_at?.toISOString?.() ?? row.last_log_at,
+    };
+  }
+
+  async listJobSnapshots(limit = 50): Promise<JobSnapshotRow[]> {
+    const res = await this.pool.query(
+      `SELECT job_id, request_id, raw_request, current_gate, deploy_target, autonomous, preview_url, updated_at
+       FROM job_snapshots ORDER BY updated_at DESC LIMIT $1`,
+      [limit]
+    );
+    return res.rows.map((r) => ({
+      ...r,
+      updated_at: r.updated_at?.toISOString?.() ?? r.updated_at,
     }));
   }
 

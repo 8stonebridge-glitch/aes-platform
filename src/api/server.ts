@@ -471,9 +471,30 @@ app.get("/api/jobs/:id", async (req, res) => {
 
 // ─── GET /api/jobs — List all jobs ─────────────────────────────────
 
-app.get("/api/jobs", (_req, res) => {
+app.get("/api/jobs", async (_req, res) => {
   const store = getJobStore();
-  const jobs = store.list().map((j) => ({
+  let jobs = store.list();
+
+  // If memory is empty, fall back to persisted snapshots
+  if (jobs.length === 0 && store.hasPersistence()) {
+    const pgJobs = await store.listFromPostgres();
+    const hydrated = pgJobs.map((j) => ({
+      jobId: j.job_id,
+      intent: j.raw_request,
+      currentGate: j.current_gate || "unknown",
+      features: 0,
+      intentConfirmed: undefined,
+      userApproved: undefined,
+      autonomous: j.autonomous ?? false,
+      targetPath: null,
+      deployTarget: (j.deploy_target as any) || "local",
+      previewUrl: j.preview_url || null,
+      createdAt: j.created_at,
+    }));
+    return res.json(hydrated);
+  }
+
+  const response = jobs.map((j) => ({
     jobId: j.jobId,
     intent: j.rawRequest,
     currentGate: j.currentGate,
@@ -486,7 +507,7 @@ app.get("/api/jobs", (_req, res) => {
     previewUrl: j.previewUrl ?? null,
     createdAt: j.createdAt,
   }));
-  res.json(jobs);
+  res.json(response);
 });
 
 // ─── GET /api/jobs/:id/logs — Get job logs ─────────────────────────

@@ -118,6 +118,37 @@ CREATE TABLE IF NOT EXISTS build_logs (
 CREATE INDEX IF NOT EXISTS idx_build_logs_job_id ON build_logs(job_id);
 CREATE INDEX IF NOT EXISTS idx_build_logs_gate ON build_logs(job_id, gate);
 
+-- ─── Job Snapshots (runtime state) ─────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS job_snapshots (
+  job_id TEXT PRIMARY KEY,
+  request_id TEXT,
+  raw_request TEXT,
+  current_gate TEXT,
+  intent_confirmed BOOLEAN,
+  user_approved BOOLEAN,
+  deploy_target TEXT,
+  autonomous BOOLEAN,
+  target_path TEXT,
+  preview_url TEXT,
+  deployment_url TEXT,
+  error_message TEXT,
+  design_mode TEXT,
+  design_brief JSONB,
+  design_evidence JSONB,
+  feature_build_order TEXT[],
+  feature_build_index INTEGER,
+  feature_bridges JSONB,
+  validator_results JSONB,
+  build_results JSONB,
+  last_log_at TIMESTAMPTZ,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_snapshots_updated_at ON job_snapshots(updated_at DESC);
+
 -- ─── Fix Trails ─────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS fix_trails (

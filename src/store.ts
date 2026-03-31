@@ -4,7 +4,7 @@
  * Postgres for durability and replay.
  */
 
-import type { PersistenceLayer } from "./persistence.js";
+import type { PersistenceLayer, JobSnapshotRow } from "./persistence.js";
 import type {
   IntentBrief,
   AppSpec,
@@ -51,6 +51,32 @@ export interface JobRecord {
   designMode?: "auto" | "paper";
   designBrief?: any;
   designEvidence?: any;
+}
+
+interface JobSnapshot {
+  job_id: string;
+  request_id?: string | null;
+  raw_request?: string | null;
+  current_gate?: string | null;
+  intent_confirmed?: boolean | null;
+  user_approved?: boolean | null;
+  deploy_target?: string | null;
+  autonomous?: boolean | null;
+  target_path?: string | null;
+  preview_url?: string | null;
+  deployment_url?: string | null;
+  error_message?: string | null;
+  design_mode?: string | null;
+  design_brief?: any;
+  design_evidence?: any;
+  feature_build_order?: string[] | null;
+  feature_build_index?: number | null;
+  feature_bridges?: any;
+  validator_results?: any;
+  build_results?: any;
+  last_log_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 // ─── Schema initialization SQL ────────────────────────────────────────
@@ -194,6 +220,35 @@ CREATE TABLE IF NOT EXISTS builder_runs (
   pr_summary TEXT,
   check_results JSONB DEFAULT '[]'
 );
+
+CREATE TABLE IF NOT EXISTS job_snapshots (
+  job_id TEXT PRIMARY KEY,
+  request_id TEXT,
+  raw_request TEXT,
+  current_gate TEXT,
+  intent_confirmed BOOLEAN,
+  user_approved BOOLEAN,
+  deploy_target TEXT,
+  autonomous BOOLEAN,
+  target_path TEXT,
+  preview_url TEXT,
+  deployment_url TEXT,
+  error_message TEXT,
+  design_mode TEXT,
+  design_brief JSONB,
+  design_evidence JSONB,
+  feature_build_order TEXT[],
+  feature_build_index INTEGER,
+  feature_bridges JSONB,
+  validator_results JSONB,
+  build_results JSONB,
+  last_log_at TIMESTAMPTZ,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_snapshots_updated_at ON job_snapshots(updated_at DESC);
 `;
 
 /** Maximum consecutive persistence failures before writes are paused. */
@@ -204,6 +259,62 @@ const HEALTH_CHECK_INTERVAL_MS = 60_000;
 
 /** Max jobs to keep in memory before evicting oldest completed ones. */
 const MAX_IN_MEMORY_JOBS = 200;
+const HERMES_OBSERVE_URL =
+  process.env.HERMES_RELEASE_URL ||
+  process.env.HERMES_INTERNAL_URL ||
+  process.env.HERMES_URL ||
+  "";
+const HERMES_SNAPSHOT_PUSH_DISABLED =
+  process.env.AES_DISABLE_HERMES_SNAPSHOTS === "true" ||
+  process.env.AES_DISABLE_HERMES_SNAPSHOTS === "1";
+
+interface HermesReleaseEvent {
+  artifactType: string;
+  rawMessage: string;
+  payload?: Record<string, unknown> | null;
+  source?: string;
+  sessionId?: string | null;
+  promotable?: boolean;
+  trafficClass?: "incident" | "coordination";
+}
+
+interface HermesRepairOutcomeEvent {
+  pattern: string;
+  category: string;
+  diagnosis: string;
+  fixAction: string;
+  fixType?: string;
+  filesChanged?: string[];
+  success: boolean;
+  errorSnippet: string;
+  service?: string;
+}
+
+function compactSnapshotForHermes(snapshot: JobSnapshotRow): Record<string, unknown> {
+  return {
+    job_id: snapshot.job_id,
+    current_gate: snapshot.current_gate ?? null,
+    deploy_target: snapshot.deploy_target ?? null,
+    autonomous: snapshot.autonomous ?? null,
+    preview_url: snapshot.preview_url ?? null,
+    deployment_url: snapshot.deployment_url ?? null,
+    error_message: snapshot.error_message ?? null,
+    updated_at: snapshot.updated_at ?? null,
+  };
+}
+
+function formatSnapshotMessage(snapshot: JobSnapshotRow): string {
+  const parts = [
+    `job=${snapshot.job_id}`,
+    `gate=${snapshot.current_gate ?? "unknown"}`,
+    `target=${snapshot.deploy_target ?? "unset"}`,
+    `autonomous=${snapshot.autonomous === true ? "true" : "false"}`,
+  ];
+  if (snapshot.preview_url) parts.push(`preview=${snapshot.preview_url}`);
+  if (snapshot.deployment_url) parts.push(`deployment=${snapshot.deployment_url}`);
+  if (snapshot.error_message) parts.push(`error=${snapshot.error_message}`);
+  return `[AES release] job snapshot | ${parts.join(" | ")}`;
+}
 
 export class JobStore {
   private jobs: Map<string, JobRecord> = new Map();
@@ -341,6 +452,133 @@ export class JobStore {
     return this.persistence !== null && this.dbAvailable;
   }
 
+  private toSnapshot(job: JobRecord): JobSnapshotRow {
+    const latestLog = this.logs.get(job.jobId)?.slice(-1)[0];
+    return {
+      job_id: job.jobId,
+      request_id: job.requestId,
+      raw_request: job.rawRequest,
+      current_gate: job.currentGate,
+      intent_confirmed: job.intentConfirmed ?? null,
+      user_approved: job.userApproved ?? null,
+      deploy_target: job.deployTarget ?? null,
+      autonomous: job.autonomous ?? null,
+      target_path: job.targetPath ?? null,
+      preview_url: job.previewUrl ?? null,
+      deployment_url: job.deploymentUrl ?? null,
+      error_message: job.errorMessage ?? null,
+      design_mode: job.designMode ?? null,
+      design_brief: job.designBrief ?? null,
+      design_evidence: job.designEvidence ?? null,
+      feature_build_order: job.featureBuildOrder ?? null,
+      feature_build_index: job.featureBuildIndex ?? null,
+      feature_bridges: job.featureBridges ?? null,
+      validator_results: job.validatorResults ?? null,
+      build_results: job.buildResults ?? null,
+      last_log_at: latestLog?.timestamp ?? null,
+      created_at: job.createdAt ?? null,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  private async pushSnapshotToHermes(snapshot: JobSnapshotRow): Promise<void> {
+    await this.postToHermes({
+      source: "aes-release-snapshot",
+      artifactType: "job_snapshot",
+      rawMessage: formatSnapshotMessage(snapshot),
+      payload: compactSnapshotForHermes(snapshot),
+      sessionId: snapshot.job_id,
+      promotable: false,
+    });
+  }
+
+  private async postToHermes(event: HermesReleaseEvent): Promise<void> {
+    if (HERMES_SNAPSHOT_PUSH_DISABLED || !HERMES_OBSERVE_URL) return;
+
+    const body = JSON.stringify({
+      source: event.source ?? "aes-release",
+      environment: "orchestrator",
+      raw_message: event.rawMessage,
+      session_id: event.sessionId ?? null,
+      promotable: event.promotable ?? false,
+      traffic_class: event.trafficClass ?? "incident",
+      artifact_type: event.artifactType,
+      payload: event.payload ?? null,
+    });
+
+    const attempt = async () => {
+      await fetch(`${HERMES_OBSERVE_URL}/observe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    };
+
+    const retries = [0, 250, 1000]; // immediate, then backoff
+    for (const delay of retries) {
+      try {
+        if (delay) {
+          await new Promise((r) => setTimeout(r, delay));
+        }
+        await attempt();
+        return;
+      } catch {
+        // best-effort; continue retries
+      }
+    }
+  }
+
+  private async postRepairOutcomeToHermes(
+    outcome: HermesRepairOutcomeEvent,
+  ): Promise<void> {
+    if (HERMES_SNAPSHOT_PUSH_DISABLED || !HERMES_OBSERVE_URL) return;
+
+    const body = JSON.stringify({
+      pattern: outcome.pattern,
+      category: outcome.category,
+      diagnosis: outcome.diagnosis,
+      fixAction: outcome.fixAction,
+      fixType: outcome.fixType ?? "auto_fix",
+      filesChanged: outcome.filesChanged ?? [],
+      success: outcome.success,
+      errorSnippet: outcome.errorSnippet,
+      service: outcome.service ?? "aes-release",
+    });
+
+    const attempt = async () => {
+      await fetch(`${HERMES_OBSERVE_URL}/repair/remember`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    };
+
+    const retries = [0, 250, 1000];
+    for (const delay of retries) {
+      try {
+        if (delay) {
+          await new Promise((r) => setTimeout(r, delay));
+        }
+        await attempt();
+        return;
+      } catch {
+        // best-effort; continue retries
+      }
+    }
+  }
+
+  recordHermesReleaseEvent(event: HermesReleaseEvent): void {
+    this.postToHermes(event).catch(() => {
+      // best-effort only
+    });
+  }
+
+  recordHermesRepairOutcome(outcome: HermesRepairOutcomeEvent): void {
+    this.postRepairOutcomeToHermes(outcome).catch(() => {
+      // best-effort only
+    });
+  }
+
   // ─── Periodic health check ────────────────────────────────────────
 
   private startHealthCheckTimer(): void {
@@ -378,9 +616,23 @@ export class JobStore {
   create(job: JobRecord): void {
     this.evictIfNeeded();
     const durability: DurabilityStatus = this.persistence ? "persisted" : "memory_only";
-    this.jobs.set(job.jobId, { ...job, durability, createdAt: new Date().toISOString() });
+    const createdAt = new Date().toISOString();
+    const record = { ...job, durability, createdAt };
+    this.jobs.set(job.jobId, record);
     this.logs.set(job.jobId, []);
     this.latestJobId = job.jobId;
+
+    if (this.shouldWrite()) {
+      this.persistence!.persistJobSnapshot(job.jobId, this.toSnapshot(record))
+        .then(() => this.recordPersistenceSuccess())
+        .catch((err) => {
+          this.recordPersistenceFailure(`snapshot:create:${job.jobId}`, err);
+          const j = this.jobs.get(job.jobId);
+          if (j) j.durability = "partial";
+        })
+        .then(() => this.pushSnapshotToHermes(this.toSnapshot(record)))
+        .catch(() => {/* ignore Hermes push errors */});
+    }
   }
 
   get(jobId: string): JobRecord | undefined {
@@ -466,18 +718,47 @@ export class JobStore {
     const cached = this.jobs.get(jobId);
     if (cached) return cached;
 
+    const snapshot = await this.persistence.loadJobSnapshot(jobId);
     const logs = await this.persistence.loadLogs(jobId);
-    // Reconstruct from Postgres artifacts
     const brief = await this.persistence.loadIntentBrief(jobId);
-    if (!brief && logs.length === 0) return null;
+    if (!brief && !snapshot && logs.length === 0) return null;
 
-    const job: JobRecord = {
+    const snapshotJob: JobRecord | null = snapshot ? {
+      jobId,
+      requestId: snapshot.request_id || jobId,
+      rawRequest: snapshot.raw_request || inferRawRequestFromLogs(logs) || brief?.raw_request || "",
+      currentGate: snapshot.current_gate || "unknown",
+      createdAt: snapshot.created_at || brief?.created_at || logs[0]?.timestamp || new Date().toISOString(),
+      durability: "confirmed",
+      intentBrief: brief || undefined,
+      intentConfirmed: snapshot.intent_confirmed ?? (brief
+        ? brief.confirmation_status === "confirmed" ||
+          brief.confirmation_status === "auto_confirmed_low_ambiguity"
+        : logs.some((log) => /Classified as|Intent confirmed/i.test(log.message || ""))),
+      userApproved: snapshot.user_approved ?? undefined,
+      autonomous: snapshot.autonomous ?? undefined,
+      deployTarget: (snapshot.deploy_target as any) ?? undefined,
+      targetPath: snapshot.target_path ?? null,
+      previewUrl: snapshot.preview_url ?? null,
+      deploymentUrl: snapshot.deployment_url ?? null,
+      errorMessage: snapshot.error_message ?? null,
+      designMode: snapshot.design_mode as any,
+      designBrief: snapshot.design_brief ?? undefined,
+      designEvidence: snapshot.design_evidence ?? undefined,
+      featureBuildOrder: snapshot.feature_build_order ?? undefined,
+      featureBuildIndex: snapshot.feature_build_index ?? undefined,
+      featureBridges: snapshot.feature_bridges ?? undefined,
+      validatorResults: snapshot.validator_results ?? undefined,
+      buildResults: snapshot.build_results ?? undefined,
+    } : null;
+
+    const job: JobRecord = snapshotJob || {
       jobId,
       requestId: brief?.request_id || jobId,
       rawRequest: brief?.raw_request || inferRawRequestFromLogs(logs) || "",
       currentGate: "unknown",
       createdAt: brief?.created_at || logs[0]?.timestamp || new Date().toISOString(),
-      durability: "confirmed", // loaded from Postgres, so it's confirmed
+      durability: "confirmed",
       intentBrief: brief || undefined,
       intentConfirmed: brief
         ? brief.confirmation_status === "confirmed" ||
@@ -490,15 +771,19 @@ export class JobStore {
     const appSpecLookupId = brief?.request_id || jobId;
     const appSpecRow = await this.persistence.loadAppSpecByRequestId(appSpecLookupId);
     if (appSpecRow) {
-      job.appSpec = appSpecRow;
-      job.currentGate = "gate_1";
+      job.appSpec = job.appSpec || appSpecRow;
+      if (job.currentGate === "unknown") {
+        job.currentGate = "gate_1";
+      }
 
       // Load bridges
       const bridges = await this.persistence.loadFeatureBridges(appSpecRow.app_id);
       if (Object.keys(bridges).length > 0) {
-        job.featureBridges = bridges;
-        job.featureBuildOrder = Object.keys(bridges);
-        job.currentGate = "gate_2";
+        job.featureBridges = job.featureBridges || bridges;
+        job.featureBuildOrder = job.featureBuildOrder || Object.keys(bridges);
+        if (job.currentGate === "unknown") {
+          job.currentGate = "gate_2";
+        }
 
         // Load vetoes
         const bridgeIds = Object.values(bridges)
@@ -506,16 +791,18 @@ export class JobStore {
           .map((b) => b.bridge_id);
         const vetoes = await this.persistence.loadVetoResults(bridgeIds);
         if (vetoes.length > 0) {
-          job.vetoResults = vetoes;
+          job.vetoResults = job.vetoResults || vetoes;
           const anyTriggered = vetoes.some((v) => v.triggered);
-          job.currentGate = anyTriggered ? "failed" : "gate_3";
+          if (job.currentGate === "unknown") {
+            job.currentGate = anyTriggered ? "failed" : "gate_3";
+          }
         }
       }
 
       // Load approval
       const approval = await this.persistence.loadApproval(jobId);
       if (approval) {
-        job.userApproved = approval.approved;
+        job.userApproved = job.userApproved ?? approval.approved;
       }
     }
 
@@ -543,6 +830,10 @@ export class JobStore {
       job.userApproved = job.userApproved ?? logs.some((log) => log.message === "__approval_signal__:approved");
     }
 
+    if (job.errorMessage && job.currentGate !== "complete" && job.currentGate !== "failed") {
+      job.currentGate = "failed";
+    }
+
     // Cache it
     this.jobs.set(jobId, job);
 
@@ -554,8 +845,22 @@ export class JobStore {
     return this.persistence.loadLogs(jobId);
   }
 
-  async listFromPostgres(): Promise<{ job_id: string; raw_request: string; created_at: string }[]> {
+  async listFromPostgres(): Promise<{ job_id: string; raw_request: string; created_at: string; current_gate?: string | null; deploy_target?: string | null; autonomous?: boolean | null; preview_url?: string | null; updated_at?: string | null; }[]> {
     if (!this.persistence) return [];
+    const snapshots = await this.persistence.listJobSnapshots();
+    if (snapshots.length > 0) {
+      return snapshots.map((s) => ({
+        job_id: s.job_id,
+        raw_request: s.raw_request || "",
+        created_at: s.created_at || s.updated_at || new Date().toISOString(),
+        current_gate: s.current_gate || null,
+        deploy_target: s.deploy_target || null,
+        autonomous: s.autonomous ?? null,
+        preview_url: s.preview_url || null,
+        updated_at: s.updated_at || null,
+      }));
+    }
+    // Fallback to intent_briefs if no snapshots yet
     return this.persistence.listJobs();
   }
 
@@ -642,6 +947,11 @@ export class JobStore {
         }
       }
     }
+
+    // Snapshot the latest runtime state
+    const snapshot = this.toSnapshot(after);
+    await p.persistJobSnapshot(jobId, snapshot);
+    this.pushSnapshotToHermes(snapshot).catch(() => {/* ignore Hermes push errors */});
   }
 
   // ─── Cleanup ─────────────────────────────────────────────────────

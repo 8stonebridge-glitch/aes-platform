@@ -4,6 +4,9 @@
   "type": "module",
   "description": "AES v12 LangGraph.js orchestrator and operator UI",
   "main": "dist/src/graph.js",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "aes": "dist/src/cli/index.js"
   },
