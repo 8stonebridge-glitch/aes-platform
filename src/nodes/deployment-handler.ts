@@ -70,7 +70,7 @@ const HERMES_REPAIR_URL = (
   process.env.HERMES_URL ||
   ""
 ).replace(/\/+$/, "");
-const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 2;
+const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 3;
 
 const AES_UI_COMPONENTS = [
   "Button",

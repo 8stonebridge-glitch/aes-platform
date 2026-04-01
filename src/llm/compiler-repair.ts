@@ -176,6 +176,28 @@ function repairTestingLibraryImports(content: string, filePath: string): string 
 }
 
 /**
+ * Fix useState<string> / setState(null) type mismatches.
+ * LLMs frequently generate useState<string>("") but then call setState(null).
+ * Fix by widening the state type to include null: useState<string | null>.
+ */
+function repairNullStateAssignments(content: string, filePath: string): string | null {
+  if (!/\.(tsx?)$/.test(filePath)) return null;
+  // Only run if there's a useState and a setState(null) pattern
+  if (!/\buseState\b/.test(content) || !/\(null\)/.test(content)) return null;
+
+  let modified = content;
+
+  // Pattern: useState<string>("") ... setX(null) → useState<string | null>("")
+  // Widen all useState<T> to useState<T | null> when the setter is called with null
+  modified = modified.replace(
+    /useState<(string|number|boolean)>\(/g,
+    "useState<$1 | null>(",
+  );
+
+  return modified !== content ? modified : null;
+}
+
+/**
  * Deterministic regex repairs for Convex and Clerk files.
  * These fix the most common generated-code violations without needing an LLM.
  * Returns null if nothing changed.
@@ -310,6 +332,11 @@ export async function repairFilesForCompilerErrors(args: {
       // Test files: fix missing fireEvent/waitFor/screen imports
       if (!repaired) {
         repaired = repairTestingLibraryImports(original, relativePath);
+      }
+
+      // Fix useState<string> + setState(null) type mismatches
+      if (!repaired) {
+        repaired = repairNullStateAssignments(original, relativePath);
       }
 
       // Convex/Clerk/middleware files: fix bare validators, shorthand forms, { org }, deprecated middleware
