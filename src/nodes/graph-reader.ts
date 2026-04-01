@@ -211,7 +211,7 @@ MATCH (m:LearnedDataModel)
 WHERE ${conditions}
 RETURN m.name AS name, m.category AS category,
        m.fields_csv AS fields, m.field_count AS field_count,
-       m.source AS source
+       m.source AS source, m.schema_source AS schema_source
 ORDER BY m.field_count DESC
 LIMIT 25
   `.trim();

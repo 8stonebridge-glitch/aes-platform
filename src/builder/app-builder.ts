@@ -568,7 +568,7 @@ function buildGraphGuidance(
       const fields = Array.isArray(item.fields)
         ? item.fields.map((f: any) => typeof f === "string" ? f : `${f.name}: ${f.type}`).join(", ")
         : item.fields ?? item.schema ?? "";
-      guidance.learnedModels.push({ name: item.name ?? "", fields });
+      guidance.learnedModels.push({ name: item.name ?? "", fields, schemaSource: item.schema_source ?? undefined });
     }
   }
 
@@ -739,6 +739,7 @@ function buildGraphGuidance(
         name: item.name ?? "",
         tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
         appClass: item.app_class ?? "",
+        schemaText: item.schema_text ?? undefined,
       });
     }
   }
@@ -750,6 +751,7 @@ function buildGraphGuidance(
         name: item.name ?? "",
         domain: item.domain ?? "",
         tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
+        schemaText: item.schema_text ?? undefined,
       });
     }
   }
@@ -924,6 +926,7 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     parts.push("\n## KNOWN DATA MODELS — REUSE WHEN APPLICABLE");
     for (const m of guidance.learnedModels.slice(0, 10)) {
       parts.push(`- ${m.name}: ${m.fields}`);
+      if (m.schemaSource) parts.push(`  Schema:\n\`\`\`typescript\n${m.schemaSource}\n\`\`\``);
     }
   }
 
@@ -961,7 +964,7 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     parts.push("\n## PROVEN CODE PATTERNS FROM PRIOR BUILDS");
     for (const p of guidance.buildExtractedPatterns.slice(0, 8)) {
       parts.push(`- ${p.name} (${p.type}): ${p.description}`);
-      if (p.codeSample) parts.push(`  Example: ${p.codeSample.slice(0, 200)}`);
+      if (p.codeSample) parts.push(`  Example:\n\`\`\`typescript\n${p.codeSample}\n\`\`\``);
     }
   }
 
@@ -980,7 +983,7 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     for (const c of guidance.learnedComponentPatterns.slice(0, 10)) {
       parts.push(`- ${c.name} (${c.category}): ${c.description}`);
       if (c.props) parts.push(`  Props: ${c.props}`);
-      if (c.usageExample) parts.push(`  Usage: ${c.usageExample.slice(0, 150)}`);
+      if (c.usageExample) parts.push(`  Usage:\n\`\`\`tsx\n${c.usageExample}\n\`\`\``);
     }
   }
 
@@ -1046,6 +1049,7 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     parts.push("\n## WORKING CONVEX SCHEMAS FROM PRIOR BUILDS");
     for (const s of guidance.convexSchemas.slice(0, 3)) {
       parts.push(`- ${s.name} (${s.appClass}): tables: ${s.tables}`);
+      if (s.schemaText) parts.push(`  Schema:\n\`\`\`typescript\n${s.schemaText}\n\`\`\``);
     }
   }
 
@@ -1053,6 +1057,7 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     parts.push("\n## REFERENCE DATA MODELS");
     for (const s of guidance.referenceSchemas.slice(0, 5)) {
       parts.push(`- ${s.name} (${s.domain}): ${s.tables}`);
+      if (s.schemaText) parts.push(`  Schema:\n\`\`\`typescript\n${s.schemaText}\n\`\`\``);
     }
   }
 
@@ -1151,6 +1156,158 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
   }
 
   return parts.length > 0 ? parts.join("\n") : "";
+}
+
+// ─── Reference Code Collection ─────────────────────────────────────
+// Collects actual code artifacts from the BuilderPackage and GraphGuidance
+// to inject as reference material into LLM generation prompts.
+
+interface ReferenceCodeBundle {
+  schema: string;   // Reference code for schema generation
+  queries: string;  // Reference code for query generation
+  mutations: string; // Reference code for mutation generation
+  pages: string;    // Reference code for page/component generation
+  components: string; // Reference code for component generation
+}
+
+/**
+ * Collect reusable code from BuilderPackage source_files and graph_hints,
+ * plus GraphGuidance code samples, into categorized reference blocks.
+ */
+function collectReferenceCode(
+  pkg: BuilderPackage,
+  guidance?: GraphGuidance,
+): ReferenceCodeBundle {
+  const schemaParts: string[] = [];
+  const queryParts: string[] = [];
+  const mutationParts: string[] = [];
+  const pageParts: string[] = [];
+  const componentParts: string[] = [];
+
+  // ── 1. Reusable source files from GitHub (via catalog-searcher) ──
+  for (const [candidateId, entry] of Object.entries(pkg.source_files || {})) {
+    for (const file of entry.files || []) {
+      const path = file.path.toLowerCase();
+      const content = file.content;
+      if (!content || content.length < 30) continue;
+
+      // Cap individual files at 3000 chars to keep context manageable
+      const capped = content.length > 3000 ? content.slice(0, 3000) + "\n// ... (truncated)" : content;
+
+      if (path.includes("schema")) {
+        schemaParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+      } else if (path.includes("quer")) {
+        queryParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+      } else if (path.includes("mutat") || path.includes("action")) {
+        mutationParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+      } else if (path.includes("page") || path.includes("/app/")) {
+        pageParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+      } else if (path.includes("component")) {
+        componentParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+      } else {
+        // General — add to all categories as background reference
+        const shortRef = content.length > 1500 ? content.slice(0, 1500) + "\n// ..." : content;
+        pageParts.push(`// Reference from ${entry.repo} — ${file.path}\n${shortRef}`);
+      }
+    }
+  }
+
+  // ── 2. Graph hints on the BuilderPackage (proven models, schemas) ──
+  if (pkg.graph_hints) {
+    for (const model of pkg.graph_hints.proven_models || []) {
+      if (model.fields) {
+        schemaParts.push(`// Proven model "${model.name}" from ${model.appClass}: fields: ${model.fields}`);
+      }
+    }
+    for (const model of pkg.graph_hints.relevant_models || []) {
+      if (model.fields) {
+        schemaParts.push(`// Relevant model "${model.name}" from ${model.source}: fields: ${model.fields}`);
+      }
+    }
+  }
+
+  // ── 3. GraphGuidance code samples (BuildExtractedPatterns) ──
+  if (guidance) {
+    for (const p of guidance.buildExtractedPatterns || []) {
+      if (p.codeSample && p.codeSample.length > 50) {
+        const type = (p.type || "").toLowerCase();
+        const target = type.includes("schema") ? schemaParts
+          : type.includes("quer") ? queryParts
+          : type.includes("mutat") ? mutationParts
+          : type.includes("component") || type.includes("ui") ? componentParts
+          : pageParts;
+        target.push(`// Build-extracted pattern "${p.name}" (${p.type}):\n${p.codeSample}`);
+      }
+    }
+
+    // ── 4a. Learned model schema sources (Prisma, Drizzle, Convex defineTable) ──
+    for (const m of guidance.learnedModels || []) {
+      if (m.schemaSource && m.schemaSource.length > 50) {
+        schemaParts.push(`// Learned model "${m.name}" schema:\n${m.schemaSource}`);
+      }
+    }
+
+    // ── 4. Convex schema text from prior builds ──
+    for (const s of guidance.convexSchemas || []) {
+      if (s.schemaText && s.schemaText.length > 50) {
+        schemaParts.push(`// Working schema "${s.name}" from ${s.appClass}:\n${s.schemaText}`);
+      }
+    }
+
+    // ── 5. Reference schema text ──
+    for (const s of guidance.referenceSchemas || []) {
+      if (s.schemaText && s.schemaText.length > 50) {
+        schemaParts.push(`// Reference schema "${s.name}" (${s.domain}):\n${s.schemaText}`);
+      }
+    }
+
+    // ── 6. Component patterns with usage examples (cross-app) ──
+    for (const c of guidance.learnedComponentPatterns || []) {
+      if (c.usageExample && c.usageExample.length > 50) {
+        componentParts.push(`// Component "${c.name}" (${c.category}) — adapt this structure:\n${c.usageExample}`);
+      }
+    }
+
+    // ── 7. Form patterns with field definitions ──
+    for (const f of guidance.learnedFormPatterns || []) {
+      if (f.fields || f.validationRules) {
+        pageParts.push(`// Form pattern "${f.name}": fields=${f.fields || "?"}, validation=${f.validationRules || "?"}`);
+      }
+    }
+
+    // ── 8. Cross-domain blueprint — tells LLM which app to reference per domain ──
+    if (guidance.unifiedDomainSources.length > 0) {
+      const blueprintNote: string[] = ["// CROSS-APP REFERENCE MAP — each domain pulls from a different source app:"];
+      for (const ds of guidance.unifiedDomainSources) {
+        if (ds.bestApp && ds.bestApp !== "NONE") {
+          blueprintNote.push(`//   ${ds.domain} → ${ds.bestApp} (features: ${ds.features}, models: ${ds.models})`);
+        }
+      }
+      schemaParts.unshift(blueprintNote.join("\n"));
+      pageParts.unshift(blueprintNote.join("\n"));
+      componentParts.unshift(blueprintNote.join("\n"));
+    }
+  }
+
+  // Compose final blocks — cap total size per category to ~8000 chars
+  const cap = (parts: string[], limit = 8000): string => {
+    const joined: string[] = [];
+    let total = 0;
+    for (const p of parts) {
+      if (total + p.length > limit) break;
+      joined.push(p);
+      total += p.length;
+    }
+    return joined.join("\n\n");
+  };
+
+  return {
+    schema: cap(schemaParts),
+    queries: cap(queryParts),
+    mutations: cap(mutationParts),
+    pages: cap(pageParts),
+    components: cap(componentParts),
+  };
 }
 
 // ─── AppBuilder ─────────────────────────────────────────────────────
@@ -1656,6 +1813,9 @@ export class AppBuilder {
       return { files_created: filesCreated, file_contents: localContents };
     }
 
+    // ── Collect reference code from graph + source files ──────────
+    const refCode = collectReferenceCode(pkg, context?.graphGuidance);
+
     // ── Decomposed build path (generic features) ──────────────────
     // Split the feature into atomic parts, generate each separately,
     // then compose fragments into final files.
@@ -1681,11 +1841,16 @@ export class AppBuilder {
         continue;
       }
 
-      // LLM part — narrow, focused generation
+      // LLM part — narrow, focused generation with reference code
+      const partRefCode = part.kind === "query" ? refCode.queries
+        : part.kind === "mutation" ? refCode.mutations
+        : part.kind === "component" ? refCode.components
+        : part.kind === "validation" ? refCode.schema
+        : refCode.pages;
       let code: string | null = null;
       try {
         const { generateFeaturePart } = await import("../llm/code-gen.js");
-        code = await generateFeaturePart(part.prompt, part.kind);
+        code = await generateFeaturePart(part.prompt, part.kind, partRefCode || undefined);
       } catch {
         // LLM unavailable
       }
@@ -1727,7 +1892,7 @@ export class AppBuilder {
     const hasMutations = filesCreated.some((f) => f.includes("mutations.ts"));
 
     if (!hasQueries || !hasMutations) {
-      await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+      await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
       if (!hasQueries) filesCreated.push(join("convex", featureSlug, "queries.ts"));
       if (!hasMutations) filesCreated.push(join("convex", featureSlug, "mutations.ts"));
     }
@@ -1735,11 +1900,11 @@ export class AppBuilder {
     // Fallback: if no pages were generated, use monolithic page writers
     const hasPages = filesCreated.some((f) => f.startsWith(join("app", featureSlug)));
     if (!hasPages) {
-      await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+      await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
     }
 
     // Components still use monolithic path (they're usually small)
-    await this.writeComponents(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+    await this.writeComponents(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
 
     // Fallback: if no test was generated, use monolithic test writer
     const hasTests = filesCreated.some((f) => f.includes(".test."));
@@ -1853,6 +2018,7 @@ export default function Page() {
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     const tableName = featureSlug.replace(/-/g, "_");
 
@@ -1868,7 +2034,7 @@ export default function Page() {
       // Use code-gen LLM functions if available
       try {
         const { generateConvexQueries } = await import("../llm/code-gen.js");
-        queryContent = await generateConvexQueries(feature, appSpec, schemaRef);
+        queryContent = await generateConvexQueries(feature, appSpec, schemaRef, refCode?.queries);
       } catch {
         // LLM unavailable
       }
@@ -1932,7 +2098,7 @@ export const get = query({
     if (feature && appSpec) {
       try {
         const { generateConvexMutations } = await import("../llm/code-gen.js");
-        mutationContent = await generateConvexMutations(feature, appSpec, schemaRef);
+        mutationContent = await generateConvexMutations(feature, appSpec, schemaRef, refCode?.mutations);
       } catch {
         // LLM unavailable
       }
@@ -2006,6 +2172,7 @@ export const updateStatus = mutation({
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     for (const cap of pkg.included_capabilities) {
       const capLower = cap.toLowerCase();
@@ -2024,11 +2191,11 @@ export const updateStatus = mutation({
       }
 
       if (capLower.includes("form") || capLower.includes("submit") || capLower.includes("create")) {
-        await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+        await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
       } else if (capLower.includes("list") || capLower.includes("queue") || capLower.includes("table") || capLower.includes("history")) {
-        await this.writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+        await this.writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
       } else if (capLower.includes("detail") || capLower.includes("view") || capLower.includes("review")) {
-        await this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+        await this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
       }
     }
   }
@@ -2042,6 +2209,7 @@ export const updateStatus = mutation({
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     const pagePath = join(basePath, "app", featureSlug, capSlug, "page.tsx");
     this.ensureDir(pagePath);
@@ -2050,7 +2218,7 @@ export const updateStatus = mutation({
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        const generated = await generatePage(feature, appSpec, cap, "form");
+        const generated = await generatePage(feature, appSpec, cap, "form", refCode?.pages);
         content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
@@ -2167,12 +2335,13 @@ export default function ${pascalName}Page() {
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     let content: string | null = null;
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        const generated = await generatePage(feature, appSpec, cap, "list");
+        const generated = await generatePage(feature, appSpec, cap, "list", refCode?.pages);
         content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
@@ -2276,12 +2445,13 @@ export default function ${pascalName}Page() {
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     let content: string | null = null;
     if (feature && appSpec) {
       try {
         const { generatePage } = await import("../llm/code-gen.js");
-        const generated = await generatePage(feature, appSpec, cap, "detail");
+        const generated = await generatePage(feature, appSpec, cap, "detail", refCode?.pages);
         content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
       } catch {
         // LLM unavailable
@@ -2379,6 +2549,7 @@ export default function ${pascalName}DetailPage() {
     feature?: BuilderContext["feature"],
     appSpec?: BuilderContext["appSpec"],
     fileContents?: Record<string, string>,
+    refCode?: ReferenceCodeBundle,
   ): Promise<void> {
     const badgePath = join(basePath, "components", featureSlug, "status-badge.tsx");
     this.ensureDir(badgePath);
@@ -2387,7 +2558,7 @@ export default function ${pascalName}DetailPage() {
     if (feature && appSpec) {
       try {
         const { generateComponent } = await import("../llm/code-gen.js");
-        content = await generateComponent(feature, appSpec, "status-badge");
+        content = await generateComponent(feature, appSpec, "status-badge", refCode?.components);
       } catch {
         // LLM unavailable
       }

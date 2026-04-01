@@ -66,6 +66,7 @@ async function callLLM(
   systemPrompt: string,
   userPrompt: string,
   contractPackIds: FrameworkContractPackId[] = [],
+  referenceCode?: string,
 ): Promise<string | null> {
   if (!isLLMAvailable()) return null;
 
@@ -74,9 +75,12 @@ async function callLLM(
 
   const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
   const graphBlock = _activeGraphGuidanceBlock;
+  const refBlock = referenceCode
+    ? `\n\n## REFERENCE CODE FROM PRIOR BUILDS — ADAPT, DO NOT COPY BLINDLY\nThe following code is from prior successful builds in the knowledge graph.\nUse it as a structural reference — adapt field names, table names, and logic to fit the current feature.\nDo NOT copy verbatim if the domain differs. Do reuse proven patterns and structure.\n\n${referenceCode}`
+    : "";
   const slotId = await acquireLLMSlot("code-gen");
   try {
-    const fullSystem = [groundTruth, graphBlock, systemPrompt].filter(Boolean).join("\n\n");
+    const fullSystem = [groundTruth, graphBlock, systemPrompt, refBlock].filter(Boolean).join("\n\n");
     const response = await withTimeout(
       llm.invoke([
         { role: "system", content: fullSystem },
@@ -240,6 +244,7 @@ Import from "@aes/ui": { Button, Input, Textarea, Table, TableHeader, TableBody,
 export async function generateConvexSchema(
   feature: FeatureContext,
   appSpec: AppContext,
+  referenceCode?: string,
 ): Promise<string | null> {
   const system = `${STACK_PREAMBLE}
 
@@ -264,6 +269,7 @@ Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     system,
     `Generate the Convex schema for the "${feature.name}" feature.`,
     ["convex/schema-core"],
+    referenceCode,
   );
 }
 
@@ -271,6 +277,7 @@ export async function generateConvexQueries(
   feature: FeatureContext,
   appSpec: AppContext,
   schemaContent: string,
+  referenceCode?: string,
 ): Promise<string | null> {
   const system = `${STACK_PREAMBLE}
 
@@ -301,6 +308,7 @@ Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     system,
     `Generate Convex queries for "${feature.name}".`,
     ["convex/query-core"],
+    referenceCode,
   );
 }
 
@@ -308,6 +316,7 @@ export async function generateConvexMutations(
   feature: FeatureContext,
   appSpec: AppContext,
   schemaContent: string,
+  referenceCode?: string,
 ): Promise<string | null> {
   const destructiveNote = feature.destructive_actions?.length
     ? `\nThis feature has destructive actions: ${feature.destructive_actions.map(a => a.action_name).join(", ")}. Generate mutations for these with proper guards.`
@@ -347,6 +356,7 @@ Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     system,
     `Generate Convex mutations for "${feature.name}".`,
     ["convex/mutation-core"],
+    referenceCode,
   );
 }
 
@@ -355,6 +365,7 @@ export async function generatePage(
   appSpec: AppContext,
   capability: string,
   pageType: "form" | "list" | "detail",
+  referenceCode?: string,
 ): Promise<string | null> {
   const typeInstructions: Record<string, string> = {
     form: `Generate a form page with:
@@ -406,6 +417,7 @@ Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
     system,
     `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`,
     ["clerk/client-auth", "convex/query-core", "convex/mutation-core"],
+    referenceCode,
   );
 }
 
@@ -413,6 +425,7 @@ export async function generateComponent(
   feature: FeatureContext,
   appSpec: AppContext,
   componentType: string,
+  referenceCode?: string,
 ): Promise<string | null> {
   const system = `${STACK_PREAMBLE}
 ${AES_UI_RULES}
@@ -432,7 +445,7 @@ Generate a reusable component that:
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
 
-  return callLLM(system, `Generate a ${componentType} component for "${feature.name}".`);
+  return callLLM(system, `Generate a ${componentType} component for "${feature.name}".`, [], referenceCode);
 }
 
 export async function generateTest(
@@ -505,6 +518,7 @@ Output ONLY the TypeScript code, no markdown fences, no explanation.`;
 export async function generateFeaturePart(
   partPrompt: string,
   partKind: string,
+  referenceCode?: string,
 ): Promise<string | null> {
   // Map part kinds to contract packs for ground truth injection
   const packMap: Record<string, FrameworkContractPackId[]> = {
@@ -538,5 +552,5 @@ ${retrievedContext}
 Use the retrieved ground truth above as your reference. Match the verified pattern's shape exactly.
 Do ONE strongly grounded generation — do not guess or improvise.`;
 
-  return callLLM(system, partPrompt, packs);
+  return callLLM(system, partPrompt, packs, referenceCode);
 }

@@ -519,7 +519,7 @@ function scanDataModels(root: string): LearnedDataModel[] {
         }
       }
 
-      models.push({ name, category: categorizeModel(name), fields, relations });
+      models.push({ name, category: categorizeModel(name), fields, relations, schema_source: m[0].slice(0, 2000) });
     }
   }
 
@@ -555,11 +555,17 @@ function scanDataModels(root: string): LearnedDataModel[] {
         });
       }
 
+      // Extract the full table definition as source code
+      const tableChunk = content.slice(tableStart, tableStart + 2000);
+      const closingParen = tableChunk.indexOf(");");
+      const tableSource = closingParen > 0 ? tableChunk.slice(0, closingParen + 2) : tableChunk.slice(0, 1000);
+
       models.push({
         name: name.charAt(0).toUpperCase() + name.slice(1),
         category: categorizeModel(name),
         fields,
         relations: [],
+        schema_source: tableSource,
       });
     }
   }
@@ -637,6 +643,58 @@ function scanDataModels(root: string): LearnedDataModel[] {
       }
 
       models.push({ name, category: categorizeModel(name), fields, relations: [] });
+    }
+  }
+
+  // ── Convex schemas: find defineTable() definitions in convex/schema.ts ──
+  const convexSchemaFiles = findFiles(root, /schema\.(ts|js)$/, 6);
+  for (const cf of convexSchemaFiles) {
+    const rel = path.relative(root, cf);
+    if (rel.includes("node_modules") || !rel.includes("convex")) continue;
+    const content = readFile(cf, 500);
+    if (!content.includes("defineTable") && !content.includes("defineSchema")) continue;
+
+    // Match table definitions: tableName: defineTable({ ... })
+    const tableRe = /(\w+)\s*:\s*defineTable\s*\(\s*\{/g;
+    let tm;
+    while ((tm = tableRe.exec(content)) !== null) {
+      const rawName = tm[1];
+      const name = rawName.charAt(0).toUpperCase() + rawName.slice(1).replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      if (seen.has(name)) continue;
+      seen.add(name);
+
+      // Extract field definitions from the defineTable block
+      const fields: LearnedField[] = [];
+      const blockStart = tm.index;
+      const chunk = content.slice(blockStart, blockStart + 2000);
+
+      // Match Convex validators: fieldName: v.string(), v.number(), v.boolean(), v.id("table"), v.optional(v.string())
+      const fieldRe = /(\w+)\s*:\s*v\.(\w+)\s*\(/g;
+      let fm;
+      while ((fm = fieldRe.exec(chunk)) !== null) {
+        const fname = fm[1];
+        const ftype = fm[2];
+        if (fname === "index" || fname === "searchIndex" || fname === "vectorIndex") break; // hit index definitions
+        fields.push({
+          name: fname,
+          type: ftype === "id" ? "id" : ftype,
+          required: ftype !== "optional",
+          is_id: fname === "id" || ftype === "id",
+          is_unique: false,
+        });
+      }
+
+      // Extract the full table definition as source code
+      const tableEnd = chunk.indexOf("),", chunk.indexOf("defineTable"));
+      const tableSource = tableEnd > 0 ? chunk.slice(0, tableEnd + 2) : chunk.slice(0, 1000);
+
+      models.push({
+        name,
+        category: categorizeModel(rawName),
+        fields,
+        relations: [],
+        schema_source: tableSource,
+      });
     }
   }
 
@@ -1124,6 +1182,8 @@ function scanUI(root: string, deps: string[]): LearnedUI {
     uses_effects: boolean;
     line_count: number;
     file_path: string;
+    usage_example?: string;
+    description?: string;
   }
 
   const componentPatterns: ComponentPattern[] = [];
@@ -1188,6 +1248,9 @@ function scanUI(root: string, deps: string[]): LearnedUI {
 
     const cat = catComponent(path.relative(root, filePath), compName);
 
+    // Extract a meaningful code sample — cap at 2000 chars to stay reasonable
+    const codeSample = content.length > 2000 ? content.slice(0, 2000) + "\n// ... (truncated)" : content;
+
     componentPatterns.push({
       name: compName,
       category: cat,
@@ -1197,6 +1260,8 @@ function scanUI(root: string, deps: string[]): LearnedUI {
       uses_effects: /useEffect|useMemo|useCallback|useQuery|useMutation/.test(content),
       line_count: content.split("\n").length,
       file_path: path.relative(root, filePath),
+      usage_example: codeSample,
+      description: `${cat} component with ${props.length} props, ${children.size} child components`,
     });
   }
 
@@ -2048,6 +2113,7 @@ MERGE (m:${L.data_model} {name: '${esc(dm.name)}', source: '${esc(sid)}'})
 SET m.category = '${esc(dm.category)}', m.field_count = ${dm.fields.length},
     m.relation_count = ${dm.relations.length}, m.fields = '${esc(fieldSummary)}',
     m.relations = '${esc(relSummary)}',
+    m.schema_source = '${esc((dm as any).schema_source || "")}',
     m.scan_version = '${esc(scanVersion)}'
 WITH m
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})
@@ -2119,12 +2185,14 @@ RETURN c.name
     await w(`
 MERGE (c:LearnedComponentPattern {name: '${esc(cp.name)}', source: '${esc(sid)}'})
 SET c.category = '${esc(cp.category)}',
+    c.description = '${esc(cp.description || "")}',
     c.props = '${esc(cp.props.join(", "))}',
     c.child_components = '${esc(cp.child_components.join(", "))}',
     c.uses_state = ${cp.uses_state},
     c.uses_effects = ${cp.uses_effects},
     c.line_count = ${cp.line_count},
     c.file_path = '${esc(cp.file_path)}',
+    c.usage_example = '${esc(cp.usage_example || "")}',
     c.scan_version = '${esc(scanVersion)}'
 WITH c
 MATCH (a:${L.app} {source_id: '${esc(sid)}'})

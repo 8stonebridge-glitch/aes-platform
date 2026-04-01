@@ -69,6 +69,7 @@ export interface LearnedDataModel {
   category: DataModelCategory;
   fields: LearnedField[];
   relations: LearnedRelation[];
+  schema_source?: string;                   // Actual schema source code (Prisma model, Drizzle table, Convex schema)
 }
 
 export type DataModelCategory =

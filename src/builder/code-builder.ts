@@ -271,7 +271,7 @@ export interface GraphGuidance {
   /** Learned feature structures from prior builds */
   learnedFeatures: { name: string; description: string; capabilities?: string }[];
   /** Learned data models from prior builds */
-  learnedModels: { name: string; fields: string }[];
+  learnedModels: { name: string; fields: string; schemaSource?: string }[];
   /** Learned integrations from prior builds */
   learnedIntegrations: { name: string; type: string; description: string }[];
   /** Learned UI/data flow patterns */
@@ -301,9 +301,9 @@ export interface GraphGuidance {
   /** Fix patterns — known fix strategies for recurring errors */
   fixPatterns: { name: string; errorPattern: string; fixStrategy: string; successRate?: string }[];
   /** Working Convex schemas from prior builds */
-  convexSchemas: { name: string; tables: string; appClass: string }[];
+  convexSchemas: { name: string; tables: string; appClass: string; schemaText?: string }[];
   /** Reference data model templates */
-  referenceSchemas: { name: string; domain: string; tables: string }[];
+  referenceSchemas: { name: string; domain: string; tables: string; schemaText?: string }[];
   /** AES system lessons */
   aesLessons: { title: string; summary: string; category: string }[];
   /** Proven app architecture blueprints */
