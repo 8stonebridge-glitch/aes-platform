@@ -11,4 +11,8 @@
  * completes gracefully — the build is still successful, just not deployed.
  */
 import type { AESStateType } from "../state.js";
+export declare function resumeCompileGate(jobId: string, workspacePath: string): Promise<{
+    passed: boolean;
+    errorMessage?: string;
+}>;
 export declare function deploymentHandler(state: AESStateType): Promise<Partial<AESStateType>>;

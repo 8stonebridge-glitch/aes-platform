@@ -41,4 +41,11 @@ export declare function generateTest(feature: FeatureContext, testDef: {
     name: string;
     pass_condition: string;
 }): Promise<string | null>;
+/**
+ * Generate code for a single feature part.
+ * Uses a narrow, focused prompt instead of generating an entire file.
+ * The part's prompt is already scoped to a specific concern
+ * (e.g., "just the form body", "just the submit handler").
+ */
+export declare function generateFeaturePart(partPrompt: string, partKind: string): Promise<string | null>;
 export {};

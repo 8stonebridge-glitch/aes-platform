@@ -27,8 +27,8 @@ export declare const IntentBriefSchema: z.ZodObject<{
         regulated: "regulated";
     }>;
     inferred_integrations: z.ZodArray<z.ZodEnum<{
-        payments: "payments";
         email: "email";
+        payments: "payments";
         sms: "sms";
         storage: "storage";
         maps: "maps";
@@ -65,8 +65,8 @@ export declare const AppSpecSchema: z.ZodObject<{
         description: z.ZodString;
         scope: z.ZodEnum<{
             org: "org";
-            global: "global";
             account: "account";
+            global: "global";
             self: "self";
         }>;
         inherits_from: z.ZodArray<z.ZodString>;

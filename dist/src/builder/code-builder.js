@@ -140,6 +140,23 @@ function normalizeClerkUseAuthBindings(content) {
     if (/\bconst\s*{\s*[^}]*\borgId\b[^}]*}\s*=\s*useAuth\(\)\s*;/.test(normalized)) {
         normalized = normalized.replace(/\borg\b/g, "orgId");
     }
+    const useAuthBindingRegex = /const\s*{\s*([^}]*)}\s*=\s*useAuth\(\)\s*;/g;
+    const bindingMatches = Array.from(normalized.matchAll(useAuthBindingRegex));
+    if (bindingMatches.length > 1) {
+        const mergedNames = Array.from(new Set(bindingMatches
+            .flatMap((match) => match[1].split(","))
+            .map((name) => name.trim())
+            .filter(Boolean)
+            .map((name) => (name === "org" ? "orgId" : name))));
+        let seen = false;
+        normalized = normalized.replace(useAuthBindingRegex, () => {
+            if (seen)
+                return "";
+            seen = true;
+            return `const { ${mergedNames.join(", ")} } = useAuth();`;
+        });
+        normalized = normalized.replace(/\n{3,}/g, "\n\n");
+    }
     return normalized;
 }
 function normalizeConvexHandlerBindings(content) {

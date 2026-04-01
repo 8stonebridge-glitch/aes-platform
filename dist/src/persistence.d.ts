@@ -4,7 +4,7 @@
  * Reads back for replay and reconstruction.
  */
 export declare function ensureUUID(id: string): string;
-import type { IntentBrief, AppSpec, FeatureBridge, ValidationResult, VetoResult, ApprovalRecord, LogEntry, FixTrailEntry, BuilderRunRecord } from "./types/artifacts.js";
+import type { IntentBrief, AppSpec, FeatureBridge, ValidationResult, VetoResult, ApprovalRecord, LogEntry, FixTrailEntry, BuilderRunRecord, CheckpointRecord } from "./types/artifacts.js";
 export interface JobSnapshotRow {
     job_id: string;
     request_id?: string | null;
@@ -66,5 +66,8 @@ export declare class PersistenceLayer {
     persistJobSnapshot(jobId: string, snapshot: JobSnapshotRow): Promise<void>;
     loadJobSnapshot(jobId: string): Promise<JobSnapshotRow | null>;
     listJobSnapshots(limit?: number): Promise<JobSnapshotRow[]>;
+    persistCheckpoint(record: CheckpointRecord): Promise<void>;
+    listCheckpoints(jobId: string, limit?: number): Promise<CheckpointRecord[]>;
+    loadLatestCheckpoint(jobId: string): Promise<CheckpointRecord | null>;
     close(): Promise<void>;
 }

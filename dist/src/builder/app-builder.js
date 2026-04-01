@@ -18,6 +18,8 @@ import { RepoScaffolder } from "../deploy/repo-scaffolder.js";
 import { compileBuilderPackage } from "../builder-artifact.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import { generateAppLayout, generateSidebar, generateDashboard, generateUnifiedSchema, } from "../llm/app-gen.js";
+import { matchFeatureArchetype, deriveArchetypeSlots, renderArchetypeFiles, } from "../contracts/framework-contract-layer.js";
+import { decomposeFeature, composeFile, getTargetFiles, dependenciesSatisfied, } from "./feature-parts.js";
 // ─── Template fallbacks ─────────────────────────────────────────────
 function toSlug(name) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -131,6 +133,23 @@ function normalizeClerkUseAuthBindings(content) {
     });
     if (/\bconst\s*{\s*[^}]*\borgId\b[^}]*}\s*=\s*useAuth\(\)\s*;/.test(normalized)) {
         normalized = normalized.replace(/\borg\b/g, "orgId");
+    }
+    const useAuthBindingRegex = /const\s*{\s*([^}]*)}\s*=\s*useAuth\(\)\s*;/g;
+    const bindingMatches = Array.from(normalized.matchAll(useAuthBindingRegex));
+    if (bindingMatches.length > 1) {
+        const mergedNames = Array.from(new Set(bindingMatches
+            .flatMap((match) => match[1].split(","))
+            .map((name) => name.trim())
+            .filter(Boolean)
+            .map((name) => (name === "org" ? "orgId" : name))));
+        let seen = false;
+        normalized = normalized.replace(useAuthBindingRegex, () => {
+            if (seen)
+                return "";
+            seen = true;
+            return `const { ${mergedNames.join(", ")} } = useAuth();`;
+        });
+        normalized = normalized.replace(/\n{3,}/g, "\n\n");
     }
     return normalized;
 }
@@ -653,15 +672,156 @@ export class AppBuilder {
         const filesCreated = [];
         const feature = context?.feature;
         const appSpec = context?.appSpec;
-        // 1. Generate Convex server functions (skip schema — unified handles that)
-        await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
-        filesCreated.push(join("convex", featureSlug, "queries.ts"), join("convex", featureSlug, "mutations.ts"));
-        // 2. Generate UI pages
-        await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
-        // 3. Generate UI components
+        // ── Archetype intercept ──────────────────────────────────────────
+        // For hard feature types (settings, auth, org-management, profile,
+        // admin-panel), use pre-approved fixed blocks instead of LLM.
+        const archetype = matchFeatureArchetype(pkg.feature_name, pkg.objective, pkg.included_capabilities);
+        if (archetype) {
+            const slots = deriveArchetypeSlots(pkg.feature_name, archetype);
+            const rendered = renderArchetypeFiles(archetype, slots);
+            // Write queries
+            if (rendered.queries) {
+                const qPath = join(workspacePath, "convex", featureSlug, "queries.ts");
+                this.ensureDir(qPath);
+                const normalized = normalizeGeneratedSource(rendered.queries);
+                writeFileSync(qPath, normalized);
+                const rel = relative(workspacePath, qPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Write mutations
+            if (rendered.mutations) {
+                const mPath = join(workspacePath, "convex", featureSlug, "mutations.ts");
+                this.ensureDir(mPath);
+                const normalized = normalizeGeneratedSource(rendered.mutations);
+                writeFileSync(mPath, normalized);
+                const rel = relative(workspacePath, mPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Write list page
+            if (rendered.listPage) {
+                const lPath = join(workspacePath, "app", featureSlug, "page.tsx");
+                this.ensureDir(lPath);
+                const normalized = normalizeGeneratedSource(rendered.listPage);
+                writeFileSync(lPath, normalized);
+                const rel = relative(workspacePath, lPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Write form page
+            if (rendered.formPage) {
+                const capSlug = archetype.id === "auth" ? "sign-in" : "edit";
+                const fPath = join(workspacePath, "app", featureSlug, capSlug, "page.tsx");
+                this.ensureDir(fPath);
+                const normalized = normalizeGeneratedSource(rendered.formPage);
+                writeFileSync(fPath, normalized);
+                const rel = relative(workspacePath, fPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Write detail/secondary page (sign-up for auth, etc.)
+            if (rendered.detailPage) {
+                const capSlug = archetype.id === "auth" ? "sign-up" : "[id]";
+                const dPath = join(workspacePath, "app", featureSlug, capSlug, "page.tsx");
+                this.ensureDir(dPath);
+                const normalized = normalizeGeneratedSource(rendered.detailPage);
+                writeFileSync(dPath, normalized);
+                const rel = relative(workspacePath, dPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Write test
+            if (rendered.test) {
+                const tPath = join(workspacePath, "tests", featureSlug, `${featureSlug}.test.ts`);
+                this.ensureDir(tPath);
+                const normalized = normalizeGeneratedSource(rendered.test);
+                writeFileSync(tPath, normalized);
+                const rel = relative(workspacePath, tPath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
+            // Merge into caller's fileContents
+            if (fileContents) {
+                Object.assign(fileContents, localContents);
+            }
+            return { files_created: filesCreated, file_contents: localContents };
+        }
+        // ── Decomposed build path (generic features) ──────────────────
+        // Split the feature into atomic parts, generate each separately,
+        // then compose fragments into final files.
+        const decomposed = decomposeFeature(pkg, context);
+        const fragments = [];
+        const completedKinds = new Set();
+        // Process parts in dependency order
+        // Deterministic parts run immediately; LLM parts call generateFeaturePart
+        for (const part of decomposed.parts) {
+            // Check dependencies
+            if (!dependenciesSatisfied(part, completedKinds)) {
+                // Dependencies not met — skip (shouldn't happen with correct ordering)
+                fragments.push({ part, code: "", success: false, error: "dependencies not satisfied" });
+                continue;
+            }
+            if (part.deterministic) {
+                // Deterministic part — use preamble directly, no LLM
+                fragments.push({ part, code: part.preamble || "", success: true });
+                completedKinds.add(part.kind);
+                continue;
+            }
+            // LLM part — narrow, focused generation
+            let code = null;
+            try {
+                const { generateFeaturePart } = await import("../llm/code-gen.js");
+                code = await generateFeaturePart(part.prompt, part.kind);
+            }
+            catch {
+                // LLM unavailable
+            }
+            if (code) {
+                fragments.push({ part, code, success: true });
+            }
+            else {
+                // LLM failed — mark as failed but continue (other parts still run)
+                fragments.push({ part, code: "", success: false, error: "LLM unavailable or failed" });
+            }
+            completedKinds.add(part.kind);
+        }
+        // Compose fragments into final files
+        for (const targetFile of getTargetFiles(decomposed)) {
+            const composed = composeFile(targetFile, fragments);
+            if (!composed)
+                continue;
+            const filePath = join(workspacePath, targetFile);
+            this.ensureDir(filePath);
+            const normalized = normalizeGeneratedSource(composed);
+            writeFileSync(filePath, normalized);
+            const rel = relative(workspacePath, filePath);
+            localContents[rel] = normalized;
+            filesCreated.push(rel);
+        }
+        // Fallback: if decomposed path produced no query/mutation files
+        // (e.g., LLM was unavailable for all parts), use the old monolithic templates
+        const hasQueries = filesCreated.some((f) => f.includes("queries.ts"));
+        const hasMutations = filesCreated.some((f) => f.includes("mutations.ts"));
+        if (!hasQueries || !hasMutations) {
+            await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+            if (!hasQueries)
+                filesCreated.push(join("convex", featureSlug, "queries.ts"));
+            if (!hasMutations)
+                filesCreated.push(join("convex", featureSlug, "mutations.ts"));
+        }
+        // Fallback: if no pages were generated, use monolithic page writers
+        const hasPages = filesCreated.some((f) => f.startsWith(join("app", featureSlug)));
+        if (!hasPages) {
+            await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+        }
+        // Components still use monolithic path (they're usually small)
         await this.writeComponents(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
-        // 4. Generate tests
-        await this.writeTests(workspacePath, featureSlug, pkg, feature, localContents);
+        // Fallback: if no test was generated, use monolithic test writer
+        const hasTests = filesCreated.some((f) => f.includes(".test."));
+        if (!hasTests) {
+            await this.writeTests(workspacePath, featureSlug, pkg, feature, localContents);
+        }
         // Collect all files created
         const allFiles = Object.keys(localContents);
         filesCreated.push(...allFiles.filter((f) => !filesCreated.includes(f)));

@@ -1,9 +1,13 @@
 import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { runGraph } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { getLLMSemaphoreStats, resetLLMSemaphore } from "../llm/provider.js";
+import { CANARY_DEFINITIONS } from "../canary-definitions.js";
+import { resumeCompileGate } from "../nodes/deployment-handler.js";
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -30,6 +34,23 @@ function apiKeyAuth(req, res, next) {
     res.status(401).json({ error: "Unauthorized" });
 }
 app.use(apiKeyAuth);
+async function ensurePersistenceIfConfigured() {
+    const store = getJobStore();
+    if (store.hasPersistence())
+        return;
+    const pgUrl = process.env.AES_POSTGRES_URL;
+    if (!pgUrl)
+        return;
+    try {
+        const { PersistenceLayer } = await import("../persistence.js");
+        const persistence = new PersistenceLayer(pgUrl);
+        await persistence.initialize();
+        store.setPersistence(persistence);
+    }
+    catch (err) {
+        console.error("[server] Failed to initialize Postgres persistence:", err?.message || err);
+    }
+}
 // Active job streams (Server-Sent Events)
 const jobStreams = new Map();
 // Event buffer — stores events so clients connecting late get a full replay
@@ -888,17 +909,46 @@ app.get("/api/graph/visualize", async (req, res) => {
 // Build fingerprint — changes on every deploy so Hermes can detect stale containers
 const BUILD_ID = `b-${Date.now().toString(36)}`;
 const BOOT_TIME = new Date().toISOString();
+const COMMIT_SHA = resolveCommitSha();
+const COMMIT_SHORT = COMMIT_SHA ? COMMIT_SHA.slice(0, 7) : null;
 app.get("/api/health", (_req, res) => {
     const sem = getLLMSemaphoreStats();
     res.json({
         status: "ok",
         version: "v15",
         build_id: BUILD_ID,
+        commit_sha: COMMIT_SHA,
+        commit_short: COMMIT_SHORT,
         booted_at: BOOT_TIME,
         math_layer: true,
         llm_slots: { active: sem.activeSlots, max: sem.maxSlots, queued: sem.queueLength },
     });
 });
+function resolveCommitSha() {
+    const envCandidates = [
+        process.env.AES_GIT_COMMIT_SHA,
+        process.env.RAILWAY_GIT_COMMIT_SHA,
+        process.env.GIT_COMMIT,
+        process.env.COMMIT_SHA,
+        process.env.SOURCE_COMMIT,
+    ];
+    for (const candidate of envCandidates) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+            return candidate.trim();
+        }
+    }
+    try {
+        const sha = execSync("git rev-parse HEAD", {
+            cwd: process.cwd(),
+            stdio: ["ignore", "pipe", "ignore"],
+            encoding: "utf8",
+        }).trim();
+        return sha.length > 0 ? sha : null;
+    }
+    catch {
+        return null;
+    }
+}
 // ─── Debug / admin endpoints ──────────────────────────────────────
 app.get("/api/debug/semaphore", apiKeyAuth, (_req, res) => {
     res.json(getLLMSemaphoreStats());
@@ -959,26 +1009,7 @@ async function initializePersistenceOnBoot() {
         console.warn(`[persistence] Bootstrap failed: ${err?.message || String(err)}`);
     }
 }
-const CANARY_DEFINITIONS = {
-    "shoutout-board": {
-        slug: "shoutout-board",
-        title: "Team Shoutout Board",
-        description: "A team recognition app where org members can post shoutouts to colleagues. Features: create/list shoutouts by org, Clerk auth for user identity, org-scoped queries with withIndex, real-time list view.",
-        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/middleware"],
-    },
-    "inventory-tool": {
-        slug: "inventory-tool",
-        title: "Inventory Tracker",
-        description: "An inventory management tool with categories, items, and stock levels. Features: schema with typed ID relations between categories and items, withIndex access for filtered views, CRUD mutations, status badges.",
-        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/server-auth", "clerk/middleware"],
-    },
-    "ticket-portal": {
-        slug: "ticket-portal",
-        title: "Support Ticket Portal",
-        description: "A customer support ticket system with middleware-protected routes and server-side auth. Features: clerkMiddleware for route protection, server-side auth() in API routes, action handlers for ticket assignment, status transitions with audit trail.",
-        exercisedPacks: ["convex/query-core", "convex/mutation-core", "convex/schema-core", "clerk/client-auth", "clerk/server-auth", "clerk/middleware"],
-    },
-};
+// ─── Canary builds — fixed intents for quality signal tracking ─────
 // GET /api/canary — list all canary definitions
 app.get("/api/canary", (_req, res) => {
     res.json({
@@ -1108,6 +1139,52 @@ app.get("/api/canary/:slug/results", (req, res) => {
         jobs: canaryJobs,
     });
 });
+// ─── Checkpoints & resume ─────────────────────────────────────────────
+app.get("/api/jobs/:id/checkpoints", async (req, res) => {
+    await ensurePersistenceIfConfigured();
+    const store = getJobStore();
+    const checkpoints = await store.listCheckpoints(req.params.id, 50);
+    res.json({ jobId: req.params.id, checkpoints });
+});
+app.get("/api/jobs/:id/checkpoints/latest", async (req, res) => {
+    await ensurePersistenceIfConfigured();
+    const store = getJobStore();
+    const checkpoint = await store.latestCheckpoint(req.params.id);
+    if (!checkpoint) {
+        res.status(404).json({ error: "No checkpoints found" });
+        return;
+    }
+    res.json(checkpoint);
+});
+app.post("/api/jobs/:id/resume/compile", async (req, res) => {
+    await ensurePersistenceIfConfigured();
+    const store = getJobStore();
+    const checkpoint = await store.latestCheckpoint(req.params.id);
+    if (!checkpoint) {
+        res.status(404).json({ error: "No checkpoint for job" });
+        return;
+    }
+    if (checkpoint.gate !== "compile_gate") {
+        res.status(400).json({ error: `Latest checkpoint is ${checkpoint.gate}, not compile_gate` });
+        return;
+    }
+    if (checkpoint.resume_eligible === false) {
+        res.status(409).json({ error: "Checkpoint marked as not resume-eligible", reason: checkpoint.resume_reason });
+        return;
+    }
+    const workspacePath = checkpoint.workspace_path;
+    if (!workspacePath || !existsSync(workspacePath)) {
+        res.status(410).json({ error: "Workspace no longer exists for checkpoint", workspacePath });
+        return;
+    }
+    try {
+        const result = await resumeCompileGate(req.params.id, workspacePath);
+        res.json({ jobId: req.params.id, workspacePath, result });
+    }
+    catch (err) {
+        res.status(500).json({ error: err?.message || "Resume failed" });
+    }
+});
 export function startServer() {
     void initializePersistenceOnBoot();
     // Bind to :: (IPv6 + IPv4) for Railway private networking compatibility
@@ -1130,6 +1207,9 @@ export function startServer() {
         console.log(`  GET  /api/canary                         — List canary definitions`);
         console.log(`  POST /api/canary/:slug/run               — Trigger canary build`);
         console.log(`  GET  /api/canary/:slug/results           — Canary success rate`);
+        console.log(`  GET  /api/jobs/:id/checkpoints           — List checkpoints`);
+        console.log(`  GET  /api/jobs/:id/checkpoints/latest    — Latest checkpoint`);
+        console.log(`  POST /api/jobs/:id/resume/compile        — Resume from compile gate`);
     });
     return app;
 }

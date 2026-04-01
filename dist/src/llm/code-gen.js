@@ -6,6 +6,7 @@
  */
 import { getLLM, isLLMAvailable, acquireLLMSlot, releaseLLMSlot } from "./provider.js";
 import { getGenerationGroundTruthForPacks } from "./current-api-context.js";
+import { retrieveVerifiedContextForPart } from "../contracts/framework-contract-layer.js";
 const LLM_TIMEOUT_MS = 30_000;
 /** Race a promise against a timeout; resolves to null on timeout. */
 function withTimeout(promise, ms) {
@@ -345,7 +346,8 @@ Pass condition: ${testDef.pass_condition}
 
 IMPORTS — HARD RULES:
   ✅ import { describe, it, expect, vi, beforeEach } from 'vitest';
-  ✅ import { render, fireEvent } from '@testing-library/react';
+  ✅ import { render } from '@testing-library/react';
+  ✅ import { fireEvent } from '@testing-library/dom';
   ✅ import '@testing-library/jest-dom/vitest';
   ✅ import React from 'react';
   ✅ import { SomeComponent } from '@/components/...';   ← only if path is known to exist
@@ -380,4 +382,42 @@ ASSERTIONS:
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
     return callLLM(system, `Generate a test for "${testDef.name}" with pass condition: "${testDef.pass_condition}".`, ["test/vitest-core"]);
+}
+// ─── Part-scoped generation ─────────────────────────────────────────
+/**
+ * Generate code for a single feature part.
+ * Uses a narrow, focused prompt instead of generating an entire file.
+ * The part's prompt is already scoped to a specific concern
+ * (e.g., "just the form body", "just the submit handler").
+ */
+export async function generateFeaturePart(partPrompt, partKind) {
+    // Map part kinds to contract packs for ground truth injection
+    const packMap = {
+        "query": ["convex/query-core"],
+        "mutation": ["convex/mutation-core"],
+        "page-shell": ["clerk/client-auth"],
+        "auth-guard": ["clerk/client-auth"],
+        "data-loader": ["convex/query-core", "clerk/client-auth"],
+        "form-body": ["clerk/client-auth"],
+        "submit-handler": ["convex/mutation-core", "clerk/client-auth"],
+        "validation": [],
+        "test": ["test/vitest-core"],
+        "component": ["clerk/client-auth"],
+    };
+    const packs = packMap[partKind] || [];
+    // ── Retrieval-first: pull verified patterns before generating ──
+    const retrievedContext = retrieveVerifiedContextForPart(partKind);
+    const system = `${STACK_PREAMBLE}
+
+You are generating a SINGLE PART of a feature — not a complete file.
+Output ONLY the requested code fragment. No imports unless specifically needed.
+No markdown fences. No explanation. No file header.
+
+Part type: ${partKind}
+
+${retrievedContext}
+
+Use the retrieved ground truth above as your reference. Match the verified pattern's shape exactly.
+Do ONE strongly grounded generation — do not guess or improvise.`;
+    return callLLM(system, partPrompt, packs);
 }

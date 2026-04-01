@@ -4,7 +4,7 @@
  * Postgres for durability and replay.
  */
 import type { PersistenceLayer } from "./persistence.js";
-import type { IntentBrief, AppSpec, FeatureBridge, ValidationResult, VetoResult, LogEntry, FixTrailEntry, BuilderRunRecord } from "./types/artifacts.js";
+import type { IntentBrief, AppSpec, FeatureBridge, ValidationResult, VetoResult, LogEntry, FixTrailEntry, BuilderRunRecord, CheckpointRecord } from "./types/artifacts.js";
 export type DurabilityStatus = "confirmed" | "partial" | "persisted" | "memory_only";
 export interface JobRecord {
     jobId: string;
@@ -62,6 +62,7 @@ interface HermesRepairOutcomeEvent {
 export declare class JobStore {
     private jobs;
     private logs;
+    private checkpoints;
     private latestJobId;
     private persistence;
     private dbAvailable;
@@ -79,6 +80,9 @@ export declare class JobStore {
      * persistence interface if available, otherwise is a no-op.
      */
     initSchema(): Promise<void>;
+    addCheckpoint(record: CheckpointRecord): Promise<void>;
+    listCheckpoints(jobId: string, limit?: number): Promise<CheckpointRecord[]>;
+    latestCheckpoint(jobId: string): Promise<CheckpointRecord | null>;
     /**
      * Test the database connection by running a trivial query.
      * Returns true if the connection is healthy, false otherwise.
