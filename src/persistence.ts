@@ -49,6 +49,7 @@ import type {
   LogEntry,
   FixTrailEntry,
   BuilderRunRecord,
+  CheckpointRecord,
 } from "./types/artifacts.js";
 import { CURRENT_SCHEMA_VERSION } from "./types/artifacts.js";
 
@@ -640,6 +641,113 @@ export class PersistenceLayer {
       ...r,
       updated_at: r.updated_at?.toISOString?.() ?? r.updated_at,
     }));
+  }
+
+  // ─── Checkpoints (resume metadata) ───────────────────────────────
+
+  async persistCheckpoint(record: CheckpointRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO job_checkpoints (
+        checkpoint_id, job_id, gate, status, last_successful_gate,
+        workspace_path, feature_ids, contract_packs, archetypes,
+        env_snapshot, artifacts, raw_error, summarized_error,
+        resume_eligible, resume_reason, invalidation_scope, schema_version
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17
+      )
+      ON CONFLICT (checkpoint_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        last_successful_gate = EXCLUDED.last_successful_gate,
+        workspace_path = EXCLUDED.workspace_path,
+        feature_ids = EXCLUDED.feature_ids,
+        contract_packs = EXCLUDED.contract_packs,
+        archetypes = EXCLUDED.archetypes,
+        env_snapshot = EXCLUDED.env_snapshot,
+        artifacts = EXCLUDED.artifacts,
+        raw_error = EXCLUDED.raw_error,
+        summarized_error = EXCLUDED.summarized_error,
+        resume_eligible = EXCLUDED.resume_eligible,
+        resume_reason = EXCLUDED.resume_reason,
+        invalidation_scope = EXCLUDED.invalidation_scope,
+        updated_at = now()`,
+      [
+        record.checkpoint_id,
+        record.job_id,
+        record.gate,
+        record.status,
+        record.last_successful_gate ?? null,
+        record.workspace_path ?? null,
+        record.feature_ids ?? null,
+        record.contract_packs ?? null,
+        record.archetypes ?? null,
+        record.env_snapshot ? JSON.stringify(record.env_snapshot) : null,
+        record.artifacts ? JSON.stringify(record.artifacts) : null,
+        record.raw_error ?? null,
+        record.summarized_error ?? null,
+        record.resume_eligible ?? false,
+        record.resume_reason ?? null,
+        record.invalidation_scope ?? null,
+        record.schema_version ?? CURRENT_SCHEMA_VERSION,
+      ]
+    );
+  }
+
+  async listCheckpoints(jobId: string, limit = 25): Promise<CheckpointRecord[]> {
+    const res = await this.pool.query(
+      `SELECT * FROM job_checkpoints WHERE job_id = $1 ORDER BY created_at DESC LIMIT $2`,
+      [jobId, limit]
+    );
+    return res.rows.map((r) => ({
+      checkpoint_id: r.checkpoint_id,
+      job_id: r.job_id,
+      gate: r.gate,
+      status: r.status,
+      last_successful_gate: r.last_successful_gate,
+      workspace_path: r.workspace_path,
+      feature_ids: r.feature_ids || [],
+      contract_packs: r.contract_packs || [],
+      archetypes: r.archetypes || [],
+      env_snapshot: r.env_snapshot || null,
+      artifacts: r.artifacts || null,
+      raw_error: r.raw_error || null,
+      summarized_error: r.summarized_error || null,
+      resume_eligible: r.resume_eligible,
+      resume_reason: r.resume_reason,
+      invalidation_scope: r.invalidation_scope || [],
+      schema_version: r.schema_version ?? CURRENT_SCHEMA_VERSION,
+      created_at: r.created_at?.toISOString?.() ?? r.created_at,
+      updated_at: r.updated_at?.toISOString?.() ?? r.updated_at,
+    }));
+  }
+
+  async loadLatestCheckpoint(jobId: string): Promise<CheckpointRecord | null> {
+    const res = await this.pool.query(
+      `SELECT * FROM job_checkpoints WHERE job_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [jobId]
+    );
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      checkpoint_id: r.checkpoint_id,
+      job_id: r.job_id,
+      gate: r.gate,
+      status: r.status,
+      last_successful_gate: r.last_successful_gate,
+      workspace_path: r.workspace_path,
+      feature_ids: r.feature_ids || [],
+      contract_packs: r.contract_packs || [],
+      archetypes: r.archetypes || [],
+      env_snapshot: r.env_snapshot || null,
+      artifacts: r.artifacts || null,
+      raw_error: r.raw_error || null,
+      summarized_error: r.summarized_error || null,
+      resume_eligible: r.resume_eligible,
+      resume_reason: r.resume_reason,
+      invalidation_scope: r.invalidation_scope || [],
+      schema_version: r.schema_version ?? CURRENT_SCHEMA_VERSION,
+      created_at: r.created_at?.toISOString?.() ?? r.created_at,
+      updated_at: r.updated_at?.toISOString?.() ?? r.updated_at,
+    };
   }
 
   async close(): Promise<void> {

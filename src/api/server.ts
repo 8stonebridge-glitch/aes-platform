@@ -2,10 +2,12 @@ import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { runGraph, type GraphCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { getLLMSemaphoreStats, resetLLMSemaphore } from "../llm/provider.js";
 import { CANARY_DEFINITIONS } from "../canary-definitions.js";
+import { resumeCompileGate } from "../nodes/deployment-handler.js";
 
 const app = express();
 app.use(cors());
@@ -41,6 +43,21 @@ function apiKeyAuth(req: express.Request, res: express.Response, next: express.N
 }
 
 app.use(apiKeyAuth);
+
+async function ensurePersistenceIfConfigured() {
+  const store = getJobStore();
+  if (store.hasPersistence()) return;
+  const pgUrl = process.env.AES_POSTGRES_URL;
+  if (!pgUrl) return;
+  try {
+    const { PersistenceLayer } = await import("../persistence.js");
+    const persistence = new PersistenceLayer(pgUrl);
+    await persistence.initialize();
+    store.setPersistence(persistence);
+  } catch (err: any) {
+    console.error("[server] Failed to initialize Postgres persistence:", err?.message || err);
+  }
+}
 
 // Active job streams (Server-Sent Events)
 const jobStreams = new Map<string, express.Response[]>();
@@ -1282,6 +1299,56 @@ app.get("/api/canary/:slug/results", (req, res) => {
   });
 });
 
+// ─── Checkpoints & resume ─────────────────────────────────────────────
+
+app.get("/api/jobs/:id/checkpoints", async (req, res) => {
+  await ensurePersistenceIfConfigured();
+  const store = getJobStore();
+  const checkpoints = await store.listCheckpoints(req.params.id, 50);
+  res.json({ jobId: req.params.id, checkpoints });
+});
+
+app.get("/api/jobs/:id/checkpoints/latest", async (req, res) => {
+  await ensurePersistenceIfConfigured();
+  const store = getJobStore();
+  const checkpoint = await store.latestCheckpoint(req.params.id);
+  if (!checkpoint) {
+    res.status(404).json({ error: "No checkpoints found" });
+    return;
+  }
+  res.json(checkpoint);
+});
+
+app.post("/api/jobs/:id/resume/compile", async (req, res) => {
+  await ensurePersistenceIfConfigured();
+  const store = getJobStore();
+  const checkpoint = await store.latestCheckpoint(req.params.id);
+  if (!checkpoint) {
+    res.status(404).json({ error: "No checkpoint for job" });
+    return;
+  }
+  if (checkpoint.gate !== "compile_gate") {
+    res.status(400).json({ error: `Latest checkpoint is ${checkpoint.gate}, not compile_gate` });
+    return;
+  }
+  if (checkpoint.resume_eligible === false) {
+    res.status(409).json({ error: "Checkpoint marked as not resume-eligible", reason: checkpoint.resume_reason });
+    return;
+  }
+  const workspacePath = checkpoint.workspace_path;
+  if (!workspacePath || !existsSync(workspacePath)) {
+    res.status(410).json({ error: "Workspace no longer exists for checkpoint", workspacePath });
+    return;
+  }
+
+  try {
+    const result = await resumeCompileGate(req.params.id, workspacePath);
+    res.json({ jobId: req.params.id, workspacePath, result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || "Resume failed" });
+  }
+});
+
 export function startServer() {
   void initializePersistenceOnBoot();
 
@@ -1305,6 +1372,9 @@ export function startServer() {
     console.log(`  GET  /api/canary                         — List canary definitions`);
     console.log(`  POST /api/canary/:slug/run               — Trigger canary build`);
     console.log(`  GET  /api/canary/:slug/results           — Canary success rate`);
+    console.log(`  GET  /api/jobs/:id/checkpoints           — List checkpoints`);
+    console.log(`  GET  /api/jobs/:id/checkpoints/latest    — Latest checkpoint`);
+    console.log(`  POST /api/jobs/:id/resume/compile        — Resume from compile gate`);
   });
   return app;
 }

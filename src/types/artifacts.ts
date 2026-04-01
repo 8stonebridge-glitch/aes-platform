@@ -157,6 +157,30 @@ export interface DependencyEdge {
   reason: string;
 }
 
+// ─── Checkpoints (runtime resume) ─────────────────────────────────────
+
+export interface CheckpointRecord {
+  checkpoint_id: string;
+  job_id: string;
+  gate: string;
+  status: "in_progress" | "passed" | "failed";
+  last_successful_gate?: string | null;
+  workspace_path?: string | null;
+  feature_ids?: string[] | null;
+  contract_packs?: string[] | null;
+  archetypes?: string[] | null;
+  env_snapshot?: Record<string, unknown> | null;
+  artifacts?: Record<string, unknown> | null;
+  raw_error?: string | null;
+  summarized_error?: string | null;
+  resume_eligible?: boolean | null;
+  resume_reason?: string | null;
+  invalidation_scope?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  schema_version?: number | null;
+}
+
 export interface Confidence {
   overall: number;
   intent_clarity: number;

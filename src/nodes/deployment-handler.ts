@@ -148,15 +148,14 @@ function normalizeUnsupportedButtonLinkProps(
 ): { content: string; changed: boolean } {
   let next = content;
 
+  // Wrap <Button as="a" href="...">...</Button> into an anchor to satisfy @aes/ui types.
   next = next.replace(
     /<Button([^>]*)>([\s\S]*?)<\/Button>/g,
     (fullMatch, rawAttrs, children) => {
       const attrs = String(rawAttrs);
       const asAnchor = /\bas=["']a["']/.test(attrs);
       const hrefMatch = attrs.match(/\bhref=["']([^"']+)["']/);
-      if (!asAnchor || !hrefMatch) {
-        return fullMatch;
-      }
+      if (!asAnchor || !hrefMatch) return fullMatch;
 
       const href = hrefMatch[1];
       const buttonAttrs = attrs
@@ -168,7 +167,39 @@ function normalizeUnsupportedButtonLinkProps(
     },
   );
 
+  // Handle self-closing form: <Button as="a" href="..."/> → <a href="..."><Button /></a>
+  next = next.replace(
+    /<Button([^>]*)\/>/g,
+    (fullMatch, rawAttrs) => {
+      const attrs = String(rawAttrs);
+      const asAnchor = /\bas=["']a["']/.test(attrs);
+      const hrefMatch = attrs.match(/\bhref=["']([^"']+)["']/);
+      if (!asAnchor || !hrefMatch) return fullMatch;
+      const href = hrefMatch[1];
+      const buttonAttrs = attrs
+        .replace(/\s+/g, " ")
+        .replace(/\b(as|href)=["'][^"']+["']/g, "")
+        .trim();
+      const serializedAttrs = buttonAttrs ? ` ${buttonAttrs}` : "";
+      return `<a href="${href}"><Button${serializedAttrs}></Button></a>`;
+    },
+  );
+
   return { content: next, changed: next !== content };
+}
+
+function injectClerkPublishableKey(workspacePath: string): { changed: boolean; file?: string } {
+  const envPath = join(workspacePath, ".env.local");
+  if (!existsSync(envPath)) return { changed: false };
+  const content = readFileSync(envPath, "utf-8");
+  if (/^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=/m.test(content)) {
+    return { changed: false };
+  }
+  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY;
+  if (!key) return { changed: false };
+  const next = `${content.trim()}\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${key}\n`;
+  writeFileSync(envPath, next);
+  return { changed: true, file: envPath };
 }
 
 function collectSourceFiles(root: string, extensions = [".ts", ".tsx"]): string[] {
@@ -630,6 +661,25 @@ function repairTestingLibraryFireEventImports(workspacePath: string): string[] {
       repaired = lines.join("\n");
     }
 
+    if (/\bfireEvent\s*\./.test(repaired) && !/from\s*["']@testing-library\/dom["']/.test(repaired)) {
+      const lines = repaired.split("\n");
+      let insertAt = 0;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i].trim();
+        if (line.startsWith("import ")) {
+          insertAt = i + 1;
+          continue;
+        }
+        if (line === "") {
+          insertAt = Math.max(insertAt, i + 1);
+          continue;
+        }
+        break;
+      }
+      lines.splice(insertAt, 0, `import { fireEvent } from "@testing-library/dom";`);
+      repaired = lines.join("\n");
+    }
+
     if (repaired !== existing) {
       writeFileSync(absolutePath, repaired);
       rewritten.push(relativePath);
@@ -1017,6 +1067,18 @@ async function runPredeployCompileGate(args: {
   const { workspacePath, jobId, store } = args;
   const checker = new CheckRunner();
   const dependencyInstall = installWorkspaceDependencies(workspacePath);
+  const checkpointBase = `${jobId}-compile-${Date.now()}`;
+
+  await store.addCheckpoint({
+    checkpoint_id: `${checkpointBase}-start`,
+    job_id: jobId,
+    gate: "compile_gate",
+    status: "in_progress",
+    workspace_path: workspacePath,
+    last_successful_gate: "builder_dispatch",
+    resume_eligible: true,
+    resume_reason: "Entered compile gate",
+  });
 
   store.addLog(jobId, {
     gate: "deploying",
@@ -1024,14 +1086,33 @@ async function runPredeployCompileGate(args: {
   });
 
   if (!dependencyInstall.ok) {
+    await store.addCheckpoint({
+      checkpoint_id: `${checkpointBase}-fail-install`,
+      job_id: jobId,
+      gate: "compile_gate",
+      status: "failed",
+      workspace_path: workspacePath,
+      raw_error: dependencyInstall.message,
+      summarized_error: dependencyInstall.message,
+      resume_eligible: true,
+      resume_reason: "Dependency install failed; workspace intact",
+      invalidation_scope: ["compile_gate"],
+    });
     return {
       passed: false,
       errorMessage: `Compile gate failed during dependency install: ${dependencyInstall.message}`,
     };
   }
 
+  const clerkEnv = injectClerkPublishableKey(workspacePath);
   const preflightRewrittenTests = repairBrokenGeneratedTestImports(workspacePath);
   const preflightTestingLibraryFixes = repairTestingLibraryFireEventImports(workspacePath);
+  if (clerkEnv.changed) {
+    store.addLog(jobId, {
+      gate: "deploying",
+      message: `[compile-gate] injected NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY into .env.local`,
+    });
+  }
   if (preflightRewrittenTests.length > 0) {
     commitWorkspaceChanges(
       workspacePath,
@@ -1085,6 +1166,16 @@ async function runPredeployCompileGate(args: {
           service: "aes-release",
         });
       }
+      await store.addCheckpoint({
+        checkpoint_id: `${checkpointBase}-pass-${Date.now()}`,
+        job_id: jobId,
+        gate: "compile_gate",
+        status: "passed",
+        workspace_path: workspacePath,
+        last_successful_gate: "compile_gate",
+        resume_eligible: true,
+        resume_reason: "Compile gate passed",
+      });
       return { passed: true };
     }
 
@@ -1099,6 +1190,18 @@ async function runPredeployCompileGate(args: {
     });
 
     if (attempt === PREDEPLOY_MAX_REPAIR_ATTEMPTS) {
+      await store.addCheckpoint({
+        checkpoint_id: `${checkpointBase}-fail-${Date.now()}`,
+        job_id: jobId,
+        gate: "compile_gate",
+        status: "failed",
+        workspace_path: workspacePath,
+        raw_error: failingCheck.output,
+        summarized_error: pattern,
+        resume_eligible: true,
+        resume_reason: "Compile gate exhausted attempts",
+        invalidation_scope: ["compile_gate"],
+      });
       return {
         passed: false,
         errorMessage: `Compile gate failed (${failingCheck.check}): ${pattern}`,
@@ -1195,6 +1298,16 @@ async function runPredeployCompileGate(args: {
     passed: false,
     errorMessage: "Compile gate exhausted all repair attempts.",
   };
+}
+
+export async function resumeCompileGate(jobId: string, workspacePath: string): Promise<{ passed: boolean; errorMessage?: string }> {
+  const store = getJobStore();
+  const result = await runPredeployCompileGate({ workspacePath, jobId, store });
+  store.update(jobId, {
+    currentGate: result.passed ? "deploying" : "failed",
+    errorMessage: result.errorMessage ?? null,
+  } as any);
+  return result;
 }
 
 export async function deploymentHandler(

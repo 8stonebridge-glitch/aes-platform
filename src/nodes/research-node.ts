@@ -17,6 +17,7 @@
 import type { AESStateType } from "../state.js";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
+import { recordCheckpoint } from "../checkpoints.js";
 
 const RESEARCH_API = process.env.AES_PERPLEXITY_URL || process.env.AES_RESEARCH_URL || "";
 const RESEARCH_TIMEOUT_MS = 30_000;
@@ -246,6 +247,14 @@ export async function researchNode(
 
   const summary = `Research complete: ${successCount}/${queries.length} queries returned results, ${results.reduce((s, r) => s + r.findings.length, 0)} total findings`;
   store.addLog(state.jobId, { gate: "research", message: summary });
+  await recordCheckpoint({
+    job_id: state.jobId,
+    gate: "research",
+    status: "passed",
+    last_successful_gate: "research",
+    resume_eligible: true,
+    resume_reason: "research_complete",
+  });
 
   if (successCount === 0) {
     cb?.onWarn("Research unavailable — continuing with graph context only");

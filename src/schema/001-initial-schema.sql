@@ -149,6 +149,35 @@ CREATE TABLE IF NOT EXISTS job_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_job_snapshots_updated_at ON job_snapshots(updated_at DESC);
 
+-- ─── Job Checkpoints (resume metadata) ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS job_checkpoints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  checkpoint_id TEXT NOT NULL UNIQUE,
+  job_id TEXT NOT NULL,
+  gate TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  last_successful_gate TEXT,
+  workspace_path TEXT,
+  feature_ids TEXT[] DEFAULT '{}',
+  contract_packs TEXT[] DEFAULT '{}',
+  archetypes TEXT[] DEFAULT '{}',
+  env_snapshot JSONB,
+  artifacts JSONB,
+  raw_error TEXT,
+  summarized_error TEXT,
+  resume_eligible BOOLEAN DEFAULT false,
+  resume_reason TEXT,
+  invalidation_scope TEXT[] DEFAULT '{}',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_checkpoints_job_id ON job_checkpoints(job_id);
+CREATE INDEX IF NOT EXISTS idx_job_checkpoints_gate ON job_checkpoints(gate);
+CREATE INDEX IF NOT EXISTS idx_job_checkpoints_created_at ON job_checkpoints(created_at DESC);
+
 -- ─── Fix Trails ─────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS fix_trails (
