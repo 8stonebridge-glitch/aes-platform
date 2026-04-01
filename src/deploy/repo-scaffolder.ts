@@ -144,7 +144,17 @@ export class RepoScaffolder {
 
   private writeNextConfig(base: string) {
     writeFileSync(join(base, "next.config.mjs"), `/** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+  // All AES-generated apps use Convex + Clerk runtime providers.
+  // These providers crash during Next.js static prerendering because
+  // they require browser context. Using standalone output mode and
+  // disabling static page optimization prevents these build failures.
+  output: "standalone",
+  experimental: {
+    // Disable ISR to prevent static generation attempts
+    isrFlushToDisk: false,
+  },
+};
 export default nextConfig;
 `);
   }

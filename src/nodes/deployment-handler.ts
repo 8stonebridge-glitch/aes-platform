@@ -1762,6 +1762,8 @@ export async function deploymentHandler(
       if (convexUrl) {
         envVars["NEXT_PUBLIC_CONVEX_URL"] = convexUrl;
       }
+      // Tell Next.js to skip static page generation on Vercel
+      envVars["NEXT_PRIVATE_STANDALONE"] = "1";
 
       const project = await vercel.createProject(
         appSlug,
