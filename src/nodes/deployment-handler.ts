@@ -102,6 +102,7 @@ const AES_UI_COMPONENTS = [
 
 type GuardrailPatternId =
   | "next_client_hook_missing_use_client"
+  | "next_auth_page_missing_dynamic_export"
   | "missing_aes_ui_imports"
   | "clerk_useauth_org_binding"
   | "jsx_namespace_type"
@@ -233,6 +234,49 @@ function ensureClientDirective(
   }
   return {
     content: `"use client";\n${content.trimStart()}`,
+    changed: true,
+  };
+}
+
+/**
+ * Pages using Clerk auth hooks (useAuth, useUser, useClerk, useOrganization, etc.)
+ * crash during Next.js static prerendering because there is no Clerk provider at
+ * build time. Adding `export const dynamic = "force-dynamic"` tells Next to always
+ * server-render these pages instead of prerendering them.
+ */
+function ensureDynamicExportForAuthPages(
+  content: string,
+  filePath: string,
+): { content: string; changed: boolean } {
+  // Only apply to page files in the app directory
+  if (!filePath.includes("/app/") && !filePath.includes("\\app\\")) {
+    return { content, changed: false };
+  }
+  if (!/page\.(ts|tsx)$/.test(filePath)) {
+    return { content, changed: false };
+  }
+  // Already has a dynamic export
+  if (/export\s+const\s+dynamic\s*=/.test(content)) {
+    return { content, changed: false };
+  }
+  // Check for Clerk auth hooks or Convex authenticated hooks
+  const authHookPattern = /\b(useAuth|useUser|useClerk|useOrganization|useOrganizationList|useSession|useSignIn|useSignUp|Protect|SignedIn|SignedOut|useConvexAuth)\b/;
+  if (!authHookPattern.test(content)) {
+    return { content, changed: false };
+  }
+  // Insert after "use client" if present, otherwise at top
+  const useClientMatch = content.match(/^(\s*["']use client["'];?\s*\n)/);
+  if (useClientMatch) {
+    return {
+      content: content.replace(
+        useClientMatch[0],
+        `${useClientMatch[0]}export const dynamic = "force-dynamic";\n`,
+      ),
+      changed: true,
+    };
+  }
+  return {
+    content: `export const dynamic = "force-dynamic";\n${content}`,
     changed: true,
   };
 }
@@ -866,6 +910,12 @@ function enforceSourceGuardrailsInWorkspace(workspacePath: string): GuardrailPat
         patterns.add("next_client_hook_missing_use_client");
       }
 
+      const dynamicExport = ensureDynamicExportForAuthPages(next, filePath);
+      if (dynamicExport.changed) {
+        next = dynamicExport.content;
+        patterns.add("next_auth_page_missing_dynamic_export" as GuardrailPatternId);
+      }
+
       const aesUiImports = ensureAesUiImports(next);
       if (aesUiImports.changed) {
         next = aesUiImports.content;
@@ -1352,6 +1402,12 @@ export async function deploymentHandler(
       diagnosis: "Generated framework code drifted outside the approved Convex/Clerk contract packs.",
       fixAction: "Applied framework contract guardrails to rewrite generated files back to approved backend/auth patterns before deploy.",
       errorSnippet: "Framework contract pack violation.",
+    },
+    next_auth_page_missing_dynamic_export: {
+      category: "auth",
+      diagnosis: "Generated page uses Clerk auth hooks but lacks a dynamic export, causing Next.js prerender failure at build time.",
+      fixAction: 'Added export const dynamic = "force-dynamic" to auth-dependent pages before deploy.',
+      errorSnippet: "Error occurred prerendering page — Cannot read properties of null.",
     },
   };
 
