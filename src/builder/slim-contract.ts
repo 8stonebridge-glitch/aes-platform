@@ -25,6 +25,12 @@ export interface SlimContract {
   tests: { name: string; pass_condition: string }[];
   success_outcome: string;
   rules_summary: string;
+  // Graph-derived intelligence for the builder
+  graph_models?: string[];
+  graph_integrations?: string[];
+  graph_prevention?: string[];
+  graph_domain_ref?: string;
+  graph_proven_models?: string[];
 }
 
 /**
@@ -47,6 +53,16 @@ export function compileSlimContract(pkg: BuilderPackage): SlimContract {
     tests: pkg.required_tests.map(t => ({ name: t.name, pass_condition: t.pass_condition })),
     success_outcome: pkg.success_definition.user_visible_outcome,
     rules_summary: pkg.rules.map(r => `[${r.severity}] ${r.title}`).join("; "),
+    // Compact graph hints for builder consumption
+    ...(pkg.graph_hints ? {
+      graph_models: pkg.graph_hints.relevant_models.map(m => `${m.name} (${m.fields})`),
+      graph_integrations: pkg.graph_hints.relevant_integrations.map(i => `${i.name}: ${i.type} — ${i.description}`),
+      graph_prevention: pkg.graph_hints.prevention_constraints.map(p => `[${p.severity}] ${p.rule}: ${p.condition} → ${p.action}`),
+      graph_domain_ref: pkg.graph_hints.domain_reference
+        ? `${pkg.graph_hints.domain_reference.domain} (ref: ${pkg.graph_hints.domain_reference.bestApp})`
+        : undefined,
+      graph_proven_models: pkg.graph_hints.proven_models.map(m => `${m.name} [${m.appClass}] (${m.fields})`),
+    } : {}),
   };
 }
 
@@ -71,6 +87,16 @@ export function compileSlimContractFromBridge(bridge: FeatureBridge): SlimContra
     tests: bridge.required_tests.map(t => ({ name: t.name, pass_condition: t.pass_condition })),
     success_outcome: bridge.success_definition.user_visible_outcome,
     rules_summary: bridge.applied_rules.map(r => `[${r.severity}] ${r.title}`).join("; "),
+    // Compact graph hints from bridge (if present)
+    ...((bridge as any).graph_hints ? {
+      graph_models: (bridge as any).graph_hints.relevant_models.map((m: any) => `${m.name} (${m.fields})`),
+      graph_integrations: (bridge as any).graph_hints.relevant_integrations.map((i: any) => `${i.name}: ${i.type} — ${i.description}`),
+      graph_prevention: (bridge as any).graph_hints.prevention_constraints.map((p: any) => `[${p.severity}] ${p.rule}: ${p.condition} → ${p.action}`),
+      graph_domain_ref: (bridge as any).graph_hints.domain_reference
+        ? `${(bridge as any).graph_hints.domain_reference.domain} (ref: ${(bridge as any).graph_hints.domain_reference.bestApp})`
+        : undefined,
+      graph_proven_models: (bridge as any).graph_hints.proven_models.map((m: any) => `${m.name} [${m.appClass}] (${m.fields})`),
+    } : {}),
   };
 }
 

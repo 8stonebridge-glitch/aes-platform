@@ -180,10 +180,23 @@ export async function catalogSearcher(
   const graphPatterns = graphCtx?.knownPatterns || [];
   const graphFeatures = graphCtx?.similarFeatures || [];
   const graphBridges = graphCtx?.reusableBridges || [];
+  const buildExtractedPatterns = graphCtx?.buildExtractedPatterns || [];
+  const learnedComponentPatterns = graphCtx?.learnedComponentPatterns || [];
+  const learnedFormPatterns = graphCtx?.learnedFormPatterns || [];
+  const unifiedDiscoveredKnowledge: Record<string, string[]> = graphCtx?.unifiedDiscoveredKnowledge || {};
+  const convexSchemas = graphCtx?.convexSchemas || [];
+  const referenceSchemas = graphCtx?.referenceSchemas || [];
 
-  if (graphPatterns.length > 0 || graphFeatures.length > 0 || graphBridges.length > 0) {
+  const dkDomains = Object.keys(unifiedDiscoveredKnowledge);
+  if (graphPatterns.length > 0 || graphFeatures.length > 0 || graphBridges.length > 0 ||
+      buildExtractedPatterns.length > 0 || learnedComponentPatterns.length > 0 ||
+      learnedFormPatterns.length > 0 || dkDomains.length > 0 ||
+      convexSchemas.length > 0 || referenceSchemas.length > 0) {
     cb?.onStep(
-      `Graph context: ${graphPatterns.length} patterns, ${graphFeatures.length} prior features, ${graphBridges.length} reusable bridges`
+      `Graph context: ${graphPatterns.length} patterns, ${graphFeatures.length} prior features, ${graphBridges.length} bridges, ` +
+      `${buildExtractedPatterns.length} build-extracted, ${learnedComponentPatterns.length} components, ` +
+      `${learnedFormPatterns.length} forms, ${dkDomains.length} knowledge domains, ` +
+      `${convexSchemas.length} convex schemas, ${referenceSchemas.length} ref schemas`
     );
   }
 
@@ -240,6 +253,147 @@ export async function catalogSearcher(
           name: `Prior bridge: ${bridge.feature_name}`,
           description: bridge.bridge_description || "",
           fit_reason: `Reusable bridge from prior build: ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 4. Search build-extracted patterns from prior successful builds
+    for (const bxp of buildExtractedPatterns) {
+      const bxpName = (bxp.name || "").toLowerCase();
+      const bxpDesc = (bxp.description || "").toLowerCase();
+      const bxpType = (bxp.type || "").toLowerCase();
+      const wordOverlap = featureWords.filter(
+        (w: string) => bxpName.includes(w) || bxpDesc.includes(w) || bxpType.includes(w)
+      );
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `bx-pattern-${bxp.name}-${bxp.build_id || "unknown"}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "BuildExtractedPattern",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: bxp.name,
+          description: `${bxp.description || ""}${bxp.code_sample ? ` | sample: ${bxp.code_sample.slice(0, 200)}` : ""}`,
+          fit_reason: `Build-extracted ${bxp.type || "pattern"} from prior build: ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 5. Search learned component patterns (reusable UI building blocks)
+    for (const comp of learnedComponentPatterns) {
+      const compName = (comp.name || "").toLowerCase();
+      const compDesc = (comp.description || "").toLowerCase();
+      const compCat = (comp.category || "").toLowerCase();
+      const wordOverlap = featureWords.filter(
+        (w: string) => compName.includes(w) || compDesc.includes(w) || compCat.includes(w)
+      );
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `comp-pattern-${comp.name}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "LearnedComponentPattern",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: comp.name,
+          description: `${comp.description || ""}${comp.usage_example ? ` | usage: ${comp.usage_example.slice(0, 200)}` : ""}`,
+          fit_reason: `Learned component (${comp.category || "UI"}): ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 6. Search learned form patterns (validated form structures)
+    for (const form of learnedFormPatterns) {
+      const formName = (form.name || "").toLowerCase();
+      const formDesc = (form.description || "").toLowerCase();
+      const wordOverlap = featureWords.filter(
+        (w: string) => formName.includes(w) || formDesc.includes(w)
+      );
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `form-pattern-${form.name}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "LearnedFormPattern",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: form.name,
+          description: `${form.description || ""}${form.fields ? ` | fields: ${form.fields}` : ""}${form.validation_rules ? ` | validation: ${form.validation_rules}` : ""}`,
+          fit_reason: `Learned form pattern: ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 7. Search unified discovered knowledge (beam search results by domain)
+    for (const [domain, knowledgeItems] of Object.entries(unifiedDiscoveredKnowledge)) {
+      const domainLower = domain.toLowerCase();
+      const domainMatch = featureWords.some((w: string) => domainLower.includes(w));
+      // Also check if any knowledge item text matches the feature
+      const itemMatches = knowledgeItems.filter((item: string) =>
+        featureWords.some((w: string) => item.toLowerCase().includes(w))
+      );
+      if (domainMatch || itemMatches.length > 0) {
+        const matchReason = domainMatch
+          ? `Domain "${domain}" matches feature`
+          : `${itemMatches.length} knowledge items match`;
+        const preview = (itemMatches.length > 0 ? itemMatches : knowledgeItems).slice(0, 3).join("; ");
+        candidates.push({
+          candidate_id: `unified-knowledge-${domain}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "UnifiedKnowledge",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: `Discovered knowledge: ${domain}`,
+          description: preview.slice(0, 300),
+          fit_reason: `Unified beam search: ${matchReason}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 8. Search Convex schemas from prior successful builds
+    for (const schema of convexSchemas) {
+      const schemaName = (schema.name || "").toLowerCase();
+      const schemaTables = (schema.tables || "").toLowerCase();
+      const wordOverlap = featureWords.filter(
+        (w: string) => schemaName.includes(w) || schemaTables.includes(w)
+      );
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `convex-schema-${schema.name}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "ConvexSchema",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: `Convex schema: ${schema.name}`,
+          description: `Tables: ${schema.tables || "unknown"}${schema.schema_text ? ` | ${schema.schema_text.slice(0, 200)}` : ""}`,
+          fit_reason: `Working Convex schema (${schema.app_class || "general"}): ${wordOverlap.join(", ")}`,
+          constraints: [],
+          selected: false,
+        });
+      }
+    }
+
+    // 9. Search reference schemas (canonical data model templates)
+    for (const ref of referenceSchemas) {
+      const refName = (ref.name || "").toLowerCase();
+      const refDomain = (ref.domain || "").toLowerCase();
+      const refDesc = (ref.description || "").toLowerCase();
+      const refTables = (ref.tables || "").toLowerCase();
+      const wordOverlap = featureWords.filter(
+        (w: string) => refName.includes(w) || refDomain.includes(w) || refDesc.includes(w) || refTables.includes(w)
+      );
+      if (wordOverlap.length > 0) {
+        candidates.push({
+          candidate_id: `ref-schema-${ref.name}`.replace(/\s+/g, "-").toLowerCase(),
+          asset_type: "ReferenceSchema",
+          source_repo: "neo4j-graph",
+          source_path: "",
+          name: `Reference schema: ${ref.name}`,
+          description: `${ref.description || ""} | domain: ${ref.domain || "general"} | tables: ${ref.tables || "unknown"}`,
+          fit_reason: `Reference data model (${ref.domain || "general"}): ${wordOverlap.join(", ")}`,
           constraints: [],
           selected: false,
         });

@@ -502,11 +502,33 @@ export async function bridgeCompiler(
   const reusableBridges = graphCtx?.reusableBridges || [];
   const priorFeatures = graphCtx?.similarFeatures || [];
 
+  // Pull all graph intelligence layers for bridge enrichment
+  const learnedModels = graphCtx?.learnedModels || [];
+  const learnedIntegrations = graphCtx?.learnedIntegrations || [];
+  const preventionRules = graphCtx?.preventionRules || [];
+  const unifiedDomainSources = graphCtx?.unifiedDomainSources || [];
+  const buildExtractedModels = graphCtx?.buildExtractedModels || [];
+
   if (reusableBridges.length > 0) {
     cb?.onStep(`Graph context: ${reusableBridges.length} reusable bridges from prior builds`);
   }
   if (priorFeatures.length > 0) {
     cb?.onStep(`Graph context: ${priorFeatures.length} prior feature specs available`);
+  }
+  if (learnedModels.length > 0) {
+    cb?.onStep(`Graph context: ${learnedModels.length} learned data models available`);
+  }
+  if (learnedIntegrations.length > 0) {
+    cb?.onStep(`Graph context: ${learnedIntegrations.length} learned integrations available`);
+  }
+  if (preventionRules.length > 0) {
+    cb?.onStep(`Graph context: ${preventionRules.length} prevention rules loaded`);
+  }
+  if (unifiedDomainSources.length > 0) {
+    cb?.onStep(`Graph context: ${unifiedDomainSources.length} unified domain sources available`);
+  }
+  if (buildExtractedModels.length > 0) {
+    cb?.onStep(`Graph context: ${buildExtractedModels.length} build-extracted models available`);
   }
 
   // ─── Math Layer: compute dependency-based build order ───
@@ -688,6 +710,159 @@ export async function bridgeCompiler(
           bridge.confidence.test_coverage
         ) / 5;
       }
+    }
+
+    // ─── Graph Hints: inject feature-relevant graph intelligence into bridge ───
+    const graphHints: {
+      relevant_models: { name: string; fields: string; source: string }[];
+      relevant_integrations: { name: string; type: string; description: string }[];
+      prevention_constraints: { rule: string; condition: string; action: string; severity: string }[];
+      domain_reference: { domain: string; bestApp: string; features: string; models: string; integrations: string } | null;
+      proven_models: { name: string; fields: string; appClass: string }[];
+    } = {
+      relevant_models: [],
+      relevant_integrations: [],
+      prevention_constraints: [],
+      domain_reference: null,
+      proven_models: [],
+    };
+
+    // 1. Match learned models relevant to this feature by keyword overlap
+    for (const model of learnedModels) {
+      const modelName = (model.name || "").toLowerCase();
+      if (featureWords.some((w: string) => modelName.includes(w)) ||
+          featureWords.some((w: string) => (model.description || "").toLowerCase().includes(w))) {
+        const fields = Array.isArray(model.fields)
+          ? model.fields.map((f: any) => typeof f === "string" ? f : `${f.name}: ${f.type}`).join(", ")
+          : String(model.fields || "");
+        graphHints.relevant_models.push({
+          name: model.name,
+          fields,
+          source: "learned",
+        });
+      }
+    }
+
+    // 2. Match build-extracted models (proven from prior successful builds)
+    for (const model of buildExtractedModels) {
+      const modelName = (model.name || "").toLowerCase();
+      if (featureWords.some((w: string) => modelName.includes(w)) ||
+          featureWords.some((w: string) => (model.description || "").toLowerCase().includes(w))) {
+        const fields = Array.isArray(model.fields)
+          ? model.fields.join(", ")
+          : String(model.fields || "");
+        graphHints.proven_models.push({
+          name: model.name,
+          fields,
+          appClass: model.appClass || "unknown",
+        });
+      }
+    }
+
+    // 3. Match learned integrations relevant to this feature
+    for (const integration of learnedIntegrations) {
+      const intName = (integration.name || integration.service || "").toLowerCase();
+      const intType = (integration.type || "").toLowerCase();
+      if (featureWords.some((w: string) => intName.includes(w) || intType.includes(w)) ||
+          featureWords.some((w: string) => (integration.description || "").toLowerCase().includes(w))) {
+        graphHints.relevant_integrations.push({
+          name: integration.name || integration.service || "",
+          type: integration.type || "",
+          description: integration.description || "",
+        });
+      }
+    }
+
+    // 4. Match prevention rules — include all critical/error rules plus keyword-matched warnings
+    for (const rule of preventionRules) {
+      const ruleName = (rule.name || "").toLowerCase();
+      const ruleCondition = (rule.condition || "").toLowerCase();
+      const ruleAction = (rule.action || "").toLowerCase();
+      const isCritical = (rule.severity || "").toLowerCase() === "critical" || (rule.severity || "").toLowerCase() === "error";
+      const isRelevant = featureWords.some((w: string) =>
+        ruleName.includes(w) || ruleCondition.includes(w) || ruleAction.includes(w)
+      );
+      if (isCritical || isRelevant) {
+        graphHints.prevention_constraints.push({
+          rule: rule.name || "",
+          condition: rule.condition || "",
+          action: rule.action || "",
+          severity: rule.severity || "warning",
+        });
+      }
+    }
+
+    // 5. Pick best unified domain source for this feature's domain
+    if (unifiedDomainSources.length > 0) {
+      let bestMatch: any = null;
+      let bestScore = 0;
+      for (const ds of unifiedDomainSources) {
+        const domainText = `${ds.domain || ""} ${ds.features || ""} ${ds.models || ""}`.toLowerCase();
+        const score = featureWords.reduce((acc: number, w: string) =>
+          acc + (domainText.includes(w) ? 1 : 0), 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = ds;
+        }
+      }
+      if (bestMatch && bestScore > 0) {
+        graphHints.domain_reference = {
+          domain: bestMatch.domain || "",
+          bestApp: bestMatch.bestApp || "",
+          features: bestMatch.features || "",
+          models: bestMatch.models || "",
+          integrations: bestMatch.integrations || "",
+        };
+      }
+    }
+
+    bridge.graph_hints = graphHints;
+
+    // Promote critical/error prevention constraints to applied_rules on the bridge
+    for (const pc of graphHints.prevention_constraints) {
+      if (pc.severity === "critical" || pc.severity === "error") {
+        const ruleId = `rule-prevention-${pc.rule.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40)}`;
+        // Avoid duplicates
+        if (!bridge.applied_rules.some((r: any) => r.rule_id === ruleId)) {
+          bridge.applied_rules.push({
+            rule_id: ruleId,
+            title: `Prevention: ${pc.rule}`,
+            description: `${pc.condition} → ${pc.action}`,
+            severity: pc.severity,
+            rationale: "Graph prevention rule from prior failure memory",
+          });
+        }
+      }
+    }
+
+    // Boost confidence when graph provides relevant intelligence
+    const graphHintCount =
+      graphHints.relevant_models.length +
+      graphHints.proven_models.length +
+      graphHints.relevant_integrations.length +
+      (graphHints.domain_reference ? 1 : 0);
+    if (graphHintCount > 0) {
+      bridge.confidence.notes.push(
+        `Graph hints: ${graphHints.relevant_models.length} models, ${graphHints.proven_models.length} proven models, ` +
+        `${graphHints.relevant_integrations.length} integrations, ${graphHints.prevention_constraints.length} prevention rules` +
+        (graphHints.domain_reference ? `, ref domain: ${graphHints.domain_reference.domain}` : "")
+      );
+      // Boost reuse_fit when we have model/integration intelligence
+      if (graphHints.relevant_models.length > 0 || graphHints.proven_models.length > 0) {
+        bridge.confidence.reuse_fit = Math.min(bridge.confidence.reuse_fit + 0.1, 1.0);
+      }
+      // Boost rule_coverage when prevention rules apply
+      if (graphHints.prevention_constraints.length > 0) {
+        bridge.confidence.rule_coverage = Math.min(bridge.confidence.rule_coverage + 0.1, 1.0);
+      }
+      // Recalculate overall
+      bridge.confidence.overall = (
+        bridge.confidence.scope_clarity +
+        bridge.confidence.reuse_fit +
+        bridge.confidence.dependency_clarity +
+        bridge.confidence.rule_coverage +
+        bridge.confidence.test_coverage
+      ) / 5;
     }
 
     bridges[feature.feature_id] = bridge;

@@ -112,6 +112,97 @@ export async function validatorRunner(
     });
   }
 
+  // ─── Graph Context: validator heuristics and prevention rules ───
+  const graphCtx = state.graphContext;
+  const heuristics = graphCtx?.validatorHeuristics ?? [];
+  const preventionRules = graphCtx?.preventionRules ?? [];
+
+  if (heuristics.length > 0 || preventionRules.length > 0) {
+    cb?.onStep(`Graph context: ${heuristics.length} heuristics, ${preventionRules.length} prevention rules loaded`);
+  }
+
+  // Apply validator heuristics — each heuristic specifies detection_logic
+  // that describes a condition to check.  We evaluate these against the
+  // current build output to surface graph-derived warnings.
+  for (const heuristic of heuristics) {
+    const heuristicStart = Date.now();
+    try {
+      // Check if heuristic targets any built features
+      const builtFeatures = Object.keys(state.buildResults || {});
+      const affectedPatterns = heuristic.target_failure_patterns ?? [];
+      const isRelevant = affectedPatterns.length === 0 || affectedPatterns.some(
+        (p: string) => builtFeatures.some((f: string) => f.toLowerCase().includes(p.toLowerCase()))
+      );
+
+      if (!isRelevant) continue;
+
+      // Heuristics with detection_logic are descriptive checks — surface them
+      // as informational results so the operator can see graph-derived signals.
+      const passed = true; // Heuristics are advisory, not blocking
+      results.push({
+        test_id: `heuristic-${heuristic.heuristic_id ?? heuristic.name}`,
+        name: `[Graph Heuristic] ${heuristic.name}`,
+        type: `heuristic_${heuristic.validator_tier ?? "tier_c"}`,
+        passed,
+        output: `Detection logic: ${heuristic.detection_logic ?? heuristic.description}` +
+          (heuristic.false_positive_rate != null
+            ? ` | FP rate: ${(heuristic.false_positive_rate * 100).toFixed(0)}%`
+            : ""),
+        duration_ms: Date.now() - heuristicStart,
+      });
+    } catch (err: any) {
+      results.push({
+        test_id: `heuristic-${heuristic.heuristic_id ?? heuristic.name}`,
+        name: `[Graph Heuristic] ${heuristic.name}`,
+        type: "heuristic_error",
+        passed: true, // Don't block on heuristic errors
+        output: `Heuristic evaluation error: ${err.message}`,
+        duration_ms: Date.now() - heuristicStart,
+      });
+    }
+  }
+
+  // Apply prevention rules — rules whose gate matches "gate_4" or "validation"
+  // are rule-based checks that should flag when their target failure patterns
+  // match any observed build or test output.
+  for (const rule of preventionRules) {
+    const ruleStart = Date.now();
+    try {
+      const ruleGate = rule.gate ?? "";
+      if (ruleGate !== "gate_4" && ruleGate !== "gate_5" && ruleGate !== "validation") continue;
+
+      const builtFeatures = Object.keys(state.buildResults || {});
+      const affectedPatterns = rule.target_failure_patterns ?? [];
+      const ruleTriggered = affectedPatterns.some((p: string) =>
+        builtFeatures.some((f: string) => f.toLowerCase().includes(p.toLowerCase()))
+      );
+
+      results.push({
+        test_id: `prevention-${rule.rule_id ?? rule.name}`,
+        name: `[Graph Rule] ${rule.name}`,
+        type: "prevention_rule",
+        passed: !ruleTriggered,
+        output: ruleTriggered
+          ? `Prevention rule triggered: ${rule.check_logic ?? rule.description}`
+          : `Prevention rule clear: ${rule.name}`,
+        duration_ms: Date.now() - ruleStart,
+      });
+
+      if (ruleTriggered) {
+        cb?.onWarn(`Prevention rule [${rule.name}]: ${rule.check_logic ?? rule.description}`);
+      }
+    } catch (err: any) {
+      results.push({
+        test_id: `prevention-${rule.rule_id ?? rule.name}`,
+        name: `[Graph Rule] ${rule.name}`,
+        type: "prevention_rule_error",
+        passed: true,
+        output: `Rule evaluation error: ${err.message}`,
+        duration_ms: Date.now() - ruleStart,
+      });
+    }
+  }
+
   const totalPassed = results.filter(r => r.passed).length;
   const totalFailed = results.filter(r => !r.passed).length;
   const duration = Date.now() - startTime;

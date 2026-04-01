@@ -439,10 +439,138 @@ Generate a complete, production-quality application specification. Include:
 
 All features must have status "proposed".`;
 
+/**
+ * Build a structured text block from graph context so the LLM can use
+ * prior features, failure patterns, blueprints, domain sources, concept
+ * confidence, and universal patterns when planning the application.
+ */
+function buildGraphGuidance(graphCtx: any): string {
+  if (!graphCtx) return "";
+
+  const sections: string[] = [];
+
+  // Prior similar features
+  const similar = graphCtx.similarFeatures || [];
+  if (similar.length > 0) {
+    const lines = similar.slice(0, 20).map((f: any) =>
+      `- ${f.name || "unnamed"}${f.description ? `: ${f.description}` : ""}${f.priority ? ` [${f.priority}]` : ""}${f.version ? ` (v${f.version})` : ""}`
+    );
+    sections.push(`## Prior Similar Features (${similar.length} total)\nThese features were built in previous apps of the same type. Use them as reference for naming, scope, and structure:\n${lines.join("\n")}`);
+  }
+
+  // Failure patterns to avoid
+  const failures = graphCtx.failureHistory || [];
+  if (failures.length > 0) {
+    const lines = failures.slice(0, 15).map((f: any) =>
+      `- ${f.name || f.pattern || "unknown"}: ${f.description || f.reason || "no details"}${f.severity ? ` [severity: ${f.severity}]` : ""}`
+    );
+    sections.push(`## Failure Patterns to AVOID\nThese patterns caused issues in prior builds. Design around them:\n${lines.join("\n")}`);
+  }
+
+  // Prevention rules
+  const prevention = graphCtx.preventionRules || [];
+  if (prevention.length > 0) {
+    const lines = prevention.slice(0, 15).map((r: any) =>
+      `- ${r.rule || r.name || r.description || JSON.stringify(r)}`
+    );
+    sections.push(`## Prevention Rules\nMandatory rules from prior build failures:\n${lines.join("\n")}`);
+  }
+
+  // Unified blueprint
+  const blueprint = graphCtx.unifiedBlueprint || [];
+  if (blueprint.length > 0) {
+    sections.push(`## Unified Architecture Blueprint\nComposite architecture plan derived from prior successful apps:\n${blueprint.join("\n")}`);
+  }
+
+  // Domain sources
+  const domainSources = graphCtx.unifiedDomainSources || [];
+  if (domainSources.length > 0) {
+    const lines = domainSources.slice(0, 15).map((s: any) =>
+      typeof s === "string" ? `- ${s}` : `- ${s.domain || s.name || "unknown"}: ${s.sources?.join(", ") || s.apps?.join(", ") || JSON.stringify(s)}`
+    );
+    sections.push(`## Domain Source Apps\nPrior apps to learn from per domain:\n${lines.join("\n")}`);
+  }
+
+  // Concept confidence scores
+  const conceptScores = graphCtx.unifiedConceptScores || [];
+  if (conceptScores.length > 0) {
+    const lines = conceptScores.slice(0, 20).map((c: any) =>
+      typeof c === "string" ? `- ${c}` : `- ${c.concept || c.name || "unknown"}: confidence ${typeof c.score === "number" ? (c.score * 100).toFixed(0) + "%" : c.score || c.confidence || "unknown"}`
+    );
+    sections.push(`## Concept Confidence (what the graph knows vs gaps)\nHigh-confidence concepts can be reused directly; low-confidence areas need more care:\n${lines.join("\n")}`);
+  }
+
+  // Gaps — areas with no prior data
+  const gaps = graphCtx.unifiedGaps || [];
+  if (gaps.length > 0) {
+    sections.push(`## Knowledge Gaps\nAreas where no prior data exists — be especially careful with design here:\n${gaps.map((g: string) => `- ${g}`).join("\n")}`);
+  }
+
+  // Universal patterns
+  const universalPatterns = graphCtx.unifiedUniversalPatterns || [];
+  if (universalPatterns.length > 0) {
+    const lines = universalPatterns.slice(0, 15).map((p: any) =>
+      typeof p === "string" ? `- ${p}` : `- ${p.name || p.pattern || "unknown"}: ${p.description || JSON.stringify(p)}`
+    );
+    sections.push(`## Universal Patterns\nPatterns that apply across all apps of this type:\n${lines.join("\n")}`);
+  }
+
+  // Learned features from prior builds
+  const learnedFeatures = graphCtx.learnedFeatures || [];
+  if (learnedFeatures.length > 0) {
+    const lines = learnedFeatures.slice(0, 15).map((f: any) =>
+      `- ${f.name || "unnamed"}${f.description ? `: ${f.description}` : ""}${f.type ? ` [${f.type}]` : ""}`
+    );
+    sections.push(`## Learned Feature Structures\nFeature structures extracted from prior successful builds:\n${lines.join("\n")}`);
+  }
+
+  // Learned data models
+  const learnedModels = graphCtx.learnedModels || [];
+  if (learnedModels.length > 0) {
+    const lines = learnedModels.slice(0, 15).map((m: any) =>
+      `- ${m.name || m.model || "unnamed"}${m.fields ? ` (fields: ${Array.isArray(m.fields) ? m.fields.join(", ") : m.fields})` : ""}${m.description ? `: ${m.description}` : ""}`
+    );
+    sections.push(`## Learned Data Models\nData models from prior builds — use as reference for domain entities:\n${lines.join("\n")}`);
+  }
+
+  // Build-extracted patterns
+  const buildPatterns = graphCtx.buildExtractedPatterns || [];
+  if (buildPatterns.length > 0) {
+    const lines = buildPatterns.slice(0, 15).map((p: any) =>
+      typeof p === "string" ? `- ${p}` : `- ${p.name || p.pattern || "unnamed"}: ${p.description || p.usage || JSON.stringify(p)}`
+    );
+    sections.push(`## Build-Extracted Patterns\nPatterns discovered during prior builds:\n${lines.join("\n")}`);
+  }
+
+  // Known patterns from graph
+  const knownPatterns = graphCtx.knownPatterns || [];
+  if (knownPatterns.length > 0) {
+    const lines = knownPatterns.slice(0, 10).map((p: any) =>
+      typeof p === "string" ? `- ${p}` : `- ${p.name || p.type || "unnamed"}: ${p.description || JSON.stringify(p)}`
+    );
+    sections.push(`## Known Patterns\n${lines.join("\n")}`);
+  }
+
+  // Unified coverage score
+  if (typeof graphCtx.unifiedCoverage === "number" && graphCtx.unifiedCoverage > 0) {
+    sections.push(`## Graph Coverage\nOverall knowledge coverage for this domain: ${(graphCtx.unifiedCoverage * 100).toFixed(0)}%`);
+  }
+
+  if (sections.length === 0) return "";
+
+  return `\n\n--- GRAPH-DERIVED GUIDANCE ---
+The following knowledge was extracted from the project graph (prior builds, failure analysis, domain research). Use it to inform your decomposition — reuse proven structures, avoid known failure patterns, and pay extra attention to identified gaps.
+
+${sections.join("\n\n")}
+
+--- END GRAPH GUIDANCE ---`;
+}
+
 async function llmDecompose(
   intentBrief: any,
   retryCount: number,
-  previousFailures: any[]
+  previousFailures: any[],
+  graphHints?: string
 ): Promise<{ appSpec: any; featureBuildOrder: string[] }> {
   const llm = getLLM()!;
   const structured = llm.withStructuredOutput(AppSpecSchema);
@@ -457,11 +585,13 @@ ${failures.map((r: any) => `- ${r.code}: ${r.reason}`).join("\n")}
 You MUST fix all of these issues.`;
   }
 
+  const graphGuidanceBlock = graphHints || "";
+
   const result = await safeLLMCall("decomposer", () =>
     structured.invoke([
       {
         role: "system",
-        content: DECOMPOSER_SYSTEM_PROMPT + retryContext,
+        content: DECOMPOSER_SYSTEM_PROMPT + graphGuidanceBlock + retryContext,
       },
       {
         role: "user",
@@ -547,6 +677,12 @@ export async function decomposer(
   let featureBuildOrder: string[];
   let usedLLM = false;
 
+  // Build graph guidance for the LLM from all available graph context fields
+  const graphGuidance = buildGraphGuidance(graphCtx);
+  if (graphGuidance) {
+    cb?.onStep("Graph guidance block built — passing prior knowledge to LLM decomposer");
+  }
+
   if (isLLMAvailable()) {
     try {
       cb?.onStep(
@@ -557,7 +693,8 @@ export async function decomposer(
       const result = await llmDecompose(
         state.intentBrief,
         state.specRetryCount,
-        state.specValidationResults
+        state.specValidationResults,
+        graphGuidance || undefined
       );
       appSpec = result.appSpec;
       featureBuildOrder = result.featureBuildOrder;

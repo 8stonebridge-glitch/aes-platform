@@ -56,6 +56,15 @@ export interface BuilderPackage {
     validation_requirements: string[];
   };
 
+  // Graph-derived hints — feature-specific intelligence from Neo4j
+  graph_hints?: {
+    relevant_models: { name: string; fields: string; source: string }[];
+    relevant_integrations: { name: string; type: string; description: string }[];
+    prevention_constraints: { rule: string; condition: string; action: string; severity: string }[];
+    domain_reference: { domain: string; bestApp: string; features: string; models: string; integrations: string } | null;
+    proven_models: { name: string; fields: string; appClass: string }[];
+  };
+
   // Metadata
   schema_version: number;
   created_at: string;
@@ -160,6 +169,9 @@ export function compileBuilderPackage(
     required_tests: requiredTests,
 
     success_definition: bridge.success_definition,
+
+    // Pass through graph-derived hints from bridge compilation
+    graph_hints: (bridge as any).graph_hints || undefined,
 
     schema_version: CURRENT_SCHEMA_VERSION,
     created_at: new Date().toISOString(),
