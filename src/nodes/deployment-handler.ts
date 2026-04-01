@@ -259,9 +259,10 @@ function ensureDynamicExportForAuthPages(
   if (/export\s+const\s+dynamic\s*=/.test(content)) {
     return { content, changed: false };
   }
-  // Check for Clerk auth hooks or Convex authenticated hooks
-  const authHookPattern = /\b(useAuth|useUser|useClerk|useOrganization|useOrganizationList|useSession|useSignIn|useSignUp|Protect|SignedIn|SignedOut|useConvexAuth)\b/;
-  if (!authHookPattern.test(content)) {
+  // Any page using React hooks, Clerk auth, or Convex hooks will fail prerendering.
+  // Since all AES-generated apps use client-side providers, mark all pages dynamic.
+  const runtimeHookPattern = /\b(useAuth|useUser|useClerk|useOrganization|useOrganizationList|useSession|useSignIn|useSignUp|Protect|SignedIn|SignedOut|useConvexAuth|useQuery|useMutation|useAction|useConvex|useState|useEffect|useRouter|useParams|usePathname)\b/;
+  if (!runtimeHookPattern.test(content)) {
     return { content, changed: false };
   }
   // Insert after "use client" if present, otherwise at top
