@@ -5,6 +5,175 @@ export declare const CATALOG_ENFORCEMENT_RULES = "\n## CATALOG ENFORCEMENT \u201
 /**
  * Context for LLM code generation — enriches BuilderPackage with AppSpec data.
  */
+export interface GraphGuidance {
+    /** Prior violations relevant to this feature/app class */
+    violations: {
+        code: string;
+        description: string;
+        resolution: string;
+        severity: string;
+    }[];
+    /** Known failure patterns from prior builds */
+    failurePatterns: {
+        pattern: string;
+        diagnosis: string;
+        fixAction: string;
+    }[];
+    /** Corrections learned from prior builds */
+    corrections: {
+        description: string;
+        resolution: string;
+    }[];
+    /** Reusable patterns from similar features */
+    knownPatterns: {
+        name: string;
+        description: string;
+    }[];
+    /** Learned feature structures from prior builds */
+    learnedFeatures: {
+        name: string;
+        description: string;
+        capabilities?: string;
+    }[];
+    /** Learned data models from prior builds */
+    learnedModels: {
+        name: string;
+        fields: string;
+    }[];
+    /** Learned integrations from prior builds */
+    learnedIntegrations: {
+        name: string;
+        type: string;
+        description: string;
+    }[];
+    /** Learned UI/data flow patterns */
+    learnedFlows: {
+        name: string;
+        description: string;
+    }[];
+    /** External research findings relevant to this build */
+    learnedResearch: {
+        topic: string;
+        finding: string;
+    }[];
+    /** Models extracted from prior successful builds */
+    buildExtractedModels: {
+        name: string;
+        fields: string;
+        appClass: string;
+    }[];
+    /** Patterns extracted from prior builds with code samples */
+    buildExtractedPatterns: {
+        name: string;
+        type: string;
+        description: string;
+        codeSample?: string;
+    }[];
+    /** Tech stacks from prior builds */
+    buildExtractedTech: {
+        name: string;
+        version: string;
+        category: string;
+    }[];
+    /** Learned component patterns — reusable UI building blocks */
+    learnedComponentPatterns: {
+        name: string;
+        category: string;
+        description: string;
+        props?: string;
+        usageExample?: string;
+    }[];
+    /** Learned form patterns — validated form structures */
+    learnedFormPatterns: {
+        name: string;
+        description: string;
+        fields?: string;
+        validationRules?: string;
+    }[];
+    /** Learned navigation patterns */
+    learnedNavigation: {
+        name: string;
+        type: string;
+        description: string;
+    }[];
+    /** Learned page section layouts */
+    learnedPageSections: {
+        name: string;
+        type: string;
+        description: string;
+        layout?: string;
+    }[];
+    /** Learned state management patterns */
+    learnedStatePatterns: {
+        name: string;
+        patternType: string;
+        description: string;
+    }[];
+    /** Design system references */
+    learnedDesignSystems: {
+        name: string;
+        description: string;
+        componentLibrary?: string;
+    }[];
+    /** Prevention rules — proactive error avoidance */
+    preventionRules: {
+        name: string;
+        condition: string;
+        action: string;
+        severity: string;
+    }[];
+    /** Fix patterns — known fix strategies for recurring errors */
+    fixPatterns: {
+        name: string;
+        errorPattern: string;
+        fixStrategy: string;
+        successRate?: string;
+    }[];
+    /** Working Convex schemas from prior builds */
+    convexSchemas: {
+        name: string;
+        tables: string;
+        appClass: string;
+    }[];
+    /** Reference data model templates */
+    referenceSchemas: {
+        name: string;
+        domain: string;
+        tables: string;
+    }[];
+    /** AES system lessons */
+    aesLessons: {
+        title: string;
+        summary: string;
+        category: string;
+    }[];
+    /** Proven app architecture blueprints */
+    aesBlueprints: {
+        name: string;
+        appClass: string;
+        description: string;
+        featureList?: string;
+    }[];
+    /** Prior app contexts with full feature/model/integration graphs */
+    learnedAppContext: {
+        appName: string;
+        appClass: string;
+        features: string;
+        models: string;
+        integrations: string;
+    }[];
+    /** AES reasoning rules and search strategies */
+    reasoningRules: {
+        title: string;
+        summary: string;
+        strategies: string;
+    }[];
+    /** AES preflight checklists */
+    aesPreflight: {
+        title: string;
+        steps: string;
+    }[];
+}
 export interface BuilderContext {
     feature?: {
         name: string;
@@ -34,6 +203,8 @@ export interface BuilderContext {
             effect: string;
         }[];
     };
+    /** Graph-derived guidance: prior violations, failure patterns, corrections */
+    graphGuidance?: GraphGuidance;
 }
 export declare class CodeBuilder {
     private workspaceManager;

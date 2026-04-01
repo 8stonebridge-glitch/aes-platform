@@ -213,7 +213,18 @@ Output ONLY the function code (no imports, those are prepended).`,
 
   // ── 3. Pages — decomposed per capability ──
   for (const cap of pkg.included_capabilities) {
-    const capSlug = cap.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    let capSlug = cap.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+    // Prevent path doubling when capability slug overlaps with feature slug
+    if (capSlug === featureSlug || capSlug.startsWith(`${featureSlug}-`) || featureSlug.startsWith(`${capSlug}-`)) {
+      if (capabilityIsForm(cap)) {
+        capSlug = "new";
+      } else if (capabilityIsDetail(cap)) {
+        capSlug = "view";
+      } else {
+        capSlug = "list";
+      }
+    }
 
     if (capabilityIsForm(cap)) {
       const pagePath = `app/${featureSlug}/${capSlug}/page.tsx`;

@@ -136,6 +136,69 @@ function repairTestingLibraryImports(content, filePath) {
     return `import { ${needed.join(", ")} } from '@testing-library/react';\n${content}`;
 }
 /**
+ * Fix useState<string> / setState(null) type mismatches.
+ * LLMs frequently generate useState<string>("") but then call setState(null).
+ * Fix by widening the state type to include null: useState<string | null>.
+ */
+function repairNullStateAssignments(content, filePath) {
+    if (!/\.(tsx?)$/.test(filePath))
+        return null;
+    // Only run if there's a useState and a setState(null) pattern
+    if (!/\buseState\b/.test(content) || !/\(null\)/.test(content))
+        return null;
+    let modified = content;
+    // Pattern: useState<string>("") ... setX(null) → useState<string | null>("")
+    // Widen all useState<T> to useState<T | null> when the setter is called with null
+    modified = modified.replace(/useState<(string|number|boolean)>\(/g, "useState<$1 | null>(");
+    return modified !== content ? modified : null;
+}
+/**
+ * LLMs frequently generate <Badge variant="..."> but the Badge component
+ * only accepts HTMLSpanElement attributes (className, children). Strip
+ * the variant prop entirely — styling should use className.
+ */
+function repairBadgeVariantProp(content, filePath) {
+    if (!/\.tsx$/.test(filePath))
+        return null;
+    if (!/variant=/.test(content) || !/Badge/.test(content))
+        return null;
+    // <Badge variant="success"> → <Badge>
+    // <Badge variant={...} className="..."> → <Badge className="...">
+    const modified = content.replace(/<Badge(\s+)variant=(?:"[^"]*"|'[^']*'|\{[^}]*\})/g, "<Badge$1");
+    return modified !== content ? modified : null;
+}
+/**
+ * LLMs frequently generate <Button as="a" href="..."> which fails because
+ * the Button component doesn't accept `as` or `href` props.
+ * Replace with Next.js Link styled as a button.
+ */
+function repairButtonAsAnchor(content, filePath) {
+    if (!/\.tsx$/.test(filePath))
+        return null;
+    if (!/as=["']a["']/.test(content))
+        return null;
+    let modified = content;
+    // <Button as="a" href="/path" className="...">text</Button>
+    // → <Link href="/path" className="...">text</Link>
+    modified = modified.replace(/<Button\s+as=["']a["']\s+href=(["'][^"']+["'])\s*(className=(?:"[^"]*"|{[^}]*}))?([^>]*)>([\s\S]*?)<\/Button>/g, (_m, href, cls, rest, children) => {
+        const clsPart = cls ? ` ${cls}` : "";
+        return `<Link href=${href}${clsPart}${rest}>${children}</Link>`;
+    });
+    if (modified !== content) {
+        // Ensure Link is imported
+        if (!/import.*Link.*from\s+["']next\/link["']/.test(modified)) {
+            const useClientMatch = modified.match(/^(\s*["']use client["'];?\s*\n)/);
+            if (useClientMatch) {
+                modified = modified.replace(useClientMatch[0], `${useClientMatch[0]}import Link from "next/link";\n`);
+            }
+            else {
+                modified = `import Link from "next/link";\n${modified}`;
+            }
+        }
+    }
+    return modified !== content ? modified : null;
+}
+/**
  * Deterministic regex repairs for Convex and Clerk files.
  * These fix the most common generated-code violations without needing an LLM.
  * Returns null if nothing changed.
@@ -244,6 +307,18 @@ export async function repairFilesForCompilerErrors(args) {
             // Test files: fix missing fireEvent/waitFor/screen imports
             if (!repaired) {
                 repaired = repairTestingLibraryImports(original, relativePath);
+            }
+            // Fix useState<string> + setState(null) type mismatches
+            if (!repaired) {
+                repaired = repairNullStateAssignments(original, relativePath);
+            }
+            // Fix <Badge variant="..."> → <Badge>
+            if (!repaired) {
+                repaired = repairBadgeVariantProp(original, relativePath);
+            }
+            // Fix <Button as="a" href="..."> → <Link href="...">
+            if (!repaired) {
+                repaired = repairButtonAsAnchor(original, relativePath);
             }
             // Convex/Clerk/middleware files: fix bare validators, shorthand forms, { org }, deprecated middleware
             if (!repaired) {

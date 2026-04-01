@@ -527,6 +527,44 @@ export class JobStore {
         this.postRepairOutcomeToHermes(outcome).catch(() => {
             // best-effort only
         });
+        // Also persist to Neo4j graph so future builds can query repair history
+        this.writeRepairOutcomeToGraph(outcome).catch(() => {
+            // best-effort only
+        });
+    }
+    async writeRepairOutcomeToGraph(outcome) {
+        try {
+            const { getNeo4jService } = await import("./services/neo4j-service.js");
+            const neo4j = getNeo4jService();
+            const ok = await neo4j.connect();
+            if (!ok)
+                return;
+            await neo4j.runCypher(`CREATE (r:HermesRepairOutcome {
+          pattern: $pattern,
+          category: $category,
+          diagnosis: $diagnosis,
+          fixAction: $fixAction,
+          fixType: $fixType,
+          filesChanged: $filesChanged,
+          success: $success,
+          errorSnippet: $errorSnippet,
+          service: $service,
+          timestamp: datetime()
+        }) RETURN r`, {
+                pattern: outcome.pattern ?? "",
+                category: outcome.category ?? "",
+                diagnosis: outcome.diagnosis ?? "",
+                fixAction: outcome.fixAction ?? "",
+                fixType: outcome.fixType ?? "auto_fix",
+                filesChanged: (outcome.filesChanged ?? []).join(", "),
+                success: outcome.success ?? false,
+                errorSnippet: outcome.errorSnippet ?? "",
+                service: outcome.service ?? "aes-release",
+            });
+        }
+        catch {
+            // best-effort — don't block the pipeline
+        }
     }
     // ─── Periodic health check ────────────────────────────────────────
     startHealthCheckTimer() {

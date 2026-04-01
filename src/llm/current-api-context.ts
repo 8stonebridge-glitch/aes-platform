@@ -22,6 +22,14 @@ CURRENT API CONTRACTS (validated March 2026):
 - Clerk server: use auth(), currentUser(), or clerkMiddleware() from "@clerk/nextjs/server". authMiddleware and withClerkMiddleware are deprecated and will cause build failures.
 - React 19: prefer current functional component patterns and avoid outdated assumptions about legacy data fetching or deprecated React APIs.
 - AES UI: every rendered JSX symbol from @aes/ui must be explicitly imported from "@aes/ui" in the same file. Common examples are Button, Card, CardHeader, CardContent, Badge, Input, Label, Select, Table, TableHeader, TableBody, TableRow, and TableCell.
+- AES UI component APIs: Button accepts {children, variant, size, disabled, className, onClick, type}. Badge accepts only {children, className} — it does NOT accept "variant" prop. Use className for styling variants (e.g., className="bg-green-100 text-green-800"). Card, CardHeader, CardContent accept {children, className}.
+
+NEXT.JS FILE AND IMPORT RULES:
+- globals.css must ONLY be imported in app/layout.tsx. NEVER import globals.css in any other file — not in pages, not in components, not in nested layouts.
+- The Button component from @aes/ui accepts: children, variant, size, disabled, className, onClick, type. It does NOT accept "as", "href", or "to" props. To make a button-styled link, use: <Link href="/path" className="...">text</Link> with next/link — do NOT write <Button as="a" href="...">.
+- All relative imports must use correct path depth. A file at app/feature/page.tsx importing from app/ uses "../". A file at app/feature/sub/page.tsx uses "../../".
+- Do not create nested layout.tsx files unless explicitly required. Only app/layout.tsx should exist by default.
+- Page files are client-page.tsx (with "use client" and hooks) wrapped by a thin page.tsx server component. You are generating the client component content only — the server wrapper is added automatically.
 
 KNOWN AES FAILURE CORRECTIONS:
 - If a page renders <Button>, <Card>, or other @aes/ui components, import those exact symbols from "@aes/ui".
@@ -29,6 +37,7 @@ KNOWN AES FAILURE CORRECTIONS:
 - Never generate const { org } = useAuth() — use orgId instead.
 - Never generate bare v.id() — always pass the table name: v.id("tableName").
 - Never generate query(async (ctx, args) => { ... }) — always use query({ args: {...}, handler: async (ctx, args) => {...} }).
+- Never generate <Button as="a"> or <Button href="...">. Use <Link> from next/link instead.
 `.trim();
 
 const HERMES_RECALL_SEEDS = [

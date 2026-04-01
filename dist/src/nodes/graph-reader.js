@@ -92,6 +92,30 @@ RETURN n.name AS name, n.description AS description,
 LIMIT 10
   `.trim();
 }
+/** Query Violation nodes (compile/build failures recorded during prior builds). */
+function cypherViolations() {
+    return `
+MATCH (v:Violation)
+WHERE v.severity = 'blocking'
+RETURN v.code AS code, v.description AS description,
+       v.resolution AS resolution, v.severity AS severity,
+       v.gate AS gate
+ORDER BY v.timestamp DESC
+LIMIT 15
+  `.trim();
+}
+/** Query HermesRepairOutcome nodes (repair patterns from compile gate). */
+function cypherRepairOutcomes() {
+    return `
+MATCH (r:HermesRepairOutcome)
+WHERE r.success = true
+RETURN r.pattern AS pattern, r.diagnosis AS diagnosis,
+       r.fixAction AS fixAction, r.category AS category,
+       r.errorSnippet AS errorSnippet
+ORDER BY r.timestamp DESC
+LIMIT 15
+  `.trim();
+}
 /**
  * Find existing bridges that could be reused for similar features.
  * Returns the full bridge packet data stored on the Entity node.
@@ -261,9 +285,195 @@ RETURN a.name AS app_name, a.app_class AS app_class,
 LIMIT 5
   `.trim();
 }
-// ─── Reasoning Rules Loader ─────────────────────────────────────────
-// LESSON-001: The retrieval was broken, not the data.
-// Always load reasoning rules FIRST so the pipeline knows HOW to search.
+// ─── Build Extraction Intelligence ──────────────────────────────────
+// Prior builds extracted models, integrations, patterns, and tech stacks.
+// These feed back what ACTUALLY WORKED in production builds.
+/** Models extracted from prior successful builds. */
+function cypherBuildExtractedModels() {
+    return `
+MATCH (b:BuildExtraction)-[:EXTRACTED]->(m:BuildExtractedModel)
+RETURN m.name AS name, m.fields AS fields, m.table_name AS table_name,
+       b.app_class AS app_class, b.build_id AS build_id
+ORDER BY b.timestamp DESC
+LIMIT 20
+  `.trim();
+}
+/** Integrations extracted from prior builds. */
+function cypherBuildExtractedIntegrations() {
+    return `
+MATCH (b:BuildExtraction)-[:EXTRACTED]->(i:BuildExtractedIntegration)
+RETURN i.name AS name, i.type AS type, i.provider AS provider,
+       i.config_pattern AS config_pattern,
+       b.app_class AS app_class, b.build_id AS build_id
+ORDER BY b.timestamp DESC
+LIMIT 20
+  `.trim();
+}
+/** Patterns extracted from prior builds. */
+function cypherBuildExtractedPatterns() {
+    return `
+MATCH (b:BuildExtraction)-[:EXTRACTED]->(p:BuildExtractedPattern)
+RETURN p.name AS name, p.type AS type, p.description AS description,
+       p.code_sample AS code_sample,
+       b.app_class AS app_class, b.build_id AS build_id
+ORDER BY b.timestamp DESC
+LIMIT 20
+  `.trim();
+}
+/** Tech stacks extracted from prior builds. */
+function cypherBuildExtractedTech() {
+    return `
+MATCH (b:BuildExtraction)-[:EXTRACTED]->(t:BuildExtractedTech)
+RETURN t.name AS name, t.version AS version, t.category AS category,
+       b.app_class AS app_class, b.build_id AS build_id
+ORDER BY b.timestamp DESC
+LIMIT 15
+  `.trim();
+}
+// ─── Learned Design / UI Knowledge ──────────────────────────────────
+// Rich UI patterns from prior builds and research.
+/** Learned component patterns — reusable UI building blocks. */
+function cypherLearnedComponentPatterns(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(c.name) CONTAINS '${esc(kw)}' OR toLower(c.description) CONTAINS '${esc(kw)}' OR toLower(c.category) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (c:LearnedComponentPattern)
+WHERE ${conditions}
+RETURN c.name AS name, c.description AS description,
+       c.category AS category, c.props AS props,
+       c.usage_example AS usage_example, c.source AS source
+LIMIT 15
+  `.trim();
+}
+/** Learned form patterns — validated form structures. */
+function cypherLearnedFormPatterns(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(f.name) CONTAINS '${esc(kw)}' OR toLower(f.description) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (f:LearnedFormPattern)
+WHERE ${conditions}
+RETURN f.name AS name, f.description AS description,
+       f.fields AS fields, f.validation_rules AS validation_rules,
+       f.source AS source
+LIMIT 15
+  `.trim();
+}
+/** Learned navigation patterns. */
+function cypherLearnedNavigation(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(n.name) CONTAINS '${esc(kw)}' OR toLower(n.type) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (n:LearnedNavigation)
+WHERE ${conditions}
+RETURN n.name AS name, n.type AS type, n.description AS description,
+       n.items AS items, n.source AS source
+LIMIT 10
+  `.trim();
+}
+/** Learned page sections — layout building blocks. */
+function cypherLearnedPageSections(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(s.name) CONTAINS '${esc(kw)}' OR toLower(s.type) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (s:LearnedPageSection)
+WHERE ${conditions}
+RETURN s.name AS name, s.type AS type, s.description AS description,
+       s.layout AS layout, s.source AS source
+LIMIT 15
+  `.trim();
+}
+/** Learned state patterns — state management approaches. */
+function cypherLearnedStatePatterns(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(s.name) CONTAINS '${esc(kw)}' OR toLower(s.pattern_type) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (s:LearnedStatePattern)
+WHERE ${conditions}
+RETURN s.name AS name, s.pattern_type AS pattern_type,
+       s.description AS description, s.source AS source
+LIMIT 10
+  `.trim();
+}
+/** Learned design systems — overall design language references. */
+function cypherLearnedDesignSystems(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(d.name) CONTAINS '${esc(kw)}' OR toLower(d.description) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (d:LearnedDesignSystem)
+WHERE ${conditions}
+RETURN d.name AS name, d.description AS description,
+       d.color_scheme AS color_scheme, d.typography AS typography,
+       d.component_library AS component_library, d.source AS source
+LIMIT 5
+  `.trim();
+}
+// ─── Failure Memory Intelligence ────────────────────────────────────
+// Prevention rules and fix patterns from the failure-memory subsystem.
+/** Prevention rules — proactive rules to avoid known failures. */
+function cypherPreventionRules() {
+    return `
+MATCH (r:PreventionRule)
+RETURN r.name AS name, r.description AS description,
+       r.condition AS condition, r.action AS action,
+       r.severity AS severity, r.category AS category
+ORDER BY r.severity DESC
+LIMIT 15
+  `.trim();
+}
+/** Fix patterns — known fix strategies for recurring errors. */
+function cypherFixPatterns() {
+    return `
+MATCH (f:FixPattern)
+RETURN f.name AS name, f.error_pattern AS error_pattern,
+       f.fix_strategy AS fix_strategy, f.success_rate AS success_rate,
+       f.category AS category
+ORDER BY f.success_rate DESC
+LIMIT 15
+  `.trim();
+}
+/** Validator heuristics — compile/test validation intelligence. */
+function cypherValidatorHeuristics() {
+    return `
+MATCH (v:ValidatorHeuristic)
+RETURN v.name AS name, v.description AS description,
+       v.gate AS gate, v.check_type AS check_type,
+       v.threshold AS threshold
+LIMIT 10
+  `.trim();
+}
+// ─── Schema References ──────────────────────────────────────────────
+// Known working data schemas from prior builds.
+/** Convex schemas that compiled and deployed successfully. */
+function cypherConvexSchemas() {
+    return `
+MATCH (s:ConvexSchema)
+RETURN s.name AS name, s.tables AS tables,
+       s.schema_text AS schema_text, s.app_class AS app_class
+ORDER BY s.timestamp DESC
+LIMIT 5
+  `.trim();
+}
+/** Reference schemas — canonical data model templates. */
+function cypherReferenceSchemas(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(s.name) CONTAINS '${esc(kw)}' OR toLower(s.domain) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (s:ReferenceSchema)
+WHERE ${conditions}
+RETURN s.name AS name, s.domain AS domain,
+       s.tables AS tables, s.description AS description
+LIMIT 10
+  `.trim();
+}
+// ─── AES Meta-Intelligence ──────────────────────────────────────────
+// Reasoning rules, lessons, and evolution records.
 function cypherReasoningRules() {
     return `
 MATCH (r:AESReasoningRule)
@@ -280,6 +490,31 @@ MATCH (c:AESPreflight)
 RETURN c.checklist_id AS id, c.title AS title, c.steps AS steps,
        c.priority AS priority
 ORDER BY c.priority
+  `.trim();
+}
+/** AES Lessons — system-learned insights about what works. */
+function cypherAESLessons() {
+    return `
+MATCH (l:AESLesson)
+RETURN l.lesson_id AS lesson_id, l.title AS title,
+       l.summary AS summary, l.category AS category,
+       l.impact AS impact
+ORDER BY l.timestamp DESC
+LIMIT 15
+  `.trim();
+}
+/** AES Blueprints — proven app architecture templates. */
+function cypherAESBlueprints(keywords) {
+    const conditions = keywords
+        .map((kw) => `(toLower(b.name) CONTAINS '${esc(kw)}' OR toLower(b.app_class) CONTAINS '${esc(kw)}')`)
+        .join(" OR ");
+    return `
+MATCH (b:AESBlueprint)
+WHERE ${conditions}
+RETURN b.name AS name, b.app_class AS app_class,
+       b.description AS description, b.feature_list AS feature_list,
+       b.architecture AS architecture
+LIMIT 5
   `.trim();
 }
 // ─── Synonym Expansion (STRATEGY-001) ───────────────────────────────
@@ -357,21 +592,27 @@ function expandKeywords(raw) {
 // ─── Main Node ───────────────────────────────────────────────────────
 export async function graphReader(state) {
     const cb = getCallbacks();
+    const { getJobStore } = await import("../store.js");
+    const store = getJobStore();
     const neo4j = getNeo4jService();
     const ok = await neo4j.connect();
     if (!ok) {
         cb?.onStep("Neo4j unavailable — skipping graph context lookup");
+        store.addLog(state.jobId, { gate: "graph_reader", message: "Neo4j unavailable — skipping graph context" });
         return {};
     }
     // ── STEP 0: Load reasoning rules (PREFLIGHT-001) ──
     // The graph teaches us HOW to search before we search.
     cb?.onStep("Loading reasoning rules from graph...");
-    const [reasoningRules, preflight] = await Promise.all([
+    const [loadedReasoningRules, loadedPreflight] = await Promise.all([
         neo4j.runCypher(cypherReasoningRules()).catch(() => []),
         neo4j.runCypher(cypherPreflight()).catch(() => []),
     ]);
-    if (reasoningRules.length > 0) {
-        cb?.onStep(`Loaded ${reasoningRules.length} reasoning rule(s): ${reasoningRules.map((r) => r.title).join("; ")}`);
+    if (loadedReasoningRules.length > 0) {
+        cb?.onStep(`Loaded ${loadedReasoningRules.length} reasoning rule(s): ${loadedReasoningRules.map((r) => r.title).join("; ")}`);
+    }
+    if (loadedPreflight.length > 0) {
+        cb?.onStep(`Loaded ${loadedPreflight.length} preflight checklist(s): ${loadedPreflight.map((p) => p.title).join("; ")}`);
     }
     // ── STEP 1: Extract and expand keywords (STRATEGY-001, 003) ──
     cb?.onStep("Searching graph for prior knowledge...");
@@ -397,6 +638,26 @@ export async function graphReader(state) {
         learnedFlows: [],
         learnedResearch: [],
         learnedCorrections: [],
+        buildExtractedModels: [],
+        buildExtractedIntegrations: [],
+        buildExtractedPatterns: [],
+        buildExtractedTech: [],
+        learnedComponentPatterns: [],
+        learnedFormPatterns: [],
+        learnedNavigation: [],
+        learnedPageSections: [],
+        learnedStatePatterns: [],
+        learnedDesignSystems: [],
+        preventionRules: [],
+        fixPatterns: [],
+        validatorHeuristics: [],
+        convexSchemas: [],
+        referenceSchemas: [],
+        reasoningRules: [],
+        aesLessons: [],
+        aesBlueprints: [],
+        aesPreflight: [],
+        learnedAppContext: [],
     };
     // ── Check vector search availability ──
     const vectorAvailable = isEmbeddingAvailable();
@@ -408,7 +669,17 @@ export async function graphReader(state) {
     try {
         // Run ALL keyword queries in parallel — original + learned knowledge
         // PLUS vector search across all indexed node types
-        const [builds, features, patterns, failures, bridges, lFeatures, lModels, lIntegrations, lPatterns, lFlows, lResearch, lCorrections, vectorResults,] = await Promise.all([
+        const [builds, features, patterns, failures, bridges, lFeatures, lModels, lIntegrations, lPatterns, lFlows, lResearch, lCorrections, vectorResults, violations, repairOutcomes, 
+        // Build extraction intelligence
+        bxModels, bxIntegrations, bxPatterns, bxTech, 
+        // Learned design/UI patterns
+        lComponentPatterns, lFormPatterns, lNavigation, lPageSections, lStatePatterns, lDesignSystems, 
+        // Failure memory
+        preventionRules, fixPatterns, validatorHeuristics, 
+        // Schema references
+        convexSchemas, refSchemas, 
+        // AES meta-intelligence
+        aesLessons, aesBlueprints, appContextRows,] = await Promise.all([
             // Original keyword queries
             neo4j.runCypher(cypherPriorBuilds(keywords)).catch(() => []),
             neo4j.runCypher(cypherSimilarFeatures(keywords)).catch(() => []),
@@ -427,6 +698,32 @@ export async function graphReader(state) {
             vectorAvailable
                 ? vectorSearchAll(state.rawRequest, 15, cypherRunner).catch(() => [])
                 : Promise.resolve([]),
+            // Build failure intelligence (not keyword-dependent — always load)
+            neo4j.runCypher(cypherViolations()).catch(() => []),
+            neo4j.runCypher(cypherRepairOutcomes()).catch(() => []),
+            // Build extraction intelligence (not keyword-dependent — always load)
+            neo4j.runCypher(cypherBuildExtractedModels()).catch(() => []),
+            neo4j.runCypher(cypherBuildExtractedIntegrations()).catch(() => []),
+            neo4j.runCypher(cypherBuildExtractedPatterns()).catch(() => []),
+            neo4j.runCypher(cypherBuildExtractedTech()).catch(() => []),
+            // Learned design/UI patterns (keyword-dependent)
+            neo4j.runCypher(cypherLearnedComponentPatterns(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedFormPatterns(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedNavigation(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedPageSections(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedStatePatterns(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedDesignSystems(keywords)).catch(() => []),
+            // Failure memory (not keyword-dependent — always load)
+            neo4j.runCypher(cypherPreventionRules()).catch(() => []),
+            neo4j.runCypher(cypherFixPatterns()).catch(() => []),
+            neo4j.runCypher(cypherValidatorHeuristics()).catch(() => []),
+            // Schema references
+            neo4j.runCypher(cypherConvexSchemas()).catch(() => []),
+            neo4j.runCypher(cypherReferenceSchemas(keywords)).catch(() => []),
+            // AES meta-intelligence
+            neo4j.runCypher(cypherAESLessons()).catch(() => []),
+            neo4j.runCypher(cypherAESBlueprints(keywords)).catch(() => []),
+            neo4j.runCypher(cypherLearnedAppContext(keywords)).catch(() => []),
         ]);
         // ── RRF Fusion: merge keyword + vector results for learned types ──
         // Group vector results by label so we can fuse per-type
@@ -461,7 +758,28 @@ export async function graphReader(state) {
         context.priorBuilds = builds;
         context.similarFeatures = features;
         context.knownPatterns = patterns;
-        context.failureHistory = failures;
+        // Merge FailurePattern + Violation + HermesRepairOutcome into failureHistory
+        context.failureHistory = [
+            ...failures,
+            ...violations.map((v) => ({
+                name: v.code ?? "violation",
+                code: v.code,
+                description: v.description,
+                resolution: v.resolution,
+                severity: v.severity ?? "blocking",
+                category: "violation",
+                gate: v.gate,
+            })),
+            ...repairOutcomes.map((r) => ({
+                name: r.pattern ?? "repair",
+                description: r.diagnosis,
+                resolution: r.fixAction,
+                severity: "info",
+                category: r.category ?? "repair",
+                pattern: r.pattern,
+                errorSnippet: r.errorSnippet,
+            })),
+        ];
         context.reusableBridges = bridges;
         context.learnedFeatures = fusedFeatures.rows;
         context.learnedModels = fusedModels.rows;
@@ -470,32 +788,90 @@ export async function graphReader(state) {
         context.learnedFlows = fusedFlows.rows;
         context.learnedResearch = lResearch;
         context.learnedCorrections = lCorrections;
+        // Build extraction intelligence
+        context.buildExtractedModels = bxModels;
+        context.buildExtractedIntegrations = bxIntegrations;
+        context.buildExtractedPatterns = bxPatterns;
+        context.buildExtractedTech = bxTech;
+        // Learned design/UI patterns
+        context.learnedComponentPatterns = lComponentPatterns;
+        context.learnedFormPatterns = lFormPatterns;
+        context.learnedNavigation = lNavigation;
+        context.learnedPageSections = lPageSections;
+        context.learnedStatePatterns = lStatePatterns;
+        context.learnedDesignSystems = lDesignSystems;
+        // Failure memory intelligence
+        context.preventionRules = preventionRules;
+        context.fixPatterns = fixPatterns;
+        context.validatorHeuristics = validatorHeuristics;
+        // Schema references
+        context.convexSchemas = convexSchemas;
+        context.referenceSchemas = refSchemas;
+        // AES meta-intelligence (wire reasoning rules + preflight loaded at STEP 0)
+        context.reasoningRules = loadedReasoningRules;
+        context.aesLessons = aesLessons;
+        context.aesBlueprints = aesBlueprints;
+        context.aesPreflight = loadedPreflight;
+        // Whole-app context
+        context.learnedAppContext = appContextRows;
         vectorOnlyCount = fusedFeatures.vectorOnly + fusedModels.vectorOnly +
             fusedIntegrations.vectorOnly + fusedPatterns.vectorOnly + fusedFlows.vectorOnly;
         const originalTotal = builds.length + features.length + patterns.length +
             failures.length + bridges.length;
         const learnedTotal = fusedFeatures.rows.length + fusedModels.rows.length + fusedIntegrations.rows.length +
             fusedPatterns.rows.length + fusedFlows.rows.length + lResearch.length + lCorrections.length;
-        const total = originalTotal + learnedTotal;
+        const extractionTotal = bxModels.length + bxIntegrations.length + bxPatterns.length + bxTech.length;
+        const designTotal = lComponentPatterns.length + lFormPatterns.length + lNavigation.length +
+            lPageSections.length + lStatePatterns.length + lDesignSystems.length;
+        const failureMemTotal = preventionRules.length + fixPatterns.length + validatorHeuristics.length;
+        const schemaTotal = convexSchemas.length + refSchemas.length;
+        const metaTotal = loadedReasoningRules.length + aesLessons.length + aesBlueprints.length + loadedPreflight.length;
+        const appCtxTotal = appContextRows.length;
+        const total = originalTotal + learnedTotal + extractionTotal + designTotal + failureMemTotal + schemaTotal + metaTotal + appCtxTotal;
         if (total > 0) {
             const parts = [];
             if (originalTotal > 0) {
                 parts.push(`${builds.length} prior builds, ${features.length} similar features, ${patterns.length} patterns, ${failures.length} failure records, ${bridges.length} bridges`);
             }
+            if (violations.length > 0 || repairOutcomes.length > 0) {
+                parts.push(`BUILD-INTEL: ${violations.length} violations, ${repairOutcomes.length} repair outcomes`);
+            }
             if (learnedTotal > 0) {
                 parts.push(`LEARNED: ${fusedFeatures.rows.length} features, ${fusedModels.rows.length} models, ${fusedIntegrations.rows.length} integrations, ${fusedPatterns.rows.length} patterns, ${fusedFlows.rows.length} flows, ${lResearch.length} research, ${lCorrections.length} corrections`);
+            }
+            if (extractionTotal > 0) {
+                parts.push(`BUILD-EXTRACTIONS: ${bxModels.length} models, ${bxIntegrations.length} integrations, ${bxPatterns.length} patterns, ${bxTech.length} tech`);
+            }
+            if (designTotal > 0) {
+                parts.push(`DESIGN: ${lComponentPatterns.length} components, ${lFormPatterns.length} forms, ${lNavigation.length} nav, ${lPageSections.length} sections, ${lStatePatterns.length} state, ${lDesignSystems.length} systems`);
+            }
+            if (failureMemTotal > 0) {
+                parts.push(`FAILURE-MEM: ${preventionRules.length} prevention, ${fixPatterns.length} fixes, ${validatorHeuristics.length} heuristics`);
+            }
+            if (schemaTotal > 0) {
+                parts.push(`SCHEMAS: ${convexSchemas.length} convex, ${refSchemas.length} reference`);
+            }
+            if (metaTotal > 0) {
+                parts.push(`META: ${loadedReasoningRules.length} rules, ${aesLessons.length} lessons, ${aesBlueprints.length} blueprints, ${loadedPreflight.length} preflight`);
+            }
+            if (appCtxTotal > 0) {
+                parts.push(`APP-CONTEXT: ${appCtxTotal} matching apps`);
             }
             if (vectorOnlyCount > 0) {
                 parts.push(`VECTOR-ONLY: ${vectorOnlyCount} semantic matches (not found by keywords)`);
             }
-            cb?.onSuccess(`Graph context loaded: ${parts.join(" | ")}`);
+            const summary = `Graph context loaded: ${parts.join(" | ")}`;
+            cb?.onSuccess(summary);
+            store.addLog(state.jobId, { gate: "graph_reader", message: summary });
         }
         else {
             cb?.onStep("No prior knowledge found in graph — starting fresh");
+            store.addLog(state.jobId, { gate: "graph_reader", message: "No prior knowledge found in graph" });
         }
     }
     catch (err) {
         cb?.onWarn(`Graph search failed: ${err.message} — continuing without context`);
+        store.addLog(state.jobId, { gate: "graph_reader", message: `Graph search failed: ${err.message}` });
     }
     // ── Load design evidence (Paper MCP extractions) ──
     let designEvidence = null;

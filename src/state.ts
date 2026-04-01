@@ -149,6 +149,32 @@ export const AESState = Annotation.Root({
     learnedFlows: any[];
     learnedResearch: any[];
     learnedCorrections: any[];
+    // Build extraction intelligence (what prior builds discovered)
+    buildExtractedModels: any[];
+    buildExtractedIntegrations: any[];
+    buildExtractedPatterns: any[];
+    buildExtractedTech: any[];
+    // Learned design/UI patterns
+    learnedComponentPatterns: any[];
+    learnedFormPatterns: any[];
+    learnedNavigation: any[];
+    learnedPageSections: any[];
+    learnedStatePatterns: any[];
+    learnedDesignSystems: any[];
+    // Failure memory intelligence
+    preventionRules: any[];
+    fixPatterns: any[];
+    validatorHeuristics: any[];
+    // Schema references
+    convexSchemas: any[];
+    referenceSchemas: any[];
+    // AES meta-intelligence
+    reasoningRules: any[];
+    aesLessons: any[];
+    aesBlueprints: any[];
+    aesPreflight: any[];
+    // Whole-app context (LearnedApp with relationships)
+    learnedAppContext: any[];
   }>({
     value: lastValue,
     default: () => ({
@@ -164,6 +190,26 @@ export const AESState = Annotation.Root({
       learnedFlows: [],
       learnedResearch: [],
       learnedCorrections: [],
+      buildExtractedModels: [],
+      buildExtractedIntegrations: [],
+      buildExtractedPatterns: [],
+      buildExtractedTech: [],
+      learnedComponentPatterns: [],
+      learnedFormPatterns: [],
+      learnedNavigation: [],
+      learnedPageSections: [],
+      learnedStatePatterns: [],
+      learnedDesignSystems: [],
+      preventionRules: [],
+      fixPatterns: [],
+      validatorHeuristics: [],
+      convexSchemas: [],
+      referenceSchemas: [],
+      reasoningRules: [],
+      aesLessons: [],
+      aesBlueprints: [],
+      aesPreflight: [],
+      learnedAppContext: [],
     }),
   }),
 

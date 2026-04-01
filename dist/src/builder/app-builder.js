@@ -18,6 +18,7 @@ import { RepoScaffolder } from "../deploy/repo-scaffolder.js";
 import { compileBuilderPackage } from "../builder-artifact.js";
 import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import { generateAppLayout, generateSidebar, generateDashboard, generateUnifiedSchema, } from "../llm/app-gen.js";
+import { setGraphGuidanceBlock, clearGraphGuidanceBlock } from "../llm/code-gen.js";
 import { matchFeatureArchetype, deriveArchetypeSlots, renderArchetypeFiles, } from "../contracts/framework-contract-layer.js";
 import { decomposeFeature, composeFile, getTargetFiles, dependenciesSatisfied, } from "./feature-parts.js";
 // ─── Template fallbacks ─────────────────────────────────────────────
@@ -187,6 +188,10 @@ import { ConvexClientProvider } from "./convex-provider";
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
 
+// All pages use Convex/Clerk hooks which require runtime providers.
+// Static prerendering always fails without them — force dynamic rendering.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "${(appSpec?.title || "App").replace(/"/g, '\\"')}",
   description: "${(appSpec?.summary || "Built with AES").replace(/"/g, '\\"')}",
@@ -351,6 +356,540 @@ ${tables},
 });
 `;
 }
+// ─── Graph Guidance ─────────────────────────────────────────────────
+/**
+ * Converts the raw graphContext (loaded once at Gate 0) into a structured
+ * GraphGuidance object that the builder and LLM prompts can consume.
+ * This gives every feature build access to prior violations, failure
+ * patterns, and corrections from the Neo4j graph.
+ */
+function buildGraphGuidance(graphContext) {
+    const guidance = {
+        violations: [],
+        failurePatterns: [],
+        corrections: [],
+        knownPatterns: [],
+        learnedFeatures: [],
+        learnedModels: [],
+        learnedIntegrations: [],
+        learnedFlows: [],
+        learnedResearch: [],
+        buildExtractedModels: [],
+        buildExtractedPatterns: [],
+        buildExtractedTech: [],
+        learnedComponentPatterns: [],
+        learnedFormPatterns: [],
+        learnedNavigation: [],
+        learnedPageSections: [],
+        learnedStatePatterns: [],
+        learnedDesignSystems: [],
+        preventionRules: [],
+        fixPatterns: [],
+        convexSchemas: [],
+        referenceSchemas: [],
+        aesLessons: [],
+        aesBlueprints: [],
+        learnedAppContext: [],
+        reasoningRules: [],
+        aesPreflight: [],
+    };
+    if (!graphContext)
+        return guidance;
+    // ── Failure history & violations ──
+    for (const item of graphContext.failureHistory ?? []) {
+        if (item.code || item.description) {
+            guidance.violations.push({
+                code: item.code ?? "UNKNOWN",
+                description: item.description ?? "",
+                resolution: item.resolution ?? "",
+                severity: item.severity ?? "info",
+            });
+        }
+        if (item.pattern || item.category === "repair") {
+            guidance.failurePatterns.push({
+                pattern: item.pattern ?? item.name ?? "unknown",
+                diagnosis: item.description ?? "",
+                fixAction: item.resolution ?? "",
+            });
+        }
+    }
+    // ── Corrections ──
+    for (const item of graphContext.learnedCorrections ?? []) {
+        if (item.description) {
+            guidance.corrections.push({
+                description: item.description ?? "",
+                resolution: item.resolution ?? item.fix ?? "",
+            });
+        }
+    }
+    // ── Known patterns ──
+    for (const item of graphContext.knownPatterns ?? []) {
+        if (item.name || item.description) {
+            guidance.knownPatterns.push({
+                name: item.name ?? "",
+                description: item.description ?? "",
+            });
+        }
+    }
+    // ── Learned features ──
+    for (const item of graphContext.learnedFeatures ?? []) {
+        if (item.name) {
+            guidance.learnedFeatures.push({
+                name: item.name ?? "",
+                description: item.description ?? item.summary ?? "",
+                capabilities: Array.isArray(item.capabilities)
+                    ? item.capabilities.join(", ")
+                    : item.capabilities ?? "",
+            });
+        }
+    }
+    // ── Learned data models ──
+    for (const item of graphContext.learnedModels ?? []) {
+        if (item.name) {
+            const fields = Array.isArray(item.fields)
+                ? item.fields.map((f) => typeof f === "string" ? f : `${f.name}: ${f.type}`).join(", ")
+                : item.fields ?? item.schema ?? "";
+            guidance.learnedModels.push({ name: item.name ?? "", fields });
+        }
+    }
+    // ── Learned integrations ──
+    for (const item of graphContext.learnedIntegrations ?? []) {
+        if (item.name || item.type) {
+            guidance.learnedIntegrations.push({
+                name: item.name ?? item.service ?? "",
+                type: item.type ?? item.category ?? "",
+                description: item.description ?? item.purpose ?? "",
+            });
+        }
+    }
+    // ── Learned flows ──
+    for (const item of graphContext.learnedFlows ?? []) {
+        if (item.name || item.description) {
+            guidance.learnedFlows.push({
+                name: item.name ?? "",
+                description: item.description ?? item.steps ?? "",
+            });
+        }
+    }
+    // ── Learned research ──
+    for (const item of graphContext.learnedResearch ?? []) {
+        if (item.topic || item.finding || item.description) {
+            guidance.learnedResearch.push({
+                topic: item.topic ?? item.name ?? "",
+                finding: item.finding ?? item.description ?? item.summary ?? "",
+            });
+        }
+    }
+    // ── Build extraction intelligence ──
+    for (const item of graphContext.buildExtractedModels ?? []) {
+        if (item.name) {
+            const fields = Array.isArray(item.fields)
+                ? item.fields.join(", ")
+                : item.fields ?? item.table_name ?? "";
+            guidance.buildExtractedModels.push({
+                name: item.name ?? "",
+                fields,
+                appClass: item.app_class ?? "",
+            });
+        }
+    }
+    for (const item of graphContext.buildExtractedPatterns ?? []) {
+        if (item.name) {
+            guidance.buildExtractedPatterns.push({
+                name: item.name ?? "",
+                type: item.type ?? "",
+                description: item.description ?? "",
+                codeSample: item.code_sample ?? undefined,
+            });
+        }
+    }
+    for (const item of graphContext.buildExtractedTech ?? []) {
+        if (item.name) {
+            guidance.buildExtractedTech.push({
+                name: item.name ?? "",
+                version: item.version ?? "",
+                category: item.category ?? "",
+            });
+        }
+    }
+    // ── Learned component patterns ──
+    for (const item of graphContext.learnedComponentPatterns ?? []) {
+        if (item.name) {
+            guidance.learnedComponentPatterns.push({
+                name: item.name ?? "",
+                category: item.category ?? "",
+                description: item.description ?? "",
+                props: item.props ?? undefined,
+                usageExample: item.usage_example ?? undefined,
+            });
+        }
+    }
+    // ── Learned form patterns ──
+    for (const item of graphContext.learnedFormPatterns ?? []) {
+        if (item.name) {
+            guidance.learnedFormPatterns.push({
+                name: item.name ?? "",
+                description: item.description ?? "",
+                fields: item.fields ?? undefined,
+                validationRules: item.validation_rules ?? undefined,
+            });
+        }
+    }
+    // ── Learned navigation ──
+    for (const item of graphContext.learnedNavigation ?? []) {
+        if (item.name) {
+            guidance.learnedNavigation.push({
+                name: item.name ?? "",
+                type: item.type ?? "",
+                description: item.description ?? "",
+            });
+        }
+    }
+    // ── Learned page sections ──
+    for (const item of graphContext.learnedPageSections ?? []) {
+        if (item.name) {
+            guidance.learnedPageSections.push({
+                name: item.name ?? "",
+                type: item.type ?? "",
+                description: item.description ?? "",
+                layout: item.layout ?? undefined,
+            });
+        }
+    }
+    // ── Learned state patterns ──
+    for (const item of graphContext.learnedStatePatterns ?? []) {
+        if (item.name) {
+            guidance.learnedStatePatterns.push({
+                name: item.name ?? "",
+                patternType: item.pattern_type ?? "",
+                description: item.description ?? "",
+            });
+        }
+    }
+    // ── Learned design systems ──
+    for (const item of graphContext.learnedDesignSystems ?? []) {
+        if (item.name) {
+            guidance.learnedDesignSystems.push({
+                name: item.name ?? "",
+                description: item.description ?? "",
+                componentLibrary: item.component_library ?? undefined,
+            });
+        }
+    }
+    // ── Prevention rules ──
+    for (const item of graphContext.preventionRules ?? []) {
+        if (item.name || item.condition) {
+            guidance.preventionRules.push({
+                name: item.name ?? "",
+                condition: item.condition ?? item.description ?? "",
+                action: item.action ?? "",
+                severity: item.severity ?? "warning",
+            });
+        }
+    }
+    // ── Fix patterns ──
+    for (const item of graphContext.fixPatterns ?? []) {
+        if (item.name || item.error_pattern) {
+            guidance.fixPatterns.push({
+                name: item.name ?? "",
+                errorPattern: item.error_pattern ?? "",
+                fixStrategy: item.fix_strategy ?? "",
+                successRate: item.success_rate?.toString() ?? undefined,
+            });
+        }
+    }
+    // ── Convex schemas ──
+    for (const item of graphContext.convexSchemas ?? []) {
+        if (item.name || item.tables) {
+            guidance.convexSchemas.push({
+                name: item.name ?? "",
+                tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
+                appClass: item.app_class ?? "",
+            });
+        }
+    }
+    // ── Reference schemas ──
+    for (const item of graphContext.referenceSchemas ?? []) {
+        if (item.name) {
+            guidance.referenceSchemas.push({
+                name: item.name ?? "",
+                domain: item.domain ?? "",
+                tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
+            });
+        }
+    }
+    // ── AES lessons ──
+    for (const item of graphContext.aesLessons ?? []) {
+        if (item.title || item.summary) {
+            guidance.aesLessons.push({
+                title: item.title ?? "",
+                summary: item.summary ?? "",
+                category: item.category ?? "",
+            });
+        }
+    }
+    // ── AES blueprints ──
+    for (const item of graphContext.aesBlueprints ?? []) {
+        if (item.name) {
+            guidance.aesBlueprints.push({
+                name: item.name ?? "",
+                appClass: item.app_class ?? "",
+                description: item.description ?? "",
+                featureList: Array.isArray(item.feature_list) ? item.feature_list.join(", ") : item.feature_list ?? undefined,
+            });
+        }
+    }
+    // ── Learned app context ──
+    for (const item of graphContext.learnedAppContext ?? []) {
+        if (item.app_name || item.app_class) {
+            guidance.learnedAppContext.push({
+                appName: item.app_name ?? "",
+                appClass: item.app_class ?? "",
+                features: Array.isArray(item.features) ? item.features.join(", ") : item.features ?? "",
+                models: Array.isArray(item.models) ? item.models.join(", ") : item.models ?? "",
+                integrations: Array.isArray(item.integrations) ? item.integrations.join(", ") : item.integrations ?? "",
+            });
+        }
+    }
+    // ── Reasoning rules ──
+    for (const item of graphContext.reasoningRules ?? []) {
+        if (item.title) {
+            const strategies = Array.isArray(item.strategies)
+                ? item.strategies.filter((s) => s.title).map((s) => s.title).join("; ")
+                : "";
+            guidance.reasoningRules.push({
+                title: item.title ?? "",
+                summary: item.summary ?? "",
+                strategies,
+            });
+        }
+    }
+    // ── AES preflight checklists ──
+    for (const item of graphContext.aesPreflight ?? []) {
+        if (item.title) {
+            guidance.aesPreflight.push({
+                title: item.title ?? "",
+                steps: Array.isArray(item.steps) ? item.steps.join("; ") : item.steps ?? "",
+            });
+        }
+    }
+    return guidance;
+}
+/**
+ * Formats graph guidance into a constraint block that can be injected
+ * into LLM system prompts. Only includes non-empty sections.
+ */
+export function formatGraphGuidanceForPrompt(guidance) {
+    if (!guidance)
+        return "";
+    const parts = [];
+    if (guidance.violations.length > 0) {
+        const blocking = guidance.violations.filter((v) => v.severity === "blocking");
+        if (blocking.length > 0) {
+            parts.push("## KNOWN BUILD FAILURES — AVOID THESE PATTERNS");
+            for (const v of blocking.slice(0, 10)) {
+                parts.push(`- ${v.code}: ${v.description}`);
+                if (v.resolution)
+                    parts.push(`  Fix: ${v.resolution}`);
+            }
+        }
+    }
+    if (guidance.corrections.length > 0) {
+        parts.push("\n## CORRECTIONS FROM PRIOR BUILDS");
+        for (const c of guidance.corrections.slice(0, 10)) {
+            parts.push(`- ${c.description}`);
+            if (c.resolution)
+                parts.push(`  Resolution: ${c.resolution}`);
+        }
+    }
+    if (guidance.failurePatterns.length > 0) {
+        parts.push("\n## FAILURE PATTERNS TO PREVENT");
+        for (const f of guidance.failurePatterns.slice(0, 5)) {
+            parts.push(`- ${f.pattern}: ${f.diagnosis}`);
+            if (f.fixAction)
+                parts.push(`  Prevention: ${f.fixAction}`);
+        }
+    }
+    if (guidance.knownPatterns.length > 0) {
+        parts.push("\n## REUSABLE PATTERNS FROM PRIOR BUILDS");
+        for (const p of guidance.knownPatterns.slice(0, 10)) {
+            parts.push(`- ${p.name}: ${p.description}`);
+        }
+    }
+    if (guidance.learnedFeatures.length > 0) {
+        parts.push("\n## PRIOR FEATURE STRUCTURES — USE AS REFERENCE");
+        for (const f of guidance.learnedFeatures.slice(0, 8)) {
+            parts.push(`- ${f.name}: ${f.description}`);
+            if (f.capabilities)
+                parts.push(`  Capabilities: ${f.capabilities}`);
+        }
+    }
+    if (guidance.learnedModels.length > 0) {
+        parts.push("\n## KNOWN DATA MODELS — REUSE WHEN APPLICABLE");
+        for (const m of guidance.learnedModels.slice(0, 10)) {
+            parts.push(`- ${m.name}: ${m.fields}`);
+        }
+    }
+    if (guidance.learnedIntegrations.length > 0) {
+        parts.push("\n## KNOWN INTEGRATIONS");
+        for (const i of guidance.learnedIntegrations.slice(0, 8)) {
+            parts.push(`- ${i.name} (${i.type}): ${i.description}`);
+        }
+    }
+    if (guidance.learnedFlows.length > 0) {
+        parts.push("\n## KNOWN UI/DATA FLOWS");
+        for (const f of guidance.learnedFlows.slice(0, 8)) {
+            parts.push(`- ${f.name}: ${f.description}`);
+        }
+    }
+    if (guidance.learnedResearch.length > 0) {
+        parts.push("\n## RESEARCH FINDINGS — INFORM DESIGN DECISIONS");
+        for (const r of guidance.learnedResearch.slice(0, 5)) {
+            parts.push(`- ${r.topic}: ${r.finding}`);
+        }
+    }
+    // ── Build extraction intelligence ──
+    if (guidance.buildExtractedModels.length > 0) {
+        parts.push("\n## PROVEN DATA MODELS FROM PRIOR BUILDS");
+        for (const m of guidance.buildExtractedModels.slice(0, 10)) {
+            parts.push(`- ${m.name} (${m.appClass}): ${m.fields}`);
+        }
+    }
+    if (guidance.buildExtractedPatterns.length > 0) {
+        parts.push("\n## PROVEN CODE PATTERNS FROM PRIOR BUILDS");
+        for (const p of guidance.buildExtractedPatterns.slice(0, 8)) {
+            parts.push(`- ${p.name} (${p.type}): ${p.description}`);
+            if (p.codeSample)
+                parts.push(`  Example: ${p.codeSample.slice(0, 200)}`);
+        }
+    }
+    if (guidance.buildExtractedTech.length > 0) {
+        parts.push("\n## PROVEN TECH STACK");
+        const techStr = guidance.buildExtractedTech.slice(0, 10)
+            .map(t => `${t.name}${t.version ? `@${t.version}` : ""} (${t.category})`)
+            .join(", ");
+        parts.push(`- ${techStr}`);
+    }
+    // ── Design/UI intelligence ──
+    if (guidance.learnedComponentPatterns.length > 0) {
+        parts.push("\n## UI COMPONENT PATTERNS — USE THESE STRUCTURES");
+        for (const c of guidance.learnedComponentPatterns.slice(0, 10)) {
+            parts.push(`- ${c.name} (${c.category}): ${c.description}`);
+            if (c.props)
+                parts.push(`  Props: ${c.props}`);
+            if (c.usageExample)
+                parts.push(`  Usage: ${c.usageExample.slice(0, 150)}`);
+        }
+    }
+    if (guidance.learnedFormPatterns.length > 0) {
+        parts.push("\n## FORM PATTERNS — VALIDATED FORM STRUCTURES");
+        for (const f of guidance.learnedFormPatterns.slice(0, 8)) {
+            parts.push(`- ${f.name}: ${f.description}`);
+            if (f.fields)
+                parts.push(`  Fields: ${f.fields}`);
+            if (f.validationRules)
+                parts.push(`  Validation: ${f.validationRules}`);
+        }
+    }
+    if (guidance.learnedNavigation.length > 0) {
+        parts.push("\n## NAVIGATION PATTERNS");
+        for (const n of guidance.learnedNavigation.slice(0, 5)) {
+            parts.push(`- ${n.name} (${n.type}): ${n.description}`);
+        }
+    }
+    if (guidance.learnedPageSections.length > 0) {
+        parts.push("\n## PAGE SECTION LAYOUTS");
+        for (const s of guidance.learnedPageSections.slice(0, 8)) {
+            parts.push(`- ${s.name} (${s.type}): ${s.description}`);
+            if (s.layout)
+                parts.push(`  Layout: ${s.layout}`);
+        }
+    }
+    if (guidance.learnedStatePatterns.length > 0) {
+        parts.push("\n## STATE MANAGEMENT PATTERNS");
+        for (const s of guidance.learnedStatePatterns.slice(0, 5)) {
+            parts.push(`- ${s.name} (${s.patternType}): ${s.description}`);
+        }
+    }
+    if (guidance.learnedDesignSystems.length > 0) {
+        parts.push("\n## DESIGN SYSTEM REFERENCES");
+        for (const d of guidance.learnedDesignSystems.slice(0, 3)) {
+            parts.push(`- ${d.name}: ${d.description}`);
+            if (d.componentLibrary)
+                parts.push(`  Component library: ${d.componentLibrary}`);
+        }
+    }
+    // ── Failure prevention intelligence ──
+    if (guidance.preventionRules.length > 0) {
+        parts.push("\n## PREVENTION RULES — PROACTIVE ERROR AVOIDANCE");
+        for (const r of guidance.preventionRules.slice(0, 10)) {
+            parts.push(`- ${r.name} [${r.severity}]: IF ${r.condition} THEN ${r.action}`);
+        }
+    }
+    if (guidance.fixPatterns.length > 0) {
+        parts.push("\n## KNOWN FIX STRATEGIES");
+        for (const f of guidance.fixPatterns.slice(0, 8)) {
+            parts.push(`- ${f.name}: ${f.errorPattern} → ${f.fixStrategy}`);
+            if (f.successRate)
+                parts.push(`  Success rate: ${f.successRate}`);
+        }
+    }
+    // ── Schema intelligence ──
+    if (guidance.convexSchemas.length > 0) {
+        parts.push("\n## WORKING CONVEX SCHEMAS FROM PRIOR BUILDS");
+        for (const s of guidance.convexSchemas.slice(0, 3)) {
+            parts.push(`- ${s.name} (${s.appClass}): tables: ${s.tables}`);
+        }
+    }
+    if (guidance.referenceSchemas.length > 0) {
+        parts.push("\n## REFERENCE DATA MODELS");
+        for (const s of guidance.referenceSchemas.slice(0, 5)) {
+            parts.push(`- ${s.name} (${s.domain}): ${s.tables}`);
+        }
+    }
+    // ── AES meta-intelligence ──
+    if (guidance.aesBlueprints.length > 0) {
+        parts.push("\n## APP ARCHITECTURE BLUEPRINTS");
+        for (const b of guidance.aesBlueprints.slice(0, 3)) {
+            parts.push(`- ${b.name} (${b.appClass}): ${b.description}`);
+            if (b.featureList)
+                parts.push(`  Features: ${b.featureList}`);
+        }
+    }
+    if (guidance.learnedAppContext.length > 0) {
+        parts.push("\n## PRIOR APP ARCHITECTURES — SIMILAR APPS BUILT BEFORE");
+        for (const a of guidance.learnedAppContext.slice(0, 3)) {
+            parts.push(`- ${a.appName} (${a.appClass})`);
+            if (a.features)
+                parts.push(`  Features: ${a.features}`);
+            if (a.models)
+                parts.push(`  Models: ${a.models}`);
+            if (a.integrations)
+                parts.push(`  Integrations: ${a.integrations}`);
+        }
+    }
+    if (guidance.aesLessons.length > 0) {
+        parts.push("\n## SYSTEM LESSONS — WHAT THE BUILD SYSTEM HAS LEARNED");
+        for (const l of guidance.aesLessons.slice(0, 8)) {
+            parts.push(`- ${l.title} (${l.category}): ${l.summary}`);
+        }
+    }
+    if (guidance.reasoningRules.length > 0) {
+        parts.push("\n## REASONING RULES");
+        for (const r of guidance.reasoningRules.slice(0, 5)) {
+            parts.push(`- ${r.title}: ${r.summary}`);
+            if (r.strategies)
+                parts.push(`  Strategies: ${r.strategies}`);
+        }
+    }
+    if (guidance.aesPreflight.length > 0) {
+        parts.push("\n## PREFLIGHT CHECKLISTS");
+        for (const p of guidance.aesPreflight.slice(0, 5)) {
+            parts.push(`- ${p.title}: ${p.steps}`);
+        }
+    }
+    return parts.length > 0 ? parts.join("\n") : "";
+}
 // ─── AppBuilder ─────────────────────────────────────────────────────
 export class AppBuilder {
     workspaceManager = new WorkspaceManager();
@@ -363,7 +902,7 @@ export class AppBuilder {
      * Phase 2: Build each feature into the shared workspace
      * Phase 3: Commit everything as a single atomic commit
      */
-    async buildApp(jobId, appSpec, featureBridges, featureBuildOrder, callbacks, targetPath, reusableSourceFiles) {
+    async buildApp(jobId, appSpec, featureBridges, featureBuildOrder, callbacks, targetPath, reusableSourceFiles, graphContext) {
         const runId = `br-app-${randomUUID().substring(0, 8)}`;
         const startTime = Date.now();
         const fileContents = {};
@@ -421,6 +960,12 @@ export class AppBuilder {
             callbacks?.onStep("App-level files generated (layout, sidebar, dashboard, unified schema)");
             // ─── Phase 2: Build features into shared workspace ──────────────
             callbacks?.onStep(`Phase 2: Building ${featureBuildOrder.length} features...`);
+            // Inject graph guidance into LLM prompts for all feature builds
+            const graphGuidance = buildGraphGuidance(graphContext);
+            const guidanceBlock = formatGraphGuidanceForPrompt(graphGuidance);
+            if (guidanceBlock) {
+                setGraphGuidanceBlock(guidanceBlock);
+            }
             const features = appSpec?.features || [];
             for (let i = 0; i < featureBuildOrder.length; i++) {
                 const featureId = featureBuildOrder[i];
@@ -455,8 +1000,8 @@ export class AppBuilder {
                     callbacks?.onFeatureStatus(featureId, featureName, "skipped");
                     continue;
                 }
-                // Prepare LLM context
-                const builderContext = {};
+                // Prepare LLM context with graph guidance
+                const builderContext = { graphGuidance };
                 if (feature) {
                     builderContext.feature = {
                         name: feature.name,
@@ -562,6 +1107,8 @@ export class AppBuilder {
                     };
                 }
             }
+            // Clear graph guidance after all features are built
+            clearGraphGuidanceBlock();
             // ─── Phase 3: Final commit ────────────────────────────────────
             callbacks?.onStep("Phase 3: Committing complete application...");
             const featureNames = Object.values(featureResults)
@@ -631,8 +1178,6 @@ export class AppBuilder {
         fileContents[relative(basePath, filePath)] = normalized;
     }
     async generateDashboardFile(basePath, appSpec, fileContents) {
-        const filePath = join(basePath, "app", "page.tsx");
-        this.ensureDir(filePath);
         // Try LLM first
         let content = await generateDashboard(appSpec);
         // Fallback to template
@@ -640,8 +1185,9 @@ export class AppBuilder {
             content = templateDashboard(appSpec);
         }
         const normalized = ensureAesUiImports(normalizeClerkUseAuthBindings(content));
-        writeFileSync(filePath, normalized);
-        fileContents[relative(basePath, filePath)] = normalized;
+        // Dashboard page uses hooks — route through server-wrapper pattern
+        const pageDir = join(basePath, "app");
+        this.writePageWithServerWrapper(pageDir, normalized, basePath, fileContents);
     }
     async generateSchemaFile(basePath, appSpec, fileContents) {
         const filePath = join(basePath, "convex", "schema.ts");
@@ -699,37 +1245,25 @@ export class AppBuilder {
                 localContents[rel] = normalized;
                 filesCreated.push(rel);
             }
-            // Write list page
+            // Write list page (server-wrapper pattern)
             if (rendered.listPage) {
-                const lPath = join(workspacePath, "app", featureSlug, "page.tsx");
-                this.ensureDir(lPath);
-                const normalized = normalizeGeneratedSource(rendered.listPage);
-                writeFileSync(lPath, normalized);
-                const rel = relative(workspacePath, lPath);
-                localContents[rel] = normalized;
-                filesCreated.push(rel);
+                const listDir = join(workspacePath, "app", featureSlug);
+                const written = this.writePageWithServerWrapper(listDir, rendered.listPage, workspacePath, localContents);
+                filesCreated.push(...written);
             }
-            // Write form page
+            // Write form page (server-wrapper pattern)
             if (rendered.formPage) {
                 const capSlug = archetype.id === "auth" ? "sign-in" : "edit";
-                const fPath = join(workspacePath, "app", featureSlug, capSlug, "page.tsx");
-                this.ensureDir(fPath);
-                const normalized = normalizeGeneratedSource(rendered.formPage);
-                writeFileSync(fPath, normalized);
-                const rel = relative(workspacePath, fPath);
-                localContents[rel] = normalized;
-                filesCreated.push(rel);
+                const formDir = join(workspacePath, "app", featureSlug, capSlug);
+                const written = this.writePageWithServerWrapper(formDir, rendered.formPage, workspacePath, localContents);
+                filesCreated.push(...written);
             }
-            // Write detail/secondary page (sign-up for auth, etc.)
+            // Write detail/secondary page (server-wrapper pattern)
             if (rendered.detailPage) {
                 const capSlug = archetype.id === "auth" ? "sign-up" : "[id]";
-                const dPath = join(workspacePath, "app", featureSlug, capSlug, "page.tsx");
-                this.ensureDir(dPath);
-                const normalized = normalizeGeneratedSource(rendered.detailPage);
-                writeFileSync(dPath, normalized);
-                const rel = relative(workspacePath, dPath);
-                localContents[rel] = normalized;
-                filesCreated.push(rel);
+                const detailDir = join(workspacePath, "app", featureSlug, capSlug);
+                const written = this.writePageWithServerWrapper(detailDir, rendered.detailPage, workspacePath, localContents);
+                filesCreated.push(...written);
             }
             // Write test
             if (rendered.test) {
@@ -791,13 +1325,21 @@ export class AppBuilder {
             const composed = composeFile(targetFile, fragments);
             if (!composed)
                 continue;
-            const filePath = join(workspacePath, targetFile);
-            this.ensureDir(filePath);
-            const normalized = normalizeGeneratedSource(composed);
-            writeFileSync(filePath, normalized);
-            const rel = relative(workspacePath, filePath);
-            localContents[rel] = normalized;
-            filesCreated.push(rel);
+            // Route page.tsx files through server-wrapper pattern
+            if (targetFile.endsWith("page.tsx") && targetFile.startsWith("app/")) {
+                const pageDir = join(workspacePath, dirname(targetFile));
+                const written = this.writePageWithServerWrapper(pageDir, composed, workspacePath, localContents);
+                filesCreated.push(...written);
+            }
+            else {
+                const filePath = join(workspacePath, targetFile);
+                this.ensureDir(filePath);
+                const normalized = normalizeGeneratedSource(composed);
+                writeFileSync(filePath, normalized);
+                const rel = relative(workspacePath, filePath);
+                localContents[rel] = normalized;
+                filesCreated.push(rel);
+            }
         }
         // Fallback: if decomposed path produced no query/mutation files
         // (e.g., LLM was unavailable for all parts), use the old monolithic templates
@@ -830,6 +1372,58 @@ export class AppBuilder {
             Object.assign(fileContents, localContents);
         }
         return { files_created: filesCreated, file_contents: localContents };
+    }
+    // ─── Server/Client page split ────────────────────────────────────
+    //
+    // Next.js App Router prerenders pages at build time. Pages using
+    // Convex/Clerk hooks crash during prerendering because runtime
+    // providers aren't available. The fix: every page is a thin server
+    // component that exports `dynamic = "force-dynamic"` and renders
+    // the actual client component.
+    //
+    //   app/feature/page.tsx         ← server component (no hooks)
+    //   app/feature/client-page.tsx  ← "use client" with all hooks
+    //
+    /**
+     * Write a page as a server-wrapper + client-component pair.
+     * Returns the list of relative paths written.
+     */
+    writePageWithServerWrapper(pageDir, clientContent, basePath, fileContents) {
+        const written = [];
+        // Ensure client content has "use client"
+        const clientCode = clientContent.trimStart().startsWith('"use client"')
+            || clientContent.trimStart().startsWith("'use client'")
+            ? clientContent
+            : `"use client";\n${clientContent}`;
+        // Extract the default export name (or use a generic one)
+        const exportMatch = clientCode.match(/export\s+default\s+function\s+(\w+)/);
+        const componentName = exportMatch?.[1] ?? "ClientPage";
+        // Write client-page.tsx
+        const clientPath = join(pageDir, "client-page.tsx");
+        this.ensureDir(clientPath);
+        const normalizedClient = normalizeGeneratedSource(clientCode);
+        writeFileSync(clientPath, normalizedClient);
+        const clientRel = relative(basePath, clientPath);
+        fileContents[clientRel] = normalizedClient;
+        written.push(clientRel);
+        // Write page.tsx (server component wrapper)
+        const serverCode = `// Server component — prevents Next.js static prerendering.
+// All hooks and providers live in the client component.
+export const dynamic = "force-dynamic";
+
+import ${componentName} from "./client-page";
+
+export default function Page() {
+  return <${componentName} />;
+}
+`;
+        const serverPath = join(pageDir, "page.tsx");
+        this.ensureDir(serverPath);
+        writeFileSync(serverPath, serverCode);
+        const serverRel = relative(basePath, serverPath);
+        fileContents[serverRel] = serverCode;
+        written.push(serverRel);
+        return written;
     }
     // ─── File writers (adapted from CodeBuilder) ──────────────────────
     ensureDir(filePath) {
@@ -987,7 +1581,20 @@ export const updateStatus = mutation({
     async writePages(basePath, featureSlug, pkg, feature, appSpec, fileContents) {
         for (const cap of pkg.included_capabilities) {
             const capLower = cap.toLowerCase();
-            const capSlug = capLower.replace(/[^a-z0-9]+/g, "-");
+            let capSlug = capLower.replace(/[^a-z0-9]+/g, "-");
+            // Prevent path doubling: if capSlug overlaps with featureSlug,
+            // remap to a short canonical name so we don't get feature/feature/page.tsx
+            if (capSlug === featureSlug || capSlug.startsWith(`${featureSlug}-`) || featureSlug.startsWith(`${capSlug}-`)) {
+                if (capLower.includes("form") || capLower.includes("submit") || capLower.includes("create") || capLower.includes("edit")) {
+                    capSlug = "new";
+                }
+                else if (capLower.includes("detail") || capLower.includes("view") || capLower.includes("review")) {
+                    capSlug = "view";
+                }
+                else {
+                    capSlug = "list";
+                }
+            }
             if (capLower.includes("form") || capLower.includes("submit") || capLower.includes("create")) {
                 await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
             }
@@ -1108,15 +1715,11 @@ export default function ${pascalName}Page() {
 }
 `;
         }
-        content = normalizeGeneratedSource(content);
-        writeFileSync(pagePath, content);
-        if (fileContents) {
-            fileContents[relative(basePath, pagePath)] = content;
-        }
+        // Write as server-wrapper + client-component pair
+        const pageDir = join(basePath, "app", featureSlug, capSlug);
+        this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
     async writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents) {
-        const pagePath = join(basePath, "app", featureSlug, capSlug, "page.tsx");
-        this.ensureDir(pagePath);
         let content = null;
         if (feature && appSpec) {
             try {
@@ -1210,15 +1813,11 @@ export default function ${pascalName}Page() {
 }
 `;
         }
-        content = normalizeGeneratedSource(content);
-        writeFileSync(pagePath, content);
-        if (fileContents) {
-            fileContents[relative(basePath, pagePath)] = content;
-        }
+        // Write as server-wrapper + client-component pair
+        const pageDir = join(basePath, "app", featureSlug, capSlug);
+        this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
     async writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents) {
-        const pagePath = join(basePath, "app", featureSlug, "[id]", "page.tsx");
-        this.ensureDir(pagePath);
         let content = null;
         if (feature && appSpec) {
             try {
@@ -1308,11 +1907,9 @@ export default function ${pascalName}DetailPage() {
 }
 `;
         }
-        content = normalizeGeneratedSource(content);
-        writeFileSync(pagePath, content);
-        if (fileContents) {
-            fileContents[relative(basePath, pagePath)] = content;
-        }
+        // Write as server-wrapper + client-component pair
+        const pageDir = join(basePath, "app", featureSlug, "[id]");
+        this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
     async writeComponents(basePath, featureSlug, pkg, feature, appSpec, fileContents) {
         const badgePath = join(basePath, "components", featureSlug, "status-badge.tsx");

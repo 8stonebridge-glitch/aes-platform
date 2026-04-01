@@ -74,7 +74,7 @@ export async function builderDispatcher(state) {
     // ── Primary path: AppBuilder ──
     const appBuilder = new AppBuilder();
     try {
-        const result = await appBuilder.buildApp(state.jobId, state.appSpec, state.featureBridges, state.featureBuildOrder, cb, state.targetPath, state.reusableSourceFiles);
+        const result = await appBuilder.buildApp(state.jobId, state.appSpec, state.featureBridges, state.featureBuildOrder, cb, state.targetPath, state.reusableSourceFiles, state.graphContext);
         result.run.workspace_path = result.workspace.path;
         buildResults["__app__"] = result.run;
         for (const [featureId, featureRun] of Object.entries(result.featureResults)) {

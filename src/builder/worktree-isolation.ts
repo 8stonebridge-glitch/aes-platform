@@ -44,7 +44,11 @@ export function createBaseRepo(
   jobId: string,
   repoUrl?: string,
 ): { path: string; branch: string } {
-  const basePath = mkdtempSync(join(tmpdir(), `aes-base-${jobId.slice(0, 8)}-`));
+  const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+  if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+    mkdirSync(buildDir, { recursive: true });
+  }
+  const basePath = mkdtempSync(join(buildDir, `aes-base-${jobId.slice(0, 8)}-`));
 
   if (repoUrl) {
     // Clone the real repo

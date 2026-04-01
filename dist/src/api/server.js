@@ -915,7 +915,7 @@ app.get("/api/health", (_req, res) => {
     const sem = getLLMSemaphoreStats();
     res.json({
         status: "ok",
-        version: "v15",
+        version: "v16",
         build_id: BUILD_ID,
         commit_sha: COMMIT_SHA,
         commit_short: COMMIT_SHORT,
@@ -950,6 +950,17 @@ function resolveCommitSha() {
     }
 }
 // ─── Debug / admin endpoints ──────────────────────────────────────
+app.get("/api/debug/routes", apiKeyAuth, (_req, res) => {
+    const routes = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app._router?.stack?.forEach((layer) => {
+        if (layer.route) {
+            const methods = Object.keys(layer.route.methods).join(",").toUpperCase();
+            routes.push(`${methods} ${layer.route.path}`);
+        }
+    });
+    res.json({ count: routes.length, routes });
+});
 app.get("/api/debug/semaphore", apiKeyAuth, (_req, res) => {
     res.json(getLLMSemaphoreStats());
 });

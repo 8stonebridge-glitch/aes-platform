@@ -41,7 +41,7 @@ const HERMES_REPAIR_URL = (process.env.HERMES_RELEASE_URL ||
     process.env.HERMES_INTERNAL_URL ||
     process.env.HERMES_URL ||
     "").replace(/\/+$/, "");
-const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 2;
+const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 3;
 const AES_UI_COMPONENTS = [
     "Button",
     "Input",
@@ -119,20 +119,34 @@ function normalizeUnsupportedButtonLinkProps(content) {
     });
     return { content: next, changed: next !== content };
 }
-function injectClerkPublishableKey(workspacePath) {
+function injectProviderEnvVars(workspacePath) {
     const envPath = join(workspacePath, ".env.local");
-    if (!existsSync(envPath))
-        return { changed: false };
-    const content = readFileSync(envPath, "utf-8");
-    if (/^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=/m.test(content)) {
-        return { changed: false };
+    let content = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+    let changed = false;
+    // Clerk publishable key
+    const clerkKey = process.env.AES_CLERK_PUBLISHABLE_KEY
+        || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        || process.env.CLERK_PUBLISHABLE_KEY;
+    if (clerkKey && !/^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=/m.test(content)) {
+        content = `${content.trim()}\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${clerkKey}\n`;
+        changed = true;
     }
-    const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY;
-    if (!key)
-        return { changed: false };
-    const next = `${content.trim()}\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${key}\n`;
-    writeFileSync(envPath, next);
-    return { changed: true, file: envPath };
+    // Clerk secret key
+    const clerkSecret = process.env.AES_CLERK_SECRET_KEY || process.env.CLERK_SECRET_KEY;
+    if (clerkSecret && !/^CLERK_SECRET_KEY=/m.test(content)) {
+        content = `${content.trim()}\nCLERK_SECRET_KEY=${clerkSecret}\n`;
+        changed = true;
+    }
+    // Convex URL
+    const convexUrl = process.env.AES_CONVEX_URL || process.env.NEXT_PUBLIC_CONVEX_URL;
+    if (convexUrl && !/^NEXT_PUBLIC_CONVEX_URL=/m.test(content)) {
+        content = `${content.trim()}\nNEXT_PUBLIC_CONVEX_URL=${convexUrl}\n`;
+        changed = true;
+    }
+    if (changed) {
+        writeFileSync(envPath, content.trimStart());
+    }
+    return { changed, file: envPath };
 }
 function collectSourceFiles(root, extensions = [".ts", ".tsx"]) {
     const files = [];
@@ -162,6 +176,43 @@ function ensureClientDirective(content) {
     }
     return {
         content: `"use client";\n${content.trimStart()}`,
+        changed: true,
+    };
+}
+/**
+ * Pages using Clerk auth hooks (useAuth, useUser, useClerk, useOrganization, etc.)
+ * crash during Next.js static prerendering because there is no Clerk provider at
+ * build time. Adding `export const dynamic = "force-dynamic"` tells Next to always
+ * server-render these pages instead of prerendering them.
+ */
+function ensureDynamicExportForAuthPages(content, filePath) {
+    // Only apply to page files in the app directory
+    if (!filePath.includes("/app/") && !filePath.includes("\\app\\")) {
+        return { content, changed: false };
+    }
+    if (!/page\.(ts|tsx)$/.test(filePath)) {
+        return { content, changed: false };
+    }
+    // Already has a dynamic export
+    if (/export\s+const\s+dynamic\s*=/.test(content)) {
+        return { content, changed: false };
+    }
+    // Any page using React hooks, Clerk auth, or Convex hooks will fail prerendering.
+    // Since all AES-generated apps use client-side providers, mark all pages dynamic.
+    const runtimeHookPattern = /\b(useAuth|useUser|useClerk|useOrganization|useOrganizationList|useSession|useSignIn|useSignUp|Protect|SignedIn|SignedOut|useConvexAuth|useQuery|useMutation|useAction|useConvex|useState|useEffect|useRouter|useParams|usePathname)\b/;
+    if (!runtimeHookPattern.test(content)) {
+        return { content, changed: false };
+    }
+    // Insert after "use client" if present, otherwise at top
+    const useClientMatch = content.match(/^(\s*["']use client["'];?\s*\n)/);
+    if (useClientMatch) {
+        return {
+            content: content.replace(useClientMatch[0], `${useClientMatch[0]}export const dynamic = "force-dynamic";\n`),
+            changed: true,
+        };
+    }
+    return {
+        content: `export const dynamic = "force-dynamic";\n${content}`,
         changed: true,
     };
 }
@@ -614,6 +665,22 @@ function enforceSourceGuardrailsInWorkspace(workspacePath) {
             const original = readFileSync(filePath, "utf-8");
             let next = original;
             const patterns = new Set();
+            // Fix globals.css imports:
+            // - Non-layout files: strip any globals.css import (only root layout should import it)
+            // - Layout files: fix wrong relative path to ./globals.css
+            const isLayout = filePath.endsWith("layout.tsx") || filePath.endsWith("layout.ts");
+            if (!isLayout) {
+                const stripped = next.replace(/^import\s+["'][^"']*globals\.css["'];?\s*\n?/gm, "");
+                if (stripped !== next) {
+                    next = stripped;
+                    patterns.add("globals_css_wrong_location");
+                }
+            }
+            else if (/import\s+["']\.\.\/.*globals\.css["']/.test(next)) {
+                // Layout has wrong relative path — fix to ./globals.css
+                next = next.replace(/import\s+["']\.\.\/[^"']*globals\.css["'];?/g, 'import "./globals.css";');
+                patterns.add("globals_css_wrong_location");
+            }
             const routerBindings = ensureRouterBindings(next);
             if (routerBindings.changed) {
                 next = routerBindings.content;
@@ -622,6 +689,11 @@ function enforceSourceGuardrailsInWorkspace(workspacePath) {
             if (clientDirective.changed) {
                 next = clientDirective.content;
                 patterns.add("next_client_hook_missing_use_client");
+            }
+            const dynamicExport = ensureDynamicExportForAuthPages(next, filePath);
+            if (dynamicExport.changed) {
+                next = dynamicExport.content;
+                patterns.add("next_auth_page_missing_dynamic_export");
             }
             const aesUiImports = ensureAesUiImports(next);
             if (aesUiImports.changed) {
@@ -835,13 +907,13 @@ async function runPredeployCompileGate(args) {
             errorMessage: `Compile gate failed during dependency install: ${dependencyInstall.message}`,
         };
     }
-    const clerkEnv = injectClerkPublishableKey(workspacePath);
+    const providerEnv = injectProviderEnvVars(workspacePath);
     const preflightRewrittenTests = repairBrokenGeneratedTestImports(workspacePath);
     const preflightTestingLibraryFixes = repairTestingLibraryFireEventImports(workspacePath);
-    if (clerkEnv.changed) {
+    if (providerEnv.changed) {
         store.addLog(jobId, {
             gate: "deploying",
-            message: `[compile-gate] injected NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY into .env.local`,
+            message: `[compile-gate] injected Clerk + Convex provider env vars into .env.local`,
         });
     }
     if (preflightRewrittenTests.length > 0) {
@@ -864,8 +936,8 @@ async function runPredeployCompileGate(args) {
         const convexCheck = await checker.runConvexTypecheck(workspacePath);
         // Stage 2: full app typecheck (only if convex passes)
         const typecheck = convexCheck.passed ? await checker.runTypecheck(workspacePath) : null;
-        // Stage 3: next build (only if typecheck passes)
-        const build = (typecheck?.passed) ? await checker.runBuild(workspacePath) : null;
+        // Stage 3: next build (server-wrapper pattern prevents prerender crashes)
+        const build = typecheck?.passed ? await checker.runBuild(workspacePath) : null;
         const failingCheck = findFailingCheck([convexCheck, ...(typecheck ? [typecheck] : []), ...(build ? [build] : [])]);
         if (!failingCheck) {
             for (const success of pendingSuccesses) {
@@ -943,6 +1015,10 @@ async function runPredeployCompileGate(args) {
             errorOutput: output,
             hermesHints,
         });
+        // Re-apply guardrails AFTER LLM repair to prevent the LLM from undoing
+        // critical fixes (e.g. removing export const dynamic = "force-dynamic")
+        const postRepairGuardrails = enforceSourceGuardrailsInWorkspace(workspacePath);
+        const postRepairFiles = postRepairGuardrails.map((entry) => entry.file.replace(`${workspacePath}/`, ""));
         const changedFiles = Array.from(new Set([
             ...deterministicFiles,
             ...renamedTestFiles,
@@ -952,6 +1028,7 @@ async function runPredeployCompileGate(args) {
             ...preflightBrokenImportFiles,
             ...rewrittenImplicitAnyFiles,
             ...llmRepair.filesChanged,
+            ...postRepairFiles,
         ]));
         if (changedFiles.length === 0) {
             return {
@@ -997,11 +1074,50 @@ async function runPredeployCompileGate(args) {
 export async function resumeCompileGate(jobId, workspacePath) {
     const store = getJobStore();
     const result = await runPredeployCompileGate({ workspacePath, jobId, store });
-    store.update(jobId, {
-        currentGate: result.passed ? "deploying" : "failed",
-        errorMessage: result.errorMessage ?? null,
-    });
-    return result;
+    if (!result.passed) {
+        store.update(jobId, {
+            currentGate: "failed",
+            errorMessage: result.errorMessage ?? null,
+        });
+        return result;
+    }
+    // Compile passed — continue into deployment
+    store.update(jobId, { currentGate: "deploying" });
+    // Reconstruct minimal state from the job record for the deploy phase
+    let job = store.get(jobId);
+    if (!job) {
+        // Job not in memory (instance restarted) — hydrate from Postgres
+        job = await store.loadFromPostgres(jobId) ?? undefined;
+    }
+    if (!job) {
+        return { passed: true, errorMessage: "Compile passed but job record not found for deployment" };
+    }
+    const minimalState = {
+        jobId,
+        deployTarget: job.deployTarget || "vercel",
+        appSpec: job.appSpec || null,
+        buildResults: {
+            __app__: { workspace_path: workspacePath },
+            ...(job.buildResults || {}),
+        },
+    };
+    try {
+        const deployResult = await deploymentHandler(minimalState);
+        const url = deployResult.deploymentUrl;
+        store.update(jobId, {
+            currentGate: deployResult.currentGate || "complete",
+            deploymentUrl: url ?? null,
+            errorMessage: deployResult.errorMessage ?? null,
+        });
+        return { passed: true, deploymentUrl: url };
+    }
+    catch (err) {
+        store.update(jobId, {
+            currentGate: "failed",
+            errorMessage: `Deploy after resume failed: ${err?.message || err}`,
+        });
+        return { passed: true, errorMessage: `Compile passed but deploy failed: ${err?.message}` };
+    }
 }
 export async function deploymentHandler(state) {
     const cb = getCallbacks();
@@ -1042,6 +1158,12 @@ export async function deploymentHandler(state) {
             diagnosis: "Generated framework code drifted outside the approved Convex/Clerk contract packs.",
             fixAction: "Applied framework contract guardrails to rewrite generated files back to approved backend/auth patterns before deploy.",
             errorSnippet: "Framework contract pack violation.",
+        },
+        next_auth_page_missing_dynamic_export: {
+            category: "auth",
+            diagnosis: "Generated page uses Clerk auth hooks but lacks a dynamic export, causing Next.js prerender failure at build time.",
+            fixAction: 'Added export const dynamic = "force-dynamic" to auth-dependent pages before deploy.',
+            errorSnippet: "Error occurred prerendering page — Cannot read properties of null.",
         },
     };
     cb?.onGate("deploying", "Deploying application...");
@@ -1103,6 +1225,8 @@ export async function deploymentHandler(state) {
             });
             for (const [patternId, filesChanged] of patternMap.entries()) {
                 const repair = repairMemoryEntries[patternId];
+                if (!repair)
+                    continue; // Unknown pattern — skip Hermes recording
                 store.recordHermesRepairOutcome({
                     pattern: patternId,
                     category: repair.category,
@@ -1254,7 +1378,8 @@ export async function deploymentHandler(state) {
         try {
             cb?.onStep("Creating GitHub repository...");
             const github = new GithubService();
-            const repoName = `${appSlug}-${state.jobId.substring(0, 8)}`;
+            const ts = Date.now().toString(36).slice(-4);
+            const repoName = `${appSlug}-${state.jobId.substring(0, 8)}-${ts}`;
             const repo = await github.createRepo(repoName, appDescription, false);
             githubRepoUrl = repo.html_url;
             githubFullName = repo.full_name;
@@ -1315,7 +1440,9 @@ export async function deploymentHandler(state) {
             if (convexUrl) {
                 envVars["NEXT_PUBLIC_CONVEX_URL"] = convexUrl;
             }
-            const project = await vercel.createProject(appSlug, {
+            // Tell Next.js to skip static page generation on Vercel
+            envVars["NEXT_PRIVATE_STANDALONE"] = "1";
+            const project = await vercel.createProject(githubRepoName, {
                 repo: githubRepoName,
                 org: githubRepoOwnerLogin,
                 repoId: githubRepoId,

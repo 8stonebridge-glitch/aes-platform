@@ -99,6 +99,7 @@ export declare class JobStore {
     private postRepairOutcomeToHermes;
     recordHermesReleaseEvent(event: HermesReleaseEvent): void;
     recordHermesRepairOutcome(outcome: HermesRepairOutcomeEvent): void;
+    private writeRepairOutcomeToGraph;
     private startHealthCheckTimer;
     private stopHealthCheckTimer;
     create(job: JobRecord): void;

@@ -41,7 +41,11 @@ export class WorkspaceManager {
         mkdirSync(basePath, { recursive: true });
       }
     } else {
-      basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+      const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+      if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+        mkdirSync(buildDir, { recursive: true });
+      }
+      basePath = mkdtempSync(join(buildDir, "aes-build-"));
     }
 
     // Initialize git repo with AES identity for containerized environments
@@ -76,7 +80,11 @@ export class WorkspaceManager {
     const branch = `aes/${safeJobId}/${slug}`;
     const workspaceId = `ws-${safeJobId}-${slug}`;
 
-    const basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+    const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+    if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+      mkdirSync(buildDir, { recursive: true });
+    }
+    const basePath = mkdtempSync(join(buildDir, "aes-build-"));
 
     if (repoUrl) {
       // Clone the real repo — repoUrl is passed as a single argument, not interpolated into a shell string
@@ -219,11 +227,11 @@ export function cleanupOldWorkspaces(maxAgeMs: number = 3600000): { removed: str
   const removed: string[] = [];
   const errors: string[] = [];
   const now = Date.now();
-  const tmp = tmpdir();
+  const buildDir = process.env.AES_BUILD_DIR || tmpdir();
 
   let entries: string[];
   try {
-    entries = readdirSync(tmp);
+    entries = readdirSync(buildDir);
   } catch {
     return { removed, errors };
   }
@@ -231,7 +239,7 @@ export function cleanupOldWorkspaces(maxAgeMs: number = 3600000): { removed: str
   for (const entry of entries) {
     if (!entry.startsWith("aes-build-")) continue;
 
-    const fullPath = join(tmp, entry);
+    const fullPath = join(buildDir, entry);
     try {
       const stat = statSync(fullPath);
       if (!stat.isDirectory()) continue;

@@ -53,6 +53,8 @@ export class VercelService {
         const body = {
             name,
             framework: "nextjs",
+            // Server-wrapper pattern ensures pages don't crash during prerendering.
+            // Each page.tsx is a server component with force-dynamic; hooks live in client-page.tsx.
             gitRepository: {
                 type: "github",
                 repo: gitRepo.repo,

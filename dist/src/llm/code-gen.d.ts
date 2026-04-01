@@ -32,6 +32,10 @@ interface AppContext {
         effect: string;
     }[];
 }
+/** Called by AppBuilder to set the graph guidance block for all LLM calls in this module. */
+export declare function setGraphGuidanceBlock(block: string): void;
+/** Clear the graph guidance block after a build completes. */
+export declare function clearGraphGuidanceBlock(): void;
 export declare function generateConvexSchema(feature: FeatureContext, appSpec: AppContext): Promise<string | null>;
 export declare function generateConvexQueries(feature: FeatureContext, appSpec: AppContext, schemaContent: string): Promise<string | null>;
 export declare function generateConvexMutations(feature: FeatureContext, appSpec: AppContext, schemaContent: string): Promise<string | null>;

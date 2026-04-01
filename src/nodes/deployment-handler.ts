@@ -920,6 +920,25 @@ function enforceSourceGuardrailsInWorkspace(workspacePath: string): GuardrailPat
       let next = original;
       const patterns = new Set<GuardrailPatternId>();
 
+      // Fix globals.css imports:
+      // - Non-layout files: strip any globals.css import (only root layout should import it)
+      // - Layout files: fix wrong relative path to ./globals.css
+      const isLayout = filePath.endsWith("layout.tsx") || filePath.endsWith("layout.ts");
+      if (!isLayout) {
+        const stripped = next.replace(/^import\s+["'][^"']*globals\.css["'];?\s*\n?/gm, "");
+        if (stripped !== next) {
+          next = stripped;
+          patterns.add("globals_css_wrong_location" as GuardrailPatternId);
+        }
+      } else if (/import\s+["']\.\.\/.*globals\.css["']/.test(next)) {
+        // Layout has wrong relative path — fix to ./globals.css
+        next = next.replace(
+          /import\s+["']\.\.\/[^"']*globals\.css["'];?/g,
+          'import "./globals.css";',
+        );
+        patterns.add("globals_css_wrong_location" as GuardrailPatternId);
+      }
+
       const routerBindings = ensureRouterBindings(next);
       if (routerBindings.changed) {
         next = routerBindings.content;
@@ -1219,10 +1238,8 @@ async function runPredeployCompileGate(args: {
     const convexCheck = await checker.runConvexTypecheck(workspacePath);
     // Stage 2: full app typecheck (only if convex passes)
     const typecheck = convexCheck.passed ? await checker.runTypecheck(workspacePath) : null;
-    // Stage 3: next build (skip — prerendering always fails for Convex+Clerk apps
-    // because providers don't exist at build time. Type safety is verified in stages 1-2.
-    // The app will be deployed with `next start` which renders pages at request time.)
-    const build: CheckResult | null = null;
+    // Stage 3: next build (server-wrapper pattern prevents prerender crashes)
+    const build = typecheck?.passed ? await checker.runBuild(workspacePath) : null;
     const failingCheck = findFailingCheck([convexCheck, ...(typecheck ? [typecheck] : []), ...(build ? [build] : [])]);
 
     if (!failingCheck) {
@@ -1381,14 +1398,56 @@ async function runPredeployCompileGate(args: {
   };
 }
 
-export async function resumeCompileGate(jobId: string, workspacePath: string): Promise<{ passed: boolean; errorMessage?: string }> {
+export async function resumeCompileGate(jobId: string, workspacePath: string): Promise<{ passed: boolean; errorMessage?: string; deploymentUrl?: string }> {
   const store = getJobStore();
   const result = await runPredeployCompileGate({ workspacePath, jobId, store });
-  store.update(jobId, {
-    currentGate: result.passed ? "deploying" : "failed",
-    errorMessage: result.errorMessage ?? null,
-  } as any);
-  return result;
+  if (!result.passed) {
+    store.update(jobId, {
+      currentGate: "failed",
+      errorMessage: result.errorMessage ?? null,
+    } as any);
+    return result;
+  }
+
+  // Compile passed — continue into deployment
+  store.update(jobId, { currentGate: "deploying" } as any);
+
+  // Reconstruct minimal state from the job record for the deploy phase
+  let job = store.get(jobId);
+  if (!job) {
+    // Job not in memory (instance restarted) — hydrate from Postgres
+    job = await store.loadFromPostgres(jobId) ?? undefined;
+  }
+  if (!job) {
+    return { passed: true, errorMessage: "Compile passed but job record not found for deployment" };
+  }
+
+  const minimalState = {
+    jobId,
+    deployTarget: job.deployTarget || "vercel",
+    appSpec: job.appSpec || null,
+    buildResults: {
+      __app__: { workspace_path: workspacePath },
+      ...(job.buildResults || {}),
+    },
+  } as any;
+
+  try {
+    const deployResult = await deploymentHandler(minimalState);
+    const url = deployResult.deploymentUrl as string | undefined;
+    store.update(jobId, {
+      currentGate: (deployResult.currentGate as string) || "complete",
+      deploymentUrl: url ?? null,
+      errorMessage: (deployResult.errorMessage as string) ?? null,
+    } as any);
+    return { passed: true, deploymentUrl: url };
+  } catch (err: any) {
+    store.update(jobId, {
+      currentGate: "failed",
+      errorMessage: `Deploy after resume failed: ${err?.message || err}`,
+    } as any);
+    return { passed: true, errorMessage: `Compile passed but deploy failed: ${err?.message}` };
+  }
 }
 
 export async function deploymentHandler(
@@ -1513,6 +1572,7 @@ export async function deploymentHandler(
       });
       for (const [patternId, filesChanged] of patternMap.entries()) {
         const repair = repairMemoryEntries[patternId];
+        if (!repair) continue; // Unknown pattern — skip Hermes recording
         store.recordHermesRepairOutcome({
           pattern: patternId,
           category: repair.category,
@@ -1685,7 +1745,8 @@ export async function deploymentHandler(
       cb?.onStep("Creating GitHub repository...");
       const github = new GithubService();
 
-      const repoName = `${appSlug}-${state.jobId.substring(0, 8)}`;
+      const ts = Date.now().toString(36).slice(-4);
+      const repoName = `${appSlug}-${state.jobId.substring(0, 8)}-${ts}`;
       const repo = await github.createRepo(
         repoName,
         appDescription,
@@ -1766,7 +1827,7 @@ export async function deploymentHandler(
       envVars["NEXT_PRIVATE_STANDALONE"] = "1";
 
       const project = await vercel.createProject(
-        appSlug,
+        githubRepoName,
         {
           repo: githubRepoName,
           org: githubRepoOwnerLogin,

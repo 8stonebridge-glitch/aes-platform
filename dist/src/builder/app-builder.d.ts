@@ -13,6 +13,8 @@ import { type BuilderContext } from "./code-builder.js";
 import { type BuilderPackage } from "../builder-artifact.js";
 import type { BuilderRunRecord } from "../types/artifacts.js";
 import type { GraphCallbacks } from "../graph.js";
+import type { AESStateType } from "../state.js";
+import type { GraphGuidance } from "./code-builder.js";
 export interface AppBuildResult {
     workspace: Workspace;
     run: BuilderRunRecord;
@@ -20,6 +22,11 @@ export interface AppBuildResult {
     prSummary: string;
     file_contents: Record<string, string>;
 }
+/**
+ * Formats graph guidance into a constraint block that can be injected
+ * into LLM system prompts. Only includes non-empty sections.
+ */
+export declare function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string;
 export declare class AppBuilder {
     private workspaceManager;
     private codeBuilder;
@@ -38,7 +45,7 @@ export declare class AppBuilder {
             path: string;
             content: string;
         }[];
-    }>): Promise<AppBuildResult>;
+    }>, graphContext?: AESStateType["graphContext"]): Promise<AppBuildResult>;
     private generateAppLevelFiles;
     private generateLayout;
     private generateSidebarFile;
@@ -57,6 +64,11 @@ export declare class AppBuilder {
         files_created: string[];
         file_contents: Record<string, string>;
     }>;
+    /**
+     * Write a page as a server-wrapper + client-component pair.
+     * Returns the list of relative paths written.
+     */
+    private writePageWithServerWrapper;
     private ensureDir;
     private writeAndTrack;
     private writeConvexFunctions;

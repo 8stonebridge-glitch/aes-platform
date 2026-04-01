@@ -8,6 +8,18 @@ import { getLLM, isLLMAvailable, acquireLLMSlot, releaseLLMSlot } from "./provid
 import { getGenerationGroundTruthForPacks } from "./current-api-context.js";
 import { retrieveVerifiedContextForPart } from "../contracts/framework-contract-layer.js";
 const LLM_TIMEOUT_MS = 30_000;
+// ─── Graph Guidance Injection ───────────────────────────────────────
+// Set by the AppBuilder before building each feature so LLM calls
+// get prior violations, corrections, and failure patterns as constraints.
+let _activeGraphGuidanceBlock = "";
+/** Called by AppBuilder to set the graph guidance block for all LLM calls in this module. */
+export function setGraphGuidanceBlock(block) {
+    _activeGraphGuidanceBlock = block;
+}
+/** Clear the graph guidance block after a build completes. */
+export function clearGraphGuidanceBlock() {
+    _activeGraphGuidanceBlock = "";
+}
 /** Race a promise against a timeout; resolves to null on timeout. */
 function withTimeout(promise, ms) {
     return Promise.race([
@@ -31,10 +43,12 @@ async function callLLM(systemPrompt, userPrompt, contractPackIds = []) {
     if (!llm)
         return null;
     const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
+    const graphBlock = _activeGraphGuidanceBlock;
     const slotId = await acquireLLMSlot("code-gen");
     try {
+        const fullSystem = [groundTruth, graphBlock, systemPrompt].filter(Boolean).join("\n\n");
         const response = await withTimeout(llm.invoke([
-            { role: "system", content: `${groundTruth}\n\n${systemPrompt}` },
+            { role: "system", content: fullSystem },
             { role: "user", content: userPrompt },
         ]), LLM_TIMEOUT_MS);
         if (!response)

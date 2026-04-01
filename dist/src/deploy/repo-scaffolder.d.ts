@@ -17,6 +17,7 @@ export declare class RepoScaffolder {
     private writeTailwindConfig;
     private writePostcssConfig;
     private writeEnvExample;
+    private writeEnvLocal;
     private writeVitestConfig;
     private writeTestSetup;
     private writeConvexBase;
