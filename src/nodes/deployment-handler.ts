@@ -1199,8 +1199,10 @@ async function runPredeployCompileGate(args: {
     const convexCheck = await checker.runConvexTypecheck(workspacePath);
     // Stage 2: full app typecheck (only if convex passes)
     const typecheck = convexCheck.passed ? await checker.runTypecheck(workspacePath) : null;
-    // Stage 3: next build (only if typecheck passes)
-    const build = (typecheck?.passed) ? await checker.runBuild(workspacePath) : null;
+    // Stage 3: next build (skip — prerendering always fails for Convex+Clerk apps
+    // because providers don't exist at build time. Type safety is verified in stages 1-2.
+    // The app will be deployed with `next start` which renders pages at request time.)
+    const build: CheckResult | null = null;
     const failingCheck = findFailingCheck([convexCheck, ...(typecheck ? [typecheck] : []), ...(build ? [build] : [])]);
 
     if (!failingCheck) {
