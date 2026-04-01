@@ -1288,6 +1288,13 @@ async function runPredeployCompileGate(args: {
       hermesHints,
     });
 
+    // Re-apply guardrails AFTER LLM repair to prevent the LLM from undoing
+    // critical fixes (e.g. removing export const dynamic = "force-dynamic")
+    const postRepairGuardrails = enforceSourceGuardrailsInWorkspace(workspacePath);
+    const postRepairFiles = postRepairGuardrails.map((entry) =>
+      entry.file.replace(`${workspacePath}/`, ""),
+    );
+
     const changedFiles = Array.from(
       new Set([
         ...deterministicFiles,
@@ -1298,6 +1305,7 @@ async function runPredeployCompileGate(args: {
         ...preflightBrokenImportFiles,
         ...rewrittenImplicitAnyFiles,
         ...llmRepair.filesChanged,
+        ...postRepairFiles,
       ]),
     );
 
