@@ -367,14 +367,24 @@ CREATE (c12:LearnedComponentPattern {
 
 // ============================================================
 // CROSS-RELATIONSHIPS
-// These edges make the graph traversable so AES can pull
-// complete dependency chains, not just individual components.
+// Variable mapping reference:
+//   t1=AppShell  t2=PageHeader  t3=PageContent  t4=Button
+//   t5=DataTable t6=StatCard    t7=Badge         t8=Avatar
+//   t9=FormField t10=TextInput  t11=Select       t12=Textarea
+//   t13=Modal    t14=ConfirmDialog  t15=Toast     t16=EmptyState
+//   t17=LoadingSkeleton  t18=ErrorBoundaryFallback
+//   t19=Breadcrumb  t20=Tabs  t21=SearchInput
+//   t22=DashboardGrid  t23=ListDetailLayout
+//   c1=CatalystSidebarLayout  c2=CatalystTable  c3=CatalystCheckbox
+//   c4=CatalystSwitch  c5=CatalystPagination  c6=Sheet
+//   c7=Tooltip  c8=FormSystem  c9=DropdownMenu  c10=Alert
+//   c11=Skeleton  c12=RadixTabs
 // ============================================================
 
 // ── DEPENDS_ON ──
 // "I need this other component to function"
 
-// AppShell needs navigation items rendered with buttons/links
+// AppShell needs Button for sidebar nav items
 CREATE (t1)-[:DEPENDS_ON {reason: 'sidebar nav items'}]->(t4);
 
 // DataTable depends on Badge for status cells and Button for row actions
@@ -399,7 +409,7 @@ CREATE (c8)-[:DEPENDS_ON {reason: 'text input'}]->(t10);
 CREATE (c8)-[:DEPENDS_ON {reason: 'select input'}]->(t11);
 
 // SearchInput is a specialized TextInput
-CREATE (t19)-[:DEPENDS_ON {reason: 'base input behavior'}]->(t10);
+CREATE (t21)-[:DEPENDS_ON {reason: 'base input behavior'}]->(t10);
 
 // CatalystSidebarLayout uses Button for mobile menu toggle
 CREATE (c1)-[:DEPENDS_ON {reason: 'mobile menu trigger'}]->(t4);
@@ -418,7 +428,15 @@ CREATE (c9)-[:DEPENDS_ON {reason: 'menu trigger'}]->(t4);
 CREATE (c6)-[:DEPENDS_ON {reason: 'close button'}]->(t4);
 
 // DashboardGrid typically contains StatCards
-CREATE (t20)-[:DEPENDS_ON {reason: 'stat display'}]->(t6);
+CREATE (t22)-[:DEPENDS_ON {reason: 'stat display'}]->(t6);
+
+// Toast is used by ConfirmDialog, Modal, FormSystem for outcome feedback
+CREATE (t14)-[:DEPENDS_ON {reason: 'success/failure toast after confirm'}]->(t15);
+CREATE (t13)-[:DEPENDS_ON {reason: 'dialog action feedback toast'}]->(t15);
+CREATE (c8)-[:DEPENDS_ON {reason: 'form submission feedback toast'}]->(t15);
+
+// EmptyState needs Button for the optional action
+CREATE (t16)-[:DEPENDS_ON {reason: 'optional action button'}]->(t4);
 
 // ── COMPOSES ──
 // "I commonly appear inside this container"
@@ -428,20 +446,23 @@ CREATE (t1)-[:COMPOSES {reason: 'page structure'}]->(t2);
 CREATE (t1)-[:COMPOSES {reason: 'page structure'}]->(t3);
 
 // AppShell composes Breadcrumb for navigation context
-CREATE (t1)-[:COMPOSES {reason: 'navigation hierarchy'}]->(t17);
+CREATE (t1)-[:COMPOSES {reason: 'navigation hierarchy'}]->(t19);
 
-// ListDetailLayout composes inside PageContent
-CREATE (t3)-[:COMPOSES {reason: 'list-detail pattern'}]->(t21);
+// PageContent composes ListDetailLayout
+CREATE (t3)-[:COMPOSES {reason: 'list-detail pattern'}]->(t23);
 
-// DataTable composes inside PageContent
+// PageContent composes DataTable
 CREATE (t3)-[:COMPOSES {reason: 'data display'}]->(t5);
 
-// DashboardGrid composes inside PageContent
-CREATE (t3)-[:COMPOSES {reason: 'dashboard layout'}]->(t20);
+// PageContent composes DashboardGrid
+CREATE (t3)-[:COMPOSES {reason: 'dashboard layout'}]->(t22);
 
-// Tabs/RadixTabs compose inside PageContent
-CREATE (t3)-[:COMPOSES {reason: 'tabbed content'}]->(t18);
+// PageContent composes Tabs and RadixTabs
+CREATE (t3)-[:COMPOSES {reason: 'tabbed content'}]->(t20);
 CREATE (t3)-[:COMPOSES {reason: 'tabbed content'}]->(c12);
+
+// PageContent composes SearchInput (filter bar at top)
+CREATE (t3)-[:COMPOSES {reason: 'filter bar'}]->(t21);
 
 // CatalystSidebarLayout composes the same page structure
 CREATE (c1)-[:COMPOSES {reason: 'page header'}]->(t2);
@@ -453,16 +474,38 @@ CREATE (t13)-[:COMPOSES {reason: 'form inside dialog'}]->(t9);
 // Sheet composes FormSystem for slide-out forms
 CREATE (c6)-[:COMPOSES {reason: 'form inside panel'}]->(c8);
 
+// DashboardGrid composes StatCard
+CREATE (t22)-[:COMPOSES {reason: 'stat cards in grid'}]->(t6);
+
+// ListDetailLayout composes Badge and Avatar in list items
+CREATE (t23)-[:COMPOSES {reason: 'status badges in list'}]->(t7);
+CREATE (t23)-[:COMPOSES {reason: 'user avatars in list'}]->(t8);
+
+// DataTable composes DropdownMenu for row-level actions
+CREATE (t5)-[:COMPOSES {reason: 'row action menu'}]->(c9);
+
+// DataTable composes Tooltip for truncated cell content
+CREATE (t5)-[:COMPOSES {reason: 'truncated content hints'}]->(c7);
+
+// CatalystTable composes DropdownMenu for row-level actions
+CREATE (c2)-[:COMPOSES {reason: 'row action menu'}]->(c9);
+
 // ── PLACEHOLDER_FOR ──
 // "I'm the loading state for this component"
 
-CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'table loading state'}]->(t5);
-CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'stat loading state'}]->(t6);
-CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'list loading state'}]->(t21);
+// LoadingSkeleton is loading state for data components
+CREATE (t17)-[:PLACEHOLDER_FOR {reason: 'table loading state'}]->(t5);
+CREATE (t17)-[:PLACEHOLDER_FOR {reason: 'stat loading state'}]->(t6);
+CREATE (t17)-[:PLACEHOLDER_FOR {reason: 'list loading state'}]->(t23);
+CREATE (t17)-[:PLACEHOLDER_FOR {reason: 'catalyst table loading'}]->(c2);
+CREATE (t17)-[:PLACEHOLDER_FOR {reason: 'form loading state'}]->(c8);
+
+// Skeleton (Plasma variant) is also loading state
 CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'table loading state'}]->(t5);
 CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'card loading state'}]->(t6);
 CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'form loading state'}]->(c8);
 CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'catalyst table loading'}]->(c2);
+CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'avatar loading state'}]->(t8);
 
 // ── VARIANT_OF ──
 // "I'm an alternative implementation of the same concept"
@@ -477,41 +520,40 @@ CREATE (c1)-[:VARIANT_OF {reason: 'headless-ui vs plain sidebar'}]->(t1);
 CREATE (c2)-[:VARIANT_OF {reason: 'context-driven vs prop-driven table'}]->(t5);
 
 // RadixTabs is a variant of Tabs
-CREATE (c12)-[:VARIANT_OF {reason: 'radix vs plain tabs'}]->(t18);
+CREATE (c12)-[:VARIANT_OF {reason: 'radix vs plain tabs'}]->(t20);
 
 // Skeleton is a variant of LoadingSkeleton
-CREATE (c11)-[:VARIANT_OF {reason: 'pulse vs shimmer skeleton'}]->(t15);
+CREATE (c11)-[:VARIANT_OF {reason: 'pulse vs shimmer skeleton'}]->(t17);
 
 // CatalystCheckbox and CatalystSwitch are toggle variants
 CREATE (c4)-[:VARIANT_OF {reason: 'switch vs checkbox toggle'}]->(c3);
 
+// Alert is a variant of Toast (persistent vs auto-dismiss feedback)
+CREATE (c10)-[:VARIANT_OF {reason: 'persistent vs auto-dismiss notification'}]->(t15);
+
 // ── ERROR_STATE_FOR ──
 // "I'm what renders when this component fails"
 
-CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t5);
-CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t20);
-CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t21);
+CREATE (t18)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t5);
+CREATE (t18)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t22);
+CREATE (t18)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t23);
+CREATE (t18)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(c2);
+CREATE (t18)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(c8);
 
 // ── EMPTY_STATE_FOR ──
 // "I render when this component has no data"
 
-CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(t5);
-CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(c2);
-CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no items placeholder'}]->(t21);
-
-// ── NOTIFIES_WITH ──
-// "I use this component to communicate outcomes"
-
-CREATE (t14)-[:NOTIFIES_WITH {reason: 'success/failure toast after confirm'}]->(t15);
-CREATE (c8)-[:NOTIFIES_WITH {reason: 'form submission feedback'}]->(t15);
-CREATE (t13)-[:NOTIFIES_WITH {reason: 'dialog action feedback'}]->(t15);
+CREATE (t16)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(t5);
+CREATE (t16)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(c2);
+CREATE (t16)-[:EMPTY_STATE_FOR {reason: 'no items placeholder'}]->(t23);
+CREATE (t16)-[:EMPTY_STATE_FOR {reason: 'no results placeholder'}]->(t21);
 
 // ── PAIRS_WITH ──
 // "We commonly appear together on the same page"
 
 // Search + Table
-CREATE (t19)-[:PAIRS_WITH {reason: 'filter table rows'}]->(t5);
-CREATE (t19)-[:PAIRS_WITH {reason: 'filter catalyst table'}]->(c2);
+CREATE (t21)-[:PAIRS_WITH {reason: 'filter table rows'}]->(t5);
+CREATE (t21)-[:PAIRS_WITH {reason: 'filter catalyst table'}]->(c2);
 
 // Pagination + Table
 CREATE (c5)-[:PAIRS_WITH {reason: 'paginate table rows'}]->(t5);
@@ -524,7 +566,7 @@ CREATE (c7)-[:PAIRS_WITH {reason: 'action button hints'}]->(t4);
 CREATE (c7)-[:PAIRS_WITH {reason: 'user info on hover'}]->(t8);
 
 // Breadcrumb + PageHeader (navigation context)
-CREATE (t17)-[:PAIRS_WITH {reason: 'breadcrumb above header'}]->(t2);
+CREATE (t19)-[:PAIRS_WITH {reason: 'breadcrumb above header'}]->(t2);
 
 // Alert + FormSystem (form-level error display)
 CREATE (c10)-[:PAIRS_WITH {reason: 'form-level error/success'}]->(c8);
@@ -532,3 +574,22 @@ CREATE (c10)-[:PAIRS_WITH {reason: 'form-level error/success'}]->(c8);
 // DropdownMenu + DataTable (row actions menu)
 CREATE (c9)-[:PAIRS_WITH {reason: 'row action menu'}]->(t5);
 CREATE (c9)-[:PAIRS_WITH {reason: 'row action menu'}]->(c2);
+
+// Badge + StatCard (status indicators on cards)
+CREATE (t7)-[:PAIRS_WITH {reason: 'trend/status indicator on stat'}]->(t6);
+
+// Tabs + DataTable (different data views)
+CREATE (t20)-[:PAIRS_WITH {reason: 'tabbed data views'}]->(t5);
+CREATE (c12)-[:PAIRS_WITH {reason: 'tabbed data views'}]->(t5);
+
+// CatalystCheckbox + FormSystem (form toggle input)
+CREATE (c3)-[:PAIRS_WITH {reason: 'checkbox form input'}]->(c8);
+
+// CatalystSwitch + FormSystem (form toggle input)
+CREATE (c4)-[:PAIRS_WITH {reason: 'switch form input'}]->(c8);
+
+// Textarea + FormField (multi-line form input)
+CREATE (t12)-[:PAIRS_WITH {reason: 'textarea inside form field'}]->(t9);
+
+// Avatar + Badge (user status)
+CREATE (t8)-[:PAIRS_WITH {reason: 'online/status indicator'}]->(t7);
