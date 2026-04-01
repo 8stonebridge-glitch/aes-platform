@@ -116,6 +116,50 @@ export const NODE_TYPES = {
     optional: ["description", "detection_logic", "false_positive_rate"],
     indexes: ["heuristic_id"],
   },
+
+  // Learned knowledge nodes (populated by graph-reader, donor seeds, and build extraction)
+  LearnedIntegration: {
+    required: ["name", "type", "provider"],
+    optional: ["description", "auth_method", "code_sample"],
+    indexes: ["name", "provider"],
+  },
+  LearnedPattern: {
+    required: ["name", "type"],
+    optional: ["description", "applicable_to", "code_sample"],
+    indexes: ["name", "type"],
+  },
+  LearnedComponentPattern: {
+    required: ["name", "category"],
+    optional: ["description", "source", "props", "usage_example", "depends_on"],
+    indexes: ["name", "category"],
+  },
+
+  // Live runtime nodes (populated by live-runtime.cypher)
+  FeatureSpec: {
+    required: ["node_id", "feature_id", "name", "status"],
+    optional: ["description", "priority", "depends_on", "app_id"],
+    indexes: ["node_id", "feature_id"],
+  },
+  RuntimeService: {
+    required: ["node_id", "name"],
+    optional: ["description", "entry_point", "authority_tier"],
+    indexes: ["node_id", "name"],
+  },
+  InterfaceSurface: {
+    required: ["node_id", "name", "type"],
+    optional: ["description", "entry_point"],
+    indexes: ["node_id", "name"],
+  },
+  DataStore: {
+    required: ["node_id", "name", "type"],
+    optional: ["description", "connection_env"],
+    indexes: ["node_id", "name"],
+  },
+  GovernanceRule: {
+    required: ["node_id", "name"],
+    optional: ["description", "enforcement"],
+    indexes: ["node_id", "name"],
+  },
 } as const;
 
 export type NodeLabel = keyof typeof NODE_TYPES;

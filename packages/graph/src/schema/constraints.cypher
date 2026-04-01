@@ -26,6 +26,18 @@ CREATE CONSTRAINT fix_pattern_id_unique IF NOT EXISTS FOR (fp:FixPattern) REQUIR
 CREATE CONSTRAINT prevention_rule_id_unique IF NOT EXISTS FOR (pr:PreventionRule) REQUIRE pr.rule_id IS UNIQUE;
 CREATE CONSTRAINT validator_heuristic_id_unique IF NOT EXISTS FOR (vh:ValidatorHeuristic) REQUIRE vh.heuristic_id IS UNIQUE;
 
+// Learned knowledge node constraints
+CREATE CONSTRAINT learned_component_name_unique IF NOT EXISTS FOR (lcp:LearnedComponentPattern) REQUIRE lcp.name IS UNIQUE;
+CREATE CONSTRAINT learned_integration_name_unique IF NOT EXISTS FOR (li:LearnedIntegration) REQUIRE li.name IS UNIQUE;
+CREATE CONSTRAINT learned_pattern_name_unique IF NOT EXISTS FOR (lp:LearnedPattern) REQUIRE lp.name IS UNIQUE;
+
+// Live runtime node constraints
+CREATE CONSTRAINT feature_spec_node_id_unique IF NOT EXISTS FOR (fs:FeatureSpec) REQUIRE fs.node_id IS UNIQUE;
+CREATE CONSTRAINT runtime_service_node_id_unique IF NOT EXISTS FOR (rs:RuntimeService) REQUIRE rs.node_id IS UNIQUE;
+CREATE CONSTRAINT interface_surface_node_id_unique IF NOT EXISTS FOR (is:InterfaceSurface) REQUIRE is.node_id IS UNIQUE;
+CREATE CONSTRAINT data_store_node_id_unique IF NOT EXISTS FOR (ds:DataStore) REQUIRE ds.node_id IS UNIQUE;
+CREATE CONSTRAINT governance_rule_node_id_unique IF NOT EXISTS FOR (gr:GovernanceRule) REQUIRE gr.node_id IS UNIQUE;
+
 // ============================================================
 // AES Graph — Indexes for Common Queries
 // ============================================================
@@ -53,3 +65,16 @@ CREATE INDEX failure_pattern_root_cause_idx IF NOT EXISTS FOR (fp:FailurePattern
 CREATE INDEX fix_pattern_action_idx IF NOT EXISTS FOR (fp:FixPattern) ON (fp.resolution_action);
 CREATE INDEX prevention_rule_gate_idx IF NOT EXISTS FOR (pr:PreventionRule) ON (pr.gate);
 CREATE INDEX validator_heuristic_tier_idx IF NOT EXISTS FOR (vh:ValidatorHeuristic) ON (vh.validator_tier);
+
+// Learned knowledge indexes
+CREATE INDEX learned_component_category_idx IF NOT EXISTS FOR (lcp:LearnedComponentPattern) ON (lcp.category);
+CREATE INDEX learned_component_source_idx IF NOT EXISTS FOR (lcp:LearnedComponentPattern) ON (lcp.source);
+CREATE INDEX learned_integration_provider_idx IF NOT EXISTS FOR (li:LearnedIntegration) ON (li.provider);
+CREATE INDEX learned_integration_type_idx IF NOT EXISTS FOR (li:LearnedIntegration) ON (li.type);
+CREATE INDEX learned_pattern_type_idx IF NOT EXISTS FOR (lp:LearnedPattern) ON (lp.type);
+
+// Live runtime indexes
+CREATE INDEX feature_spec_feature_id_idx IF NOT EXISTS FOR (fs:FeatureSpec) ON (fs.feature_id);
+CREATE INDEX feature_spec_status_idx IF NOT EXISTS FOR (fs:FeatureSpec) ON (fs.status);
+CREATE INDEX runtime_service_name_idx IF NOT EXISTS FOR (rs:RuntimeService) ON (rs.name);
+CREATE INDEX data_store_type_idx IF NOT EXISTS FOR (ds:DataStore) ON (ds.type);

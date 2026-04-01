@@ -35,6 +35,25 @@ export const EDGE_TYPES = {
   EMPTY_STATE_FOR: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
   NOTIFIES_WITH: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
   PAIRS_WITH: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+
+  // Learned knowledge relationships
+  TEACHES: { from: "LearnedIntegration", to: "FeatureType", properties: ["relevance"] },
+  DEMONSTRATES: { from: "LearnedPattern", to: "FeatureType", properties: ["relevance"] },
+  PATTERN_FOR: { from: "LearnedPattern", to: "Pattern", properties: [] },
+  PREVENTS: { from: "PreventionRule", to: "FeatureType", properties: ["gate"] },
+  COMPONENT_FOR: { from: "LearnedComponentPattern", to: "Package", properties: [] },
+
+  // Bridge/Scenario linkage
+  BRIDGES: { from: "BridgePreset", to: "FeatureType", properties: [] },
+  TESTS: { from: "ScenarioPack", to: "FeatureType", properties: [] },
+
+  // Live runtime relationships (FeatureSpec, RuntimeService, etc.)
+  IMPLEMENTS: { from: "FeatureSpec", to: "RuntimeService", properties: [] },
+  EXPOSES: { from: "FeatureSpec", to: "InterfaceSurface", properties: [] },
+  READS_FROM: { from: "FeatureSpec", to: "DataStore", properties: [] },
+  WRITES_TO: { from: "FeatureSpec", to: "DataStore", properties: [] },
+  ENFORCES: { from: "FeatureSpec", to: "GovernanceRule", properties: [] },
+  DEPENDS_ON_FEATURE: { from: "FeatureSpec", to: "FeatureSpec", properties: [] },
 } as const;
 
 export type EdgeLabel = keyof typeof EDGE_TYPES;
