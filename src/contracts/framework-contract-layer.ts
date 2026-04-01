@@ -92,6 +92,7 @@ const FRAMEWORK_PACKS: Record<FrameworkContractPackId, FrameworkContractPack> = 
       "Mock Convex in every test that uses Convex hooks. Use vi.mock('convex/react', () => ({ useQuery: vi.fn(() => undefined), useMutation: vi.fn(() => vi.fn()), useAction: vi.fn(() => vi.fn()) }))",
       "Mock Clerk in every test that uses Clerk hooks. Use vi.mock('@clerk/nextjs', () => ({ useAuth: vi.fn(() => ({ orgId: 'org_test', userId: 'user_test', isLoaded: true, isSignedIn: true })) }))",
       "Imports must only come from: vitest, @testing-library/react, @testing-library/dom, @testing-library/jest-dom/vitest, react, @/components/*, @/lib/*, or explicit vi.mock() stubs. Never import from @/app/* paths.",
+      "If using fireEvent, waitFor, or screen — import them from '@testing-library/react'. Using them without importing causes 'Cannot find name' compile errors.",
       "Use describe/it/expect from vitest. Import { describe, it, expect, vi, beforeEach } from 'vitest'.",
       "Prefer { render } return value for queries: const { getByText, getByRole } = render(...). Avoid importing screen separately.",
       "Every test must have at least one meaningful assertion. expect(true).toBe(true) is forbidden — it always passes and proves nothing.",
@@ -104,10 +105,13 @@ const FRAMEWORK_PACKS: Record<FrameworkContractPackId, FrameworkContractPack> = 
       "expect(false).toBe(false) — no-op assertion",
       "useQuery without vi.mock('convex/react') — Convex hooks throw at test runtime without mocking",
       "useAuth without vi.mock('@clerk/nextjs') — Clerk hooks throw at test runtime without mocking",
+      "fireEvent without import — causes 'Cannot find name fireEvent' compile error",
+      "waitFor without import — causes 'Cannot find name waitFor' compile error",
+      "screen without import — causes 'Cannot find name screen' compile error",
     ],
     preferredImports: [
       "import { describe, it, expect, vi, beforeEach } from 'vitest';",
-      "import { render } from '@testing-library/react';",
+      "import { render, fireEvent, waitFor, screen } from '@testing-library/react';",
       "import '@testing-library/jest-dom/vitest';",
     ],
     templateSkeletons: [

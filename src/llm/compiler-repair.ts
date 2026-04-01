@@ -132,6 +132,50 @@ ${fixtures.join("\n\n")}
 }
 
 /**
+ * Ensure test files that use fireEvent, waitFor, or screen have them imported
+ * from @testing-library/react. This is a deterministic fix for a common LLM
+ * mistake: using these globals without importing them.
+ */
+function repairTestingLibraryImports(content: string, filePath: string): string | null {
+  if (!/\.test\.(ts|tsx)$|\.spec\.(ts|tsx)$/.test(filePath)) return null;
+
+  const needed: string[] = [];
+  if (/\bfireEvent\b/.test(content) && !/import\s.*\bfireEvent\b.*from\s/.test(content)) needed.push("fireEvent");
+  if (/\bwaitFor\b/.test(content) && !/import\s.*\bwaitFor\b.*from\s/.test(content)) needed.push("waitFor");
+  if (/\bscreen\b/.test(content) && !/import\s.*\bscreen\b.*from\s/.test(content)) needed.push("screen");
+  if (/\bact\b\(/.test(content) && !/import\s.*\bact\b.*from\s/.test(content)) needed.push("act");
+
+  if (needed.length === 0) return null;
+
+  // Check if there's an existing @testing-library/react import to merge into
+  const existingImport = content.match(
+    /^(import\s*\{)([^}]*?)(\}\s*from\s*['"]@testing-library\/react['"];?)$/m
+  );
+
+  if (existingImport) {
+    const currentNames = existingImport[2].split(",").map(n => n.trim()).filter(Boolean);
+    const merged = Array.from(new Set([...currentNames, ...needed])).sort();
+    return content.replace(
+      existingImport[0],
+      `import { ${merged.join(", ")} } from '@testing-library/react';`
+    );
+  }
+
+  // No existing import — add one after the last import line
+  const lastImportMatch = [...content.matchAll(/^import\s+.*$/gm)];
+  const lastImport = lastImportMatch.length > 0 ? lastImportMatch[lastImportMatch.length - 1] : null;
+  if (lastImport && lastImport.index !== undefined) {
+    const insertAt = lastImport.index + lastImport[0].length;
+    return content.slice(0, insertAt) +
+      `\nimport { ${needed.join(", ")} } from '@testing-library/react';` +
+      content.slice(insertAt);
+  }
+
+  // No imports at all — prepend
+  return `import { ${needed.join(", ")} } from '@testing-library/react';\n${content}`;
+}
+
+/**
  * Deterministic regex repairs for Convex and Clerk files.
  * These fix the most common generated-code violations without needing an LLM.
  * Returns null if nothing changed.
@@ -261,6 +305,11 @@ export async function repairFilesForCompilerErrors(args: {
       // Test files: strip guessed @/app/ imports
       if (/\.test\.(ts|tsx)$|\.spec\.(ts|tsx)$/.test(relativePath)) {
         repaired = repairGuessedTestImports(original, relativePath);
+      }
+
+      // Test files: fix missing fireEvent/waitFor/screen imports
+      if (!repaired) {
+        repaired = repairTestingLibraryImports(original, relativePath);
       }
 
       // Convex/Clerk/middleware files: fix bare validators, shorthand forms, { org }, deprecated middleware
