@@ -32,8 +32,9 @@ export class RepoScaffolder {
     // 6. postcss.config.mjs
     this.writePostcssConfig(workspacePath);
 
-    // 7. .env.local.example
+    // 7. .env.local.example + actual .env.local with provider URLs
     this.writeEnvExample(workspacePath);
+    this.writeEnvLocal(workspacePath);
 
     // 8. Convex project structure
     this.writeConvexBase(workspacePath);
@@ -192,6 +193,35 @@ export default config;
 NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
 CONVEX_DEPLOYMENT=dev:your-project
 `);
+  }
+
+  private writeEnvLocal(base: string) {
+    const lines: string[] = [];
+
+    // Clerk publishable key
+    const clerkKey = process.env.AES_CLERK_PUBLISHABLE_KEY
+      || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    if (clerkKey) {
+      lines.push(`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${clerkKey}`);
+    }
+
+    // Clerk secret key
+    const clerkSecret = process.env.AES_CLERK_SECRET_KEY
+      || process.env.CLERK_SECRET_KEY;
+    if (clerkSecret) {
+      lines.push(`CLERK_SECRET_KEY=${clerkSecret}`);
+    }
+
+    // Convex URL
+    const convexUrl = process.env.AES_CONVEX_URL
+      || process.env.NEXT_PUBLIC_CONVEX_URL;
+    if (convexUrl) {
+      lines.push(`NEXT_PUBLIC_CONVEX_URL=${convexUrl}`);
+    }
+
+    if (lines.length > 0) {
+      writeFileSync(join(base, ".env.local"), lines.join("\n") + "\n");
+    }
   }
 
   private writeVitestConfig(base: string) {

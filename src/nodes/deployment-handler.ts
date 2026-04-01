@@ -189,18 +189,38 @@ function normalizeUnsupportedButtonLinkProps(
   return { content: next, changed: next !== content };
 }
 
-function injectClerkPublishableKey(workspacePath: string): { changed: boolean; file?: string } {
+function injectProviderEnvVars(workspacePath: string): { changed: boolean; file?: string } {
   const envPath = join(workspacePath, ".env.local");
-  if (!existsSync(envPath)) return { changed: false };
-  const content = readFileSync(envPath, "utf-8");
-  if (/^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=/m.test(content)) {
-    return { changed: false };
+  let content = existsSync(envPath) ? readFileSync(envPath, "utf-8") : "";
+  let changed = false;
+
+  // Clerk publishable key
+  const clerkKey = process.env.AES_CLERK_PUBLISHABLE_KEY
+    || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+    || process.env.CLERK_PUBLISHABLE_KEY;
+  if (clerkKey && !/^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=/m.test(content)) {
+    content = `${content.trim()}\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${clerkKey}\n`;
+    changed = true;
   }
-  const key = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY;
-  if (!key) return { changed: false };
-  const next = `${content.trim()}\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${key}\n`;
-  writeFileSync(envPath, next);
-  return { changed: true, file: envPath };
+
+  // Clerk secret key
+  const clerkSecret = process.env.AES_CLERK_SECRET_KEY || process.env.CLERK_SECRET_KEY;
+  if (clerkSecret && !/^CLERK_SECRET_KEY=/m.test(content)) {
+    content = `${content.trim()}\nCLERK_SECRET_KEY=${clerkSecret}\n`;
+    changed = true;
+  }
+
+  // Convex URL
+  const convexUrl = process.env.AES_CONVEX_URL || process.env.NEXT_PUBLIC_CONVEX_URL;
+  if (convexUrl && !/^NEXT_PUBLIC_CONVEX_URL=/m.test(content)) {
+    content = `${content.trim()}\nNEXT_PUBLIC_CONVEX_URL=${convexUrl}\n`;
+    changed = true;
+  }
+
+  if (changed) {
+    writeFileSync(envPath, content.trimStart());
+  }
+  return { changed, file: envPath };
 }
 
 function collectSourceFiles(root: string, extensions = [".ts", ".tsx"]): string[] {
@@ -1155,13 +1175,13 @@ async function runPredeployCompileGate(args: {
     };
   }
 
-  const clerkEnv = injectClerkPublishableKey(workspacePath);
+  const providerEnv = injectProviderEnvVars(workspacePath);
   const preflightRewrittenTests = repairBrokenGeneratedTestImports(workspacePath);
   const preflightTestingLibraryFixes = repairTestingLibraryFireEventImports(workspacePath);
-  if (clerkEnv.changed) {
+  if (providerEnv.changed) {
     store.addLog(jobId, {
       gate: "deploying",
-      message: `[compile-gate] injected NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY into .env.local`,
+      message: `[compile-gate] injected Clerk + Convex provider env vars into .env.local`,
     });
   }
   if (preflightRewrittenTests.length > 0) {
