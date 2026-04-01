@@ -287,6 +287,10 @@ import { ConvexClientProvider } from "./convex-provider";
 import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
 
+// All pages use Convex/Clerk hooks which require runtime providers.
+// Static prerendering always fails without them — force dynamic rendering.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "${(appSpec?.title || "App").replace(/"/g, '\\"')}",
   description: "${(appSpec?.summary || "Built with AES").replace(/"/g, '\\"')}",
