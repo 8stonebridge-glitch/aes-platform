@@ -86,6 +86,8 @@ export function compileBuilderPackage(job, featureId, reusableSourceFiles) {
         rules,
         required_tests: requiredTests,
         success_definition: bridge.success_definition,
+        // Pass through graph-derived hints from bridge compilation
+        graph_hints: bridge.graph_hints || undefined,
         schema_version: CURRENT_SCHEMA_VERSION,
         created_at: new Date().toISOString(),
     };

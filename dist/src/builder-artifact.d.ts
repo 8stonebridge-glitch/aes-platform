@@ -54,6 +54,36 @@ export interface BuilderPackage {
         technical_outcome: string;
         validation_requirements: string[];
     };
+    graph_hints?: {
+        relevant_models: {
+            name: string;
+            fields: string;
+            source: string;
+        }[];
+        relevant_integrations: {
+            name: string;
+            type: string;
+            description: string;
+        }[];
+        prevention_constraints: {
+            rule: string;
+            condition: string;
+            action: string;
+            severity: string;
+        }[];
+        domain_reference: {
+            domain: string;
+            bestApp: string;
+            features: string;
+            models: string;
+            integrations: string;
+        } | null;
+        proven_models: {
+            name: string;
+            fields: string;
+            appClass: string;
+        }[];
+    };
     schema_version: number;
     created_at: string;
 }

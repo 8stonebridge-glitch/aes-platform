@@ -36,11 +36,11 @@ interface AppContext {
 export declare function setGraphGuidanceBlock(block: string): void;
 /** Clear the graph guidance block after a build completes. */
 export declare function clearGraphGuidanceBlock(): void;
-export declare function generateConvexSchema(feature: FeatureContext, appSpec: AppContext): Promise<string | null>;
-export declare function generateConvexQueries(feature: FeatureContext, appSpec: AppContext, schemaContent: string): Promise<string | null>;
-export declare function generateConvexMutations(feature: FeatureContext, appSpec: AppContext, schemaContent: string): Promise<string | null>;
-export declare function generatePage(feature: FeatureContext, appSpec: AppContext, capability: string, pageType: "form" | "list" | "detail"): Promise<string | null>;
-export declare function generateComponent(feature: FeatureContext, appSpec: AppContext, componentType: string): Promise<string | null>;
+export declare function generateConvexSchema(feature: FeatureContext, appSpec: AppContext, referenceCode?: string): Promise<string | null>;
+export declare function generateConvexQueries(feature: FeatureContext, appSpec: AppContext, schemaContent: string, referenceCode?: string): Promise<string | null>;
+export declare function generateConvexMutations(feature: FeatureContext, appSpec: AppContext, schemaContent: string, referenceCode?: string): Promise<string | null>;
+export declare function generatePage(feature: FeatureContext, appSpec: AppContext, capability: string, pageType: "form" | "list" | "detail", referenceCode?: string): Promise<string | null>;
+export declare function generateComponent(feature: FeatureContext, appSpec: AppContext, componentType: string, referenceCode?: string): Promise<string | null>;
 export declare function generateTest(feature: FeatureContext, testDef: {
     name: string;
     pass_condition: string;
@@ -51,5 +51,5 @@ export declare function generateTest(feature: FeatureContext, testDef: {
  * The part's prompt is already scoped to a specific concern
  * (e.g., "just the form body", "just the submit handler").
  */
-export declare function generateFeaturePart(partPrompt: string, partKind: string): Promise<string | null>;
+export declare function generateFeaturePart(partPrompt: string, partKind: string, referenceCode?: string): Promise<string | null>;
 export {};

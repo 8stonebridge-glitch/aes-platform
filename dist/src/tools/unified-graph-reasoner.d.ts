@@ -19,6 +19,7 @@
  *   npx tsx src/tools/unified-graph-reasoner.ts "barber shop appointment booking app"
  *   npx tsx src/tools/unified-graph-reasoner.ts "AI-powered invoice management with chat and document signing"
  */
+import { getNeo4jService } from "../services/neo4j-service.js";
 interface GraphNode {
     id: string;
     label: string;
@@ -30,6 +31,66 @@ interface GraphEdge {
     targetNode: GraphNode;
     score: number;
     reason: string;
+}
+interface DomainMatch {
+    domain: string;
+    relevance: "PRIMARY" | "SUPPORTING" | "UNIVERSAL";
+    description: string;
+    keywords: string[];
+}
+interface DomainSource {
+    domain: string;
+    bestApp: string;
+    appClass: string;
+    score: number;
+    matchedFeatures: string[];
+    matchedModels: string[];
+    matchedIntegrations: string[];
+    alternateApps: string[];
+}
+interface ConceptScore {
+    concept: string;
+    featureHits: number;
+    modelHits: number;
+    integrationHits: number;
+    patternHits: number;
+    flowHits: number;
+    pageHits: number;
+    totalHits: number;
+    nodeTypesHit: number;
+    confidence: "HIGH" | "MEDIUM" | "LOW" | "GAP";
+    evidence: string[];
+}
+interface HopResult {
+    hop: number;
+    fromNode: string;
+    edges: GraphEdge[];
+    bestEdges: GraphEdge[];
+    reasoning: string;
+    path: string;
+}
+export interface UnifiedResult {
+    request: string;
+    rulesLoaded: string[];
+    domains: DomainMatch[];
+    domainSources: DomainSource[];
+    synonymClusters: Map<string, string[]>;
+    expandedKeywords: string[];
+    seedNodes: GraphNode[];
+    hops: HopResult[];
+    discoveredKnowledge: Map<string, Set<string>>;
+    tracedPaths: string[];
+    conceptScores: ConceptScore[];
+    universalPatterns: {
+        name: string;
+        type: string;
+        percentage: number;
+    }[];
+    hybridSeedCount: number;
+    vectorCacheSize: number;
+    coveragePercent: number;
+    gaps: string[];
+    blueprint: string[];
 }
 /**
  * SYNONYM-BOOSTED EDGE SCORING
@@ -43,4 +104,10 @@ interface GraphEdge {
 type LLMEdgeScorer = (request: string, edges: GraphEdge[]) => Promise<GraphEdge[]>;
 /** Call this to enable LLM-based edge re-ranking in the beam search */
 export declare function setLLMScorer(scorer: LLMEdgeScorer): void;
+/**
+ * Initialize the unified reasoner for use by the pipeline.
+ * Must be called before unifiedReason() when used as an import.
+ */
+export declare function initUnifiedReasoner(neo4jService: ReturnType<typeof getNeo4jService>): Promise<void>;
+export declare function unifiedReason(request: string): Promise<UnifiedResult>;
 export {};

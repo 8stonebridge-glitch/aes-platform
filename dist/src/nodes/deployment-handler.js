@@ -870,8 +870,42 @@ async function recallHermesRepairHints(errorMessage) {
         return [];
     }
 }
+/**
+ * Query graphContext.fixPatterns and graphContext.preventionRules for hints
+ * that match the current compiler error pattern.  Returns formatted hint
+ * strings suitable for inclusion in the LLM repair prompt alongside Hermes
+ * hints.
+ */
+function recallGraphFixHints(errorMessage, graphContext) {
+    if (!graphContext)
+        return [];
+    const hints = [];
+    const lowerError = errorMessage.toLowerCase();
+    // Match fixPatterns by checking if any target_failure_patterns keywords overlap
+    for (const fix of graphContext.fixPatterns ?? []) {
+        const nameMatch = fix.name && lowerError.includes(fix.name.toLowerCase());
+        const descMatch = fix.description && lowerError.includes(fix.description.toLowerCase().slice(0, 60));
+        const patternMatch = (fix.target_failure_patterns ?? []).some((p) => lowerError.includes(p.toLowerCase()));
+        if (nameMatch || descMatch || patternMatch) {
+            const rate = typeof fix.success_rate === "number"
+                ? ` (success ${(fix.success_rate * 100).toFixed(0)}%)`
+                : "";
+            hints.push(`[GraphFix:${fix.pattern_id ?? fix.name}] ${fix.resolution_template ?? fix.description}${rate}`);
+        }
+    }
+    // Match preventionRules — surface pre-compile checks the builder should have
+    // enforced.  The compile gate can use these as "why this failed" context.
+    for (const rule of graphContext.preventionRules ?? []) {
+        const gateMatch = rule.gate === "gate_5" || rule.gate === "compile_gate";
+        const tagMatch = (rule.target_failure_patterns ?? []).some((p) => lowerError.includes(p.toLowerCase()));
+        if (gateMatch || tagMatch) {
+            hints.push(`[GraphRule:${rule.rule_id ?? rule.name}] ${rule.check_logic ?? rule.description}`);
+        }
+    }
+    return hints;
+}
 async function runPredeployCompileGate(args) {
-    const { workspacePath, jobId, store } = args;
+    const { workspacePath, jobId, store, graphContext } = args;
     const checker = new CheckRunner();
     const dependencyInstall = installWorkspaceDependencies(workspacePath);
     const checkpointBase = `${jobId}-compile-${Date.now()}`;
@@ -969,9 +1003,12 @@ async function runPredeployCompileGate(args) {
         const pattern = extractPrimaryCompilerPattern(output);
         const category = categorizeCompilerPattern(pattern);
         const hermesHints = await recallHermesRepairHints(output);
+        const graphHints = recallGraphFixHints(output, graphContext);
+        const combinedHints = [...hermesHints, ...graphHints];
         store.addLog(jobId, {
             gate: "deploying",
-            message: `[compile-gate] ${failingCheck.check} failed on attempt ${attempt + 1}/${PREDEPLOY_MAX_REPAIR_ATTEMPTS + 1}: ${pattern}`,
+            message: `[compile-gate] ${failingCheck.check} failed on attempt ${attempt + 1}/${PREDEPLOY_MAX_REPAIR_ATTEMPTS + 1}: ${pattern}` +
+                (graphHints.length > 0 ? ` (${graphHints.length} graph hint(s) available)` : ""),
         });
         if (attempt === PREDEPLOY_MAX_REPAIR_ATTEMPTS) {
             await store.addCheckpoint({
@@ -995,7 +1032,7 @@ async function runPredeployCompileGate(args) {
             pattern,
             category,
             diagnosis: `Predeploy ${failingCheck.check} failed in the generated workspace.`,
-            fixAction: hermesHints[0] ?? "Attempt automated workspace repair before push.",
+            fixAction: combinedHints[0] ?? "Attempt automated workspace repair before push.",
             fixType: "compile_gate",
             filesChanged: [],
             success: false,
@@ -1013,7 +1050,7 @@ async function runPredeployCompileGate(args) {
         const llmRepair = await repairFilesForCompilerErrors({
             workspacePath,
             errorOutput: output,
-            hermesHints,
+            hermesHints: combinedHints,
         });
         // Re-apply guardrails AFTER LLM repair to prevent the LLM from undoing
         // critical fixes (e.g. removing export const dynamic = "force-dynamic")
@@ -1037,8 +1074,8 @@ async function runPredeployCompileGate(args) {
             };
         }
         commitWorkspaceChanges(workspacePath, `[AES] fix: repair ${failingCheck.check} errors before push`);
-        const fixAction = hermesHints[0]
-            ? `Applied compile-gate repair with Hermes hint. ${hermesHints[0]}`
+        const fixAction = combinedHints[0]
+            ? `Applied compile-gate repair with hint. ${combinedHints[0]}`
             : `Applied compile-gate repair. ${llmRepair.summary}`;
         pendingSuccesses.push({
             pattern,
@@ -1058,6 +1095,7 @@ async function runPredeployCompileGate(args) {
                 check: failingCheck.check,
                 pattern,
                 hermes_hints: hermesHints,
+                graph_hints: graphHints,
                 files_changed: changedFiles,
             },
         });
@@ -1244,6 +1282,7 @@ export async function deploymentHandler(state) {
             workspacePath,
             jobId: state.jobId,
             store,
+            graphContext: state.graphContext,
         });
         if (!compileGate.passed) {
             cb?.onFail(compileGate.errorMessage || "Compile gate failed before deploy.");

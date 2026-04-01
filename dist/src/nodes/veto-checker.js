@@ -142,11 +142,65 @@ export async function vetoChecker(state) {
     const bridges = { ...state.featureBridges };
     const allVetoResults = [];
     let anyBlocked = false;
+    // ─── Graph Context: prevention rules and fix patterns ───
+    const graphCtx = state.graphContext;
+    const graphPreventionRules = graphCtx?.preventionRules ?? [];
+    const graphFixPatterns = graphCtx?.fixPatterns ?? [];
+    if (graphPreventionRules.length > 0 || graphFixPatterns.length > 0) {
+        cb?.onStep(`Graph context: ${graphPreventionRules.length} prevention rules, ${graphFixPatterns.length} fix patterns loaded for veto augmentation`);
+    }
     for (const featureId of Object.keys(bridges)) {
         const bridge = bridges[featureId];
         if (!bridge.bridge_id)
             continue; // Skip catalog match data that isn't a compiled bridge
         const vetoes = checkVetoes(bridge, state.appSpec);
+        // ─── Graph Context: prevention-rule-derived vetoes ───
+        // Prevention rules with gate "gate_3" act as graph-derived hard vetoes.
+        for (const rule of graphPreventionRules) {
+            if (rule.gate !== "gate_3")
+                continue;
+            const affectedPatterns = rule.target_failure_patterns ?? [];
+            const featureNameLower = (bridge.feature_name ?? featureId).toLowerCase();
+            const ruleTriggered = affectedPatterns.some((p) => featureNameLower.includes(p.toLowerCase()));
+            if (ruleTriggered) {
+                vetoes.push({
+                    code: `GRAPH_RULE:${rule.rule_id ?? rule.name}`,
+                    triggered: true,
+                    reason: `Graph prevention rule: ${rule.check_logic ?? rule.description}`,
+                    required_fix: rule.description ?? "Resolve graph-identified prevention rule",
+                    blocking_feature_ids: [featureId],
+                });
+            }
+        }
+        // ─── Graph Context: anti-pattern detection from fixPatterns ───
+        // If a known fix pattern targets failure patterns that match this feature's
+        // characteristics, flag it as a potential anti-pattern presence.
+        for (const fix of graphFixPatterns) {
+            const affectedPatterns = fix.target_failure_patterns ?? [];
+            const bridgeRules = (bridge.applied_rules ?? []).map((r) => (r.rule_id ?? r.name ?? "").toLowerCase());
+            const featureTags = [
+                (bridge.feature_name ?? "").toLowerCase(),
+                featureId.toLowerCase(),
+                ...(bridge.dependencies ?? []).map((d) => (d.feature_id ?? "").toLowerCase()),
+            ];
+            // Check if any target failure patterns match this feature's context
+            const antiPatternDetected = affectedPatterns.some((p) => {
+                const pLower = p.toLowerCase();
+                return featureTags.some((t) => t.includes(pLower)) ||
+                    bridgeRules.some((r) => r.includes(pLower));
+            });
+            if (antiPatternDetected && fix.success_rate < 0.5) {
+                // Low success-rate fix pattern means the underlying issue is hard to fix;
+                // flag it as a warning veto (non-blocking but recorded).
+                vetoes.push({
+                    code: `GRAPH_ANTIPATTERN:${fix.pattern_id ?? fix.name}`,
+                    triggered: false, // Advisory — does not block
+                    reason: `Known anti-pattern detected: ${fix.name} (fix success rate: ${(fix.success_rate * 100).toFixed(0)}%)`,
+                    required_fix: fix.resolution_template ?? fix.description,
+                    blocking_feature_ids: [],
+                });
+            }
+        }
         const triggered = vetoes.filter((v) => v.triggered);
         bridge.hard_vetoes = vetoes;
         allVetoResults.push(...vetoes);

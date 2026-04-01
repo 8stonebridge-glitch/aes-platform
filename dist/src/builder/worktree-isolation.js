@@ -11,7 +11,7 @@
  * This enables safe parallel execution (P5) where multiple builders
  * write files simultaneously without conflicts.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -20,7 +20,11 @@ import { tmpdir } from "node:os";
  * worktrees branch from.
  */
 export function createBaseRepo(jobId, repoUrl) {
-    const basePath = mkdtempSync(join(tmpdir(), `aes-base-${jobId.slice(0, 8)}-`));
+    const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+    if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+        mkdirSync(buildDir, { recursive: true });
+    }
+    const basePath = mkdtempSync(join(buildDir, `aes-base-${jobId.slice(0, 8)}-`));
     if (repoUrl) {
         // Clone the real repo
         execSync(`git clone --depth 1 ${repoUrl} .`, {

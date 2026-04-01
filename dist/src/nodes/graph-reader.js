@@ -18,6 +18,7 @@ import { getCallbacks } from "../graph.js";
 import { isEmbeddingAvailable, vectorSearchAll, } from "../services/embedding-service.js";
 import { rrfFuse, boostDualSource } from "../services/rrf-fusion.js";
 import { loadDesignEvidenceFromDisk } from "../services/design-evidence-loader.js";
+import { initUnifiedReasoner, unifiedReason, } from "../tools/unified-graph-reasoner.js";
 // ─── Cypher Queries ──────────────────────────────────────────────────
 /**
  * Find prior builds that match keywords from the raw request.
@@ -182,7 +183,7 @@ MATCH (m:LearnedDataModel)
 WHERE ${conditions}
 RETURN m.name AS name, m.category AS category,
        m.fields_csv AS fields, m.field_count AS field_count,
-       m.source AS source
+       m.source AS source, m.schema_source AS schema_source
 ORDER BY m.field_count DESC
 LIMIT 25
   `.trim();
@@ -658,12 +659,41 @@ export async function graphReader(state) {
         aesBlueprints: [],
         aesPreflight: [],
         learnedAppContext: [],
+        unifiedDomains: [],
+        unifiedDomainSources: [],
+        unifiedConceptScores: [],
+        unifiedBlueprint: [],
+        unifiedGaps: [],
+        unifiedCoverage: 0,
+        unifiedTracedPaths: [],
+        unifiedDiscoveredKnowledge: {},
+        unifiedUniversalPatterns: [],
     };
     // ── Check vector search availability ──
     const vectorAvailable = isEmbeddingAvailable();
     if (vectorAvailable) {
         cb?.onStep("Vector search enabled — running hybrid keyword + semantic search");
     }
+    // ── Initialize and run unified reasoner in parallel with keyword queries ──
+    let unifiedResult = null;
+    const unifiedPromise = (async () => {
+        try {
+            await initUnifiedReasoner(neo4j);
+            cb?.onStep("Unified reasoner initialized — running domain decomposition + beam search + confidence scoring...");
+            const result = await unifiedReason(state.rawRequest);
+            cb?.onSuccess(`Unified reasoner: ${result.domains.length} domains, ${result.seedNodes.length} seeds, ${result.hops.length} hops, ${result.coveragePercent}% coverage, ${result.gaps.length} gaps`);
+            store.addLog(state.jobId, {
+                gate: "graph_reader",
+                message: `Unified reasoner: domains=[${result.domains.map(d => d.domain).join(",")}] coverage=${result.coveragePercent}% gaps=[${result.gaps.join(",")}] seeds=${result.seedNodes.length} hops=${result.hops.length} blueprint=${result.blueprint.length} lines`,
+            });
+            return result;
+        }
+        catch (err) {
+            cb?.onWarn(`Unified reasoner failed: ${err.message} — continuing with keyword queries`);
+            store.addLog(state.jobId, { gate: "graph_reader", message: `Unified reasoner failed: ${err.message}` });
+            return null;
+        }
+    })();
     // Cypher runner adapter for vectorSearch (matches expected signature)
     const cypherRunner = async (cypher, params) => neo4j.runCypher(cypher, params).catch(() => []);
     try {
@@ -872,6 +902,24 @@ export async function graphReader(state) {
     catch (err) {
         cb?.onWarn(`Graph search failed: ${err.message} — continuing without context`);
         store.addLog(state.jobId, { gate: "graph_reader", message: `Graph search failed: ${err.message}` });
+    }
+    // ── Merge unified reasoner results ──
+    unifiedResult = await unifiedPromise;
+    if (unifiedResult) {
+        context.unifiedDomains = unifiedResult.domains;
+        context.unifiedDomainSources = unifiedResult.domainSources;
+        context.unifiedConceptScores = unifiedResult.conceptScores;
+        context.unifiedBlueprint = unifiedResult.blueprint;
+        context.unifiedGaps = unifiedResult.gaps;
+        context.unifiedCoverage = unifiedResult.coveragePercent;
+        context.unifiedTracedPaths = unifiedResult.tracedPaths.slice(0, 50); // Cap for state size
+        context.unifiedUniversalPatterns = unifiedResult.universalPatterns;
+        // Convert discoveredKnowledge Map<string, Set<string>> → Record<string, string[]>
+        const dk = {};
+        for (const [key, valueSet] of unifiedResult.discoveredKnowledge) {
+            dk[key] = Array.from(valueSet);
+        }
+        context.unifiedDiscoveredKnowledge = dk;
     }
     // ── Load design evidence (Paper MCP extractions) ──
     let designEvidence = null;

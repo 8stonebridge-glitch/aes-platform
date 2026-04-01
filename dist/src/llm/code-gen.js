@@ -36,7 +36,7 @@ function validateCodeResponse(text) {
         return false;
     return true;
 }
-async function callLLM(systemPrompt, userPrompt, contractPackIds = []) {
+async function callLLM(systemPrompt, userPrompt, contractPackIds = [], referenceCode) {
     if (!isLLMAvailable())
         return null;
     const llm = getLLM();
@@ -44,9 +44,12 @@ async function callLLM(systemPrompt, userPrompt, contractPackIds = []) {
         return null;
     const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
     const graphBlock = _activeGraphGuidanceBlock;
+    const refBlock = referenceCode
+        ? `\n\n## REFERENCE CODE FROM PRIOR BUILDS — ADAPT, DO NOT COPY BLINDLY\nThe following code is from prior successful builds in the knowledge graph.\nUse it as a structural reference — adapt field names, table names, and logic to fit the current feature.\nDo NOT copy verbatim if the domain differs. Do reuse proven patterns and structure.\n\n${referenceCode}`
+        : "";
     const slotId = await acquireLLMSlot("code-gen");
     try {
-        const fullSystem = [groundTruth, graphBlock, systemPrompt].filter(Boolean).join("\n\n");
+        const fullSystem = [groundTruth, graphBlock, systemPrompt, refBlock].filter(Boolean).join("\n\n");
         const response = await withTimeout(llm.invoke([
             { role: "system", content: fullSystem },
             { role: "user", content: userPrompt },
@@ -199,7 +202,7 @@ CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
 Import from "@aes/ui": { Button, Input, Textarea, Table, TableHeader, TableBody, TableRow, TableCell, Card, CardHeader, CardContent, Badge, Label, Select, Dialog }
 `;
 // ─── Public generators ───────────────────────────────────────────────
-export async function generateConvexSchema(feature, appSpec) {
+export async function generateConvexSchema(feature, appSpec, referenceCode) {
     const system = `${STACK_PREAMBLE}
 
 You are generating a Convex schema file for a feature.
@@ -218,9 +221,9 @@ Always include: createdBy (v.string()), orgId (v.string()), createdAt (v.number(
 Add indexes for orgId, status (if present), and createdAt.
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate the Convex schema for the "${feature.name}" feature.`, ["convex/schema-core"]);
+    return callLLM(system, `Generate the Convex schema for the "${feature.name}" feature.`, ["convex/schema-core"], referenceCode);
 }
-export async function generateConvexQueries(feature, appSpec, schemaContent) {
+export async function generateConvexQueries(feature, appSpec, schemaContent, referenceCode) {
     const system = `${STACK_PREAMBLE}
 
 You are generating Convex query functions for a feature.
@@ -245,9 +248,9 @@ Generate query functions that:
 7. Never destructure handler args in the function signature
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate Convex queries for "${feature.name}".`, ["convex/query-core"]);
+    return callLLM(system, `Generate Convex queries for "${feature.name}".`, ["convex/query-core"], referenceCode);
 }
-export async function generateConvexMutations(feature, appSpec, schemaContent) {
+export async function generateConvexMutations(feature, appSpec, schemaContent, referenceCode) {
     const destructiveNote = feature.destructive_actions?.length
         ? `\nThis feature has destructive actions: ${feature.destructive_actions.map(a => a.action_name).join(", ")}. Generate mutations for these with proper guards.`
         : "";
@@ -280,9 +283,9 @@ Generate mutation functions that:
 8. If auth is needed, call await ctx.auth.getUserIdentity() and handle null before using identity data
 
 Output ONLY the TypeScript code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate Convex mutations for "${feature.name}".`, ["convex/mutation-core"]);
+    return callLLM(system, `Generate Convex mutations for "${feature.name}".`, ["convex/mutation-core"], referenceCode);
 }
-export async function generatePage(feature, appSpec, capability, pageType) {
+export async function generatePage(feature, appSpec, capability, pageType, referenceCode) {
     const typeInstructions = {
         form: `Generate a form page with:
 - useMutation() hook for submission
@@ -325,9 +328,9 @@ The page should use:
 - Feature-specific field names derived from the feature description (NOT generic "title"/"description")
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`, ["clerk/client-auth", "convex/query-core", "convex/mutation-core"]);
+    return callLLM(system, `Generate a ${pageType} page for capability "${capability}" of feature "${feature.name}".`, ["clerk/client-auth", "convex/query-core", "convex/mutation-core"], referenceCode);
 }
-export async function generateComponent(feature, appSpec, componentType) {
+export async function generateComponent(feature, appSpec, componentType, referenceCode) {
     const system = `${STACK_PREAMBLE}
 ${AES_UI_RULES}
 
@@ -345,7 +348,7 @@ Generate a reusable component that:
 - Is well-documented with JSDoc
 
 Output ONLY the TypeScript/JSX code, no markdown fences, no explanation.`;
-    return callLLM(system, `Generate a ${componentType} component for "${feature.name}".`);
+    return callLLM(system, `Generate a ${componentType} component for "${feature.name}".`, [], referenceCode);
 }
 export async function generateTest(feature, testDef) {
     const system = `${STACK_PREAMBLE}
@@ -404,7 +407,7 @@ Output ONLY the TypeScript code, no markdown fences, no explanation.`;
  * The part's prompt is already scoped to a specific concern
  * (e.g., "just the form body", "just the submit handler").
  */
-export async function generateFeaturePart(partPrompt, partKind) {
+export async function generateFeaturePart(partPrompt, partKind, referenceCode) {
     // Map part kinds to contract packs for ground truth injection
     const packMap = {
         "query": ["convex/query-core"],
@@ -433,5 +436,5 @@ ${retrievedContext}
 
 Use the retrieved ground truth above as your reference. Match the verified pattern's shape exactly.
 Do ONE strongly grounded generation — do not guess or improvise.`;
-    return callLLM(system, partPrompt, packs);
+    return callLLM(system, partPrompt, packs, referenceCode);
 }

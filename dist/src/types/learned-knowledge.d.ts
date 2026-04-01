@@ -54,6 +54,7 @@ export interface LearnedDataModel {
     category: DataModelCategory;
     fields: LearnedField[];
     relations: LearnedRelation[];
+    schema_source?: string;
 }
 export type DataModelCategory = "auth_identity" | "scheduling" | "payments" | "automation" | "integration" | "organization" | "calendar" | "routing" | "audit" | "infrastructure" | "auth_oauth" | "notifications" | "general";
 export interface LearnedField {

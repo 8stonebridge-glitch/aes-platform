@@ -811,7 +811,25 @@ async function findUniversalPatterns() {
 // ═══════════════════════════════════════════════════════════════════════
 // MAIN: UNIFIED REASONING ENGINE
 // ═══════════════════════════════════════════════════════════════════════
-async function unifiedReason(request) {
+/**
+ * Initialize the unified reasoner for use by the pipeline.
+ * Must be called before unifiedReason() when used as an import.
+ */
+export async function initUnifiedReasoner(neo4jService) {
+    neo4j = neo4jService;
+    vectorEnabled = isEmbeddingAvailable();
+    if (vectorEnabled) {
+        try {
+            const indexes = await neo4j.runCypher(`SHOW INDEXES WHERE type = 'VECTOR'`);
+            if (indexes.length === 0)
+                vectorEnabled = false;
+        }
+        catch {
+            vectorEnabled = false;
+        }
+    }
+}
+export async function unifiedReason(request) {
     const result = {
         request,
         rulesLoaded: [],

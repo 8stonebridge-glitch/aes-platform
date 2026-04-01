@@ -23,6 +23,16 @@ export function compileSlimContract(pkg) {
         tests: pkg.required_tests.map(t => ({ name: t.name, pass_condition: t.pass_condition })),
         success_outcome: pkg.success_definition.user_visible_outcome,
         rules_summary: pkg.rules.map(r => `[${r.severity}] ${r.title}`).join("; "),
+        // Compact graph hints for builder consumption
+        ...(pkg.graph_hints ? {
+            graph_models: pkg.graph_hints.relevant_models.map(m => `${m.name} (${m.fields})`),
+            graph_integrations: pkg.graph_hints.relevant_integrations.map(i => `${i.name}: ${i.type} — ${i.description}`),
+            graph_prevention: pkg.graph_hints.prevention_constraints.map(p => `[${p.severity}] ${p.rule}: ${p.condition} → ${p.action}`),
+            graph_domain_ref: pkg.graph_hints.domain_reference
+                ? `${pkg.graph_hints.domain_reference.domain} (ref: ${pkg.graph_hints.domain_reference.bestApp})`
+                : undefined,
+            graph_proven_models: pkg.graph_hints.proven_models.map(m => `${m.name} [${m.appClass}] (${m.fields})`),
+        } : {}),
     };
 }
 /**
@@ -46,6 +56,16 @@ export function compileSlimContractFromBridge(bridge) {
         tests: bridge.required_tests.map(t => ({ name: t.name, pass_condition: t.pass_condition })),
         success_outcome: bridge.success_definition.user_visible_outcome,
         rules_summary: bridge.applied_rules.map(r => `[${r.severity}] ${r.title}`).join("; "),
+        // Compact graph hints from bridge (if present)
+        ...(bridge.graph_hints ? {
+            graph_models: bridge.graph_hints.relevant_models.map((m) => `${m.name} (${m.fields})`),
+            graph_integrations: bridge.graph_hints.relevant_integrations.map((i) => `${i.name}: ${i.type} — ${i.description}`),
+            graph_prevention: bridge.graph_hints.prevention_constraints.map((p) => `[${p.severity}] ${p.rule}: ${p.condition} → ${p.action}`),
+            graph_domain_ref: bridge.graph_hints.domain_reference
+                ? `${bridge.graph_hints.domain_reference.domain} (ref: ${bridge.graph_hints.domain_reference.bestApp})`
+                : undefined,
+            graph_proven_models: bridge.graph_hints.proven_models.map((m) => `${m.name} [${m.appClass}] (${m.fields})`),
+        } : {}),
     };
 }
 /**

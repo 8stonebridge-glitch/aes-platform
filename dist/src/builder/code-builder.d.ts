@@ -39,6 +39,7 @@ export interface GraphGuidance {
     learnedModels: {
         name: string;
         fields: string;
+        schemaSource?: string;
     }[];
     /** Learned integrations from prior builds */
     learnedIntegrations: {
@@ -134,12 +135,14 @@ export interface GraphGuidance {
         name: string;
         tables: string;
         appClass: string;
+        schemaText?: string;
     }[];
     /** Reference data model templates */
     referenceSchemas: {
         name: string;
         domain: string;
         tables: string;
+        schemaText?: string;
     }[];
     /** AES system lessons */
     aesLessons: {
@@ -172,6 +175,36 @@ export interface GraphGuidance {
     aesPreflight: {
         title: string;
         steps: string;
+    }[];
+    /** Unified reasoner: domain decomposition with best source apps */
+    unifiedDomainSources: {
+        domain: string;
+        bestApp: string;
+        features: string;
+        models: string;
+        integrations: string;
+    }[];
+    /** Unified reasoner: composite architecture blueprint */
+    unifiedBlueprint: string[];
+    /** Unified reasoner: knowledge gaps identified */
+    unifiedGaps: string[];
+    /** Unified reasoner: discovered knowledge from beam search */
+    unifiedDiscoveredKnowledge: {
+        category: string;
+        items: string;
+    }[];
+    /** Unified reasoner: universal patterns (found in 5+ apps) */
+    unifiedUniversalPatterns: {
+        name: string;
+        type: string;
+        percentage: string;
+    }[];
+    /** Unified reasoner: concept confidence scores */
+    unifiedConceptScores: {
+        concept: string;
+        confidence: string;
+        totalHits: string;
+        evidence: string;
     }[];
 }
 export interface BuilderContext {

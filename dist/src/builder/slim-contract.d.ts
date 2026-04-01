@@ -29,6 +29,11 @@ export interface SlimContract {
     }[];
     success_outcome: string;
     rules_summary: string;
+    graph_models?: string[];
+    graph_integrations?: string[];
+    graph_prevention?: string[];
+    graph_domain_ref?: string;
+    graph_proven_models?: string[];
 }
 /**
  * Compile a full BuilderPackage into a SlimContract.

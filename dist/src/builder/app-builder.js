@@ -392,6 +392,12 @@ function buildGraphGuidance(graphContext) {
         learnedAppContext: [],
         reasoningRules: [],
         aesPreflight: [],
+        unifiedDomainSources: [],
+        unifiedBlueprint: [],
+        unifiedGaps: [],
+        unifiedDiscoveredKnowledge: [],
+        unifiedUniversalPatterns: [],
+        unifiedConceptScores: [],
     };
     if (!graphContext)
         return guidance;
@@ -449,7 +455,7 @@ function buildGraphGuidance(graphContext) {
             const fields = Array.isArray(item.fields)
                 ? item.fields.map((f) => typeof f === "string" ? f : `${f.name}: ${f.type}`).join(", ")
                 : item.fields ?? item.schema ?? "";
-            guidance.learnedModels.push({ name: item.name ?? "", fields });
+            guidance.learnedModels.push({ name: item.name ?? "", fields, schemaSource: item.schema_source ?? undefined });
         }
     }
     // ── Learned integrations ──
@@ -605,6 +611,7 @@ function buildGraphGuidance(graphContext) {
                 name: item.name ?? "",
                 tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
                 appClass: item.app_class ?? "",
+                schemaText: item.schema_text ?? undefined,
             });
         }
     }
@@ -615,6 +622,7 @@ function buildGraphGuidance(graphContext) {
                 name: item.name ?? "",
                 domain: item.domain ?? "",
                 tables: Array.isArray(item.tables) ? item.tables.join(", ") : item.tables ?? "",
+                schemaText: item.schema_text ?? undefined,
             });
         }
     }
@@ -673,6 +681,53 @@ function buildGraphGuidance(graphContext) {
             });
         }
     }
+    // ── Unified reasoner: domain sources ──
+    for (const item of graphContext.unifiedDomainSources ?? []) {
+        if (item.domain && item.bestApp) {
+            guidance.unifiedDomainSources.push({
+                domain: item.domain ?? "",
+                bestApp: item.bestApp ?? "",
+                features: Array.isArray(item.matchedFeatures) ? item.matchedFeatures.join(", ") : "",
+                models: Array.isArray(item.matchedModels) ? item.matchedModels.join(", ") : "",
+                integrations: Array.isArray(item.matchedIntegrations) ? item.matchedIntegrations.join(", ") : "",
+            });
+        }
+    }
+    // ── Unified reasoner: blueprint ──
+    guidance.unifiedBlueprint = graphContext.unifiedBlueprint ?? [];
+    // ── Unified reasoner: gaps ──
+    guidance.unifiedGaps = graphContext.unifiedGaps ?? [];
+    // ── Unified reasoner: discovered knowledge ──
+    const dk = graphContext.unifiedDiscoveredKnowledge ?? {};
+    for (const [category, items] of Object.entries(dk)) {
+        if (Array.isArray(items) && items.length > 0) {
+            guidance.unifiedDiscoveredKnowledge.push({
+                category,
+                items: items.slice(0, 15).join(", "),
+            });
+        }
+    }
+    // ── Unified reasoner: universal patterns ──
+    for (const item of graphContext.unifiedUniversalPatterns ?? []) {
+        if (item.name) {
+            guidance.unifiedUniversalPatterns.push({
+                name: item.name ?? "",
+                type: item.type ?? "",
+                percentage: `${item.percentage ?? 0}%`,
+            });
+        }
+    }
+    // ── Unified reasoner: concept confidence scores ──
+    for (const item of graphContext.unifiedConceptScores ?? []) {
+        if (item.concept) {
+            guidance.unifiedConceptScores.push({
+                concept: item.concept ?? "",
+                confidence: item.confidence ?? "GAP",
+                totalHits: `${item.totalHits ?? 0}`,
+                evidence: Array.isArray(item.evidence) ? item.evidence.slice(0, 5).join("; ") : "",
+            });
+        }
+    }
     return guidance;
 }
 /**
@@ -728,6 +783,8 @@ export function formatGraphGuidanceForPrompt(guidance) {
         parts.push("\n## KNOWN DATA MODELS — REUSE WHEN APPLICABLE");
         for (const m of guidance.learnedModels.slice(0, 10)) {
             parts.push(`- ${m.name}: ${m.fields}`);
+            if (m.schemaSource)
+                parts.push(`  Schema:\n\`\`\`typescript\n${m.schemaSource}\n\`\`\``);
         }
     }
     if (guidance.learnedIntegrations.length > 0) {
@@ -760,7 +817,7 @@ export function formatGraphGuidanceForPrompt(guidance) {
         for (const p of guidance.buildExtractedPatterns.slice(0, 8)) {
             parts.push(`- ${p.name} (${p.type}): ${p.description}`);
             if (p.codeSample)
-                parts.push(`  Example: ${p.codeSample.slice(0, 200)}`);
+                parts.push(`  Example:\n\`\`\`typescript\n${p.codeSample}\n\`\`\``);
         }
     }
     if (guidance.buildExtractedTech.length > 0) {
@@ -778,7 +835,7 @@ export function formatGraphGuidanceForPrompt(guidance) {
             if (c.props)
                 parts.push(`  Props: ${c.props}`);
             if (c.usageExample)
-                parts.push(`  Usage: ${c.usageExample.slice(0, 150)}`);
+                parts.push(`  Usage:\n\`\`\`tsx\n${c.usageExample}\n\`\`\``);
         }
     }
     if (guidance.learnedFormPatterns.length > 0) {
@@ -839,12 +896,16 @@ export function formatGraphGuidanceForPrompt(guidance) {
         parts.push("\n## WORKING CONVEX SCHEMAS FROM PRIOR BUILDS");
         for (const s of guidance.convexSchemas.slice(0, 3)) {
             parts.push(`- ${s.name} (${s.appClass}): tables: ${s.tables}`);
+            if (s.schemaText)
+                parts.push(`  Schema:\n\`\`\`typescript\n${s.schemaText}\n\`\`\``);
         }
     }
     if (guidance.referenceSchemas.length > 0) {
         parts.push("\n## REFERENCE DATA MODELS");
         for (const s of guidance.referenceSchemas.slice(0, 5)) {
             parts.push(`- ${s.name} (${s.domain}): ${s.tables}`);
+            if (s.schemaText)
+                parts.push(`  Schema:\n\`\`\`typescript\n${s.schemaText}\n\`\`\``);
         }
     }
     // ── AES meta-intelligence ──
@@ -888,7 +949,186 @@ export function formatGraphGuidanceForPrompt(guidance) {
             parts.push(`- ${p.title}: ${p.steps}`);
         }
     }
+    // ── Unified reasoner intelligence ──
+    if (guidance.unifiedDomainSources.length > 0) {
+        parts.push("\n## DOMAIN DECOMPOSITION — BEST SOURCE APPS PER DOMAIN");
+        parts.push("The unified graph reasoner identified these domains and the best prior app to learn from for each:");
+        for (const d of guidance.unifiedDomainSources.slice(0, 8)) {
+            parts.push(`- ${d.domain} → best source: ${d.bestApp}`);
+            if (d.features)
+                parts.push(`  Features to adopt: ${d.features}`);
+            if (d.models)
+                parts.push(`  Models to adopt: ${d.models}`);
+            if (d.integrations)
+                parts.push(`  Integrations: ${d.integrations}`);
+        }
+    }
+    if (guidance.unifiedBlueprint.length > 0) {
+        parts.push("\n## COMPOSITE ARCHITECTURE BLUEPRINT");
+        parts.push("Cross-domain blueprint assembled from best-source apps in the graph:");
+        for (const line of guidance.unifiedBlueprint.slice(0, 20)) {
+            parts.push(`  ${line}`);
+        }
+    }
+    if (guidance.unifiedDiscoveredKnowledge.length > 0) {
+        parts.push("\n## DISCOVERED KNOWLEDGE FROM GRAPH REASONING");
+        for (const dk of guidance.unifiedDiscoveredKnowledge.slice(0, 8)) {
+            parts.push(`- ${dk.category}: ${dk.items}`);
+        }
+    }
+    if (guidance.unifiedUniversalPatterns.length > 0) {
+        parts.push("\n## UNIVERSAL PATTERNS (FOUND IN 5+ PRIOR APPS)");
+        for (const p of guidance.unifiedUniversalPatterns.slice(0, 10)) {
+            parts.push(`- ${p.name} (${p.type}): used in ${p.percentage} of prior apps`);
+        }
+    }
+    if (guidance.unifiedConceptScores.length > 0) {
+        parts.push("\n## CONCEPT CONFIDENCE — WHAT THE GRAPH KNOWS VS GAPS");
+        for (const c of guidance.unifiedConceptScores.slice(0, 8)) {
+            const icon = c.confidence === "HIGH" ? "✓" : c.confidence === "MEDIUM" ? "~" : c.confidence === "LOW" ? "?" : "✗";
+            parts.push(`- [${icon} ${c.confidence}] ${c.concept} (${c.totalHits} evidence hits)`);
+            if (c.evidence)
+                parts.push(`  Evidence: ${c.evidence}`);
+        }
+    }
+    if (guidance.unifiedGaps.length > 0) {
+        parts.push("\n## KNOWLEDGE GAPS — AREAS WHERE THE GRAPH HAS NO PRIOR DATA");
+        parts.push("Be extra careful generating code for these areas — no prior builds to learn from:");
+        for (const g of guidance.unifiedGaps.slice(0, 5)) {
+            parts.push(`- ${g}`);
+        }
+    }
     return parts.length > 0 ? parts.join("\n") : "";
+}
+/**
+ * Collect reusable code from BuilderPackage source_files and graph_hints,
+ * plus GraphGuidance code samples, into categorized reference blocks.
+ */
+function collectReferenceCode(pkg, guidance) {
+    const schemaParts = [];
+    const queryParts = [];
+    const mutationParts = [];
+    const pageParts = [];
+    const componentParts = [];
+    // ── 1. Reusable source files from GitHub (via catalog-searcher) ──
+    for (const [candidateId, entry] of Object.entries(pkg.source_files || {})) {
+        for (const file of entry.files || []) {
+            const path = file.path.toLowerCase();
+            const content = file.content;
+            if (!content || content.length < 30)
+                continue;
+            // Cap individual files at 3000 chars to keep context manageable
+            const capped = content.length > 3000 ? content.slice(0, 3000) + "\n// ... (truncated)" : content;
+            if (path.includes("schema")) {
+                schemaParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+            }
+            else if (path.includes("quer")) {
+                queryParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+            }
+            else if (path.includes("mutat") || path.includes("action")) {
+                mutationParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+            }
+            else if (path.includes("page") || path.includes("/app/")) {
+                pageParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+            }
+            else if (path.includes("component")) {
+                componentParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
+            }
+            else {
+                // General — add to all categories as background reference
+                const shortRef = content.length > 1500 ? content.slice(0, 1500) + "\n// ..." : content;
+                pageParts.push(`// Reference from ${entry.repo} — ${file.path}\n${shortRef}`);
+            }
+        }
+    }
+    // ── 2. Graph hints on the BuilderPackage (proven models, schemas) ──
+    if (pkg.graph_hints) {
+        for (const model of pkg.graph_hints.proven_models || []) {
+            if (model.fields) {
+                schemaParts.push(`// Proven model "${model.name}" from ${model.appClass}: fields: ${model.fields}`);
+            }
+        }
+        for (const model of pkg.graph_hints.relevant_models || []) {
+            if (model.fields) {
+                schemaParts.push(`// Relevant model "${model.name}" from ${model.source}: fields: ${model.fields}`);
+            }
+        }
+    }
+    // ── 3. GraphGuidance code samples (BuildExtractedPatterns) ──
+    if (guidance) {
+        for (const p of guidance.buildExtractedPatterns || []) {
+            if (p.codeSample && p.codeSample.length > 50) {
+                const type = (p.type || "").toLowerCase();
+                const target = type.includes("schema") ? schemaParts
+                    : type.includes("quer") ? queryParts
+                        : type.includes("mutat") ? mutationParts
+                            : type.includes("component") || type.includes("ui") ? componentParts
+                                : pageParts;
+                target.push(`// Build-extracted pattern "${p.name}" (${p.type}):\n${p.codeSample}`);
+            }
+        }
+        // ── 4a. Learned model schema sources (Prisma, Drizzle, Convex defineTable) ──
+        for (const m of guidance.learnedModels || []) {
+            if (m.schemaSource && m.schemaSource.length > 50) {
+                schemaParts.push(`// Learned model "${m.name}" schema:\n${m.schemaSource}`);
+            }
+        }
+        // ── 4. Convex schema text from prior builds ──
+        for (const s of guidance.convexSchemas || []) {
+            if (s.schemaText && s.schemaText.length > 50) {
+                schemaParts.push(`// Working schema "${s.name}" from ${s.appClass}:\n${s.schemaText}`);
+            }
+        }
+        // ── 5. Reference schema text ──
+        for (const s of guidance.referenceSchemas || []) {
+            if (s.schemaText && s.schemaText.length > 50) {
+                schemaParts.push(`// Reference schema "${s.name}" (${s.domain}):\n${s.schemaText}`);
+            }
+        }
+        // ── 6. Component patterns with usage examples (cross-app) ──
+        for (const c of guidance.learnedComponentPatterns || []) {
+            if (c.usageExample && c.usageExample.length > 50) {
+                componentParts.push(`// Component "${c.name}" (${c.category}) — adapt this structure:\n${c.usageExample}`);
+            }
+        }
+        // ── 7. Form patterns with field definitions ──
+        for (const f of guidance.learnedFormPatterns || []) {
+            if (f.fields || f.validationRules) {
+                pageParts.push(`// Form pattern "${f.name}": fields=${f.fields || "?"}, validation=${f.validationRules || "?"}`);
+            }
+        }
+        // ── 8. Cross-domain blueprint — tells LLM which app to reference per domain ──
+        if (guidance.unifiedDomainSources.length > 0) {
+            const blueprintNote = ["// CROSS-APP REFERENCE MAP — each domain pulls from a different source app:"];
+            for (const ds of guidance.unifiedDomainSources) {
+                if (ds.bestApp && ds.bestApp !== "NONE") {
+                    blueprintNote.push(`//   ${ds.domain} → ${ds.bestApp} (features: ${ds.features}, models: ${ds.models})`);
+                }
+            }
+            schemaParts.unshift(blueprintNote.join("\n"));
+            pageParts.unshift(blueprintNote.join("\n"));
+            componentParts.unshift(blueprintNote.join("\n"));
+        }
+    }
+    // Compose final blocks — cap total size per category to ~8000 chars
+    const cap = (parts, limit = 8000) => {
+        const joined = [];
+        let total = 0;
+        for (const p of parts) {
+            if (total + p.length > limit)
+                break;
+            joined.push(p);
+            total += p.length;
+        }
+        return joined.join("\n\n");
+    };
+    return {
+        schema: cap(schemaParts),
+        queries: cap(queryParts),
+        mutations: cap(mutationParts),
+        pages: cap(pageParts),
+        components: cap(componentParts),
+    };
 }
 // ─── AppBuilder ─────────────────────────────────────────────────────
 export class AppBuilder {
@@ -1281,6 +1521,8 @@ export class AppBuilder {
             }
             return { files_created: filesCreated, file_contents: localContents };
         }
+        // ── Collect reference code from graph + source files ──────────
+        const refCode = collectReferenceCode(pkg, context?.graphGuidance);
         // ── Decomposed build path (generic features) ──────────────────
         // Split the feature into atomic parts, generate each separately,
         // then compose fragments into final files.
@@ -1302,11 +1544,16 @@ export class AppBuilder {
                 completedKinds.add(part.kind);
                 continue;
             }
-            // LLM part — narrow, focused generation
+            // LLM part — narrow, focused generation with reference code
+            const partRefCode = part.kind === "query" ? refCode.queries
+                : part.kind === "mutation" ? refCode.mutations
+                    : part.kind === "component" ? refCode.components
+                        : part.kind === "validation" ? refCode.schema
+                            : refCode.pages;
             let code = null;
             try {
                 const { generateFeaturePart } = await import("../llm/code-gen.js");
-                code = await generateFeaturePart(part.prompt, part.kind);
+                code = await generateFeaturePart(part.prompt, part.kind, partRefCode || undefined);
             }
             catch {
                 // LLM unavailable
@@ -1346,7 +1593,7 @@ export class AppBuilder {
         const hasQueries = filesCreated.some((f) => f.includes("queries.ts"));
         const hasMutations = filesCreated.some((f) => f.includes("mutations.ts"));
         if (!hasQueries || !hasMutations) {
-            await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+            await this.writeConvexFunctions(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
             if (!hasQueries)
                 filesCreated.push(join("convex", featureSlug, "queries.ts"));
             if (!hasMutations)
@@ -1355,10 +1602,10 @@ export class AppBuilder {
         // Fallback: if no pages were generated, use monolithic page writers
         const hasPages = filesCreated.some((f) => f.startsWith(join("app", featureSlug)));
         if (!hasPages) {
-            await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+            await this.writePages(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
         }
         // Components still use monolithic path (they're usually small)
-        await this.writeComponents(workspacePath, featureSlug, pkg, feature, appSpec, localContents);
+        await this.writeComponents(workspacePath, featureSlug, pkg, feature, appSpec, localContents, refCode);
         // Fallback: if no test was generated, use monolithic test writer
         const hasTests = filesCreated.some((f) => f.includes(".test."));
         if (!hasTests) {
@@ -1436,7 +1683,7 @@ export default function Page() {
         const relPath = relative(basePath, filePath);
         fileContents[relPath] = normalized;
     }
-    async writeConvexFunctions(basePath, featureSlug, pkg, feature, appSpec, fileContents) {
+    async writeConvexFunctions(basePath, featureSlug, pkg, feature, appSpec, fileContents, refCode) {
         const tableName = featureSlug.replace(/-/g, "_");
         // ── Queries ──
         const queryPath = join(basePath, "convex", featureSlug, "queries.ts");
@@ -1448,7 +1695,7 @@ export default function Page() {
             // Use code-gen LLM functions if available
             try {
                 const { generateConvexQueries } = await import("../llm/code-gen.js");
-                queryContent = await generateConvexQueries(feature, appSpec, schemaRef);
+                queryContent = await generateConvexQueries(feature, appSpec, schemaRef, refCode?.queries);
             }
             catch {
                 // LLM unavailable
@@ -1511,7 +1758,7 @@ export const get = query({
         if (feature && appSpec) {
             try {
                 const { generateConvexMutations } = await import("../llm/code-gen.js");
-                mutationContent = await generateConvexMutations(feature, appSpec, schemaRef);
+                mutationContent = await generateConvexMutations(feature, appSpec, schemaRef, refCode?.mutations);
             }
             catch {
                 // LLM unavailable
@@ -1578,7 +1825,7 @@ export const updateStatus = mutation({
             fileContents[relative(basePath, mutationPath)] = mutationContent;
         }
     }
-    async writePages(basePath, featureSlug, pkg, feature, appSpec, fileContents) {
+    async writePages(basePath, featureSlug, pkg, feature, appSpec, fileContents, refCode) {
         for (const cap of pkg.included_capabilities) {
             const capLower = cap.toLowerCase();
             let capSlug = capLower.replace(/[^a-z0-9]+/g, "-");
@@ -1596,24 +1843,24 @@ export const updateStatus = mutation({
                 }
             }
             if (capLower.includes("form") || capLower.includes("submit") || capLower.includes("create")) {
-                await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+                await this.writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
             }
             else if (capLower.includes("list") || capLower.includes("queue") || capLower.includes("table") || capLower.includes("history")) {
-                await this.writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+                await this.writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
             }
             else if (capLower.includes("detail") || capLower.includes("view") || capLower.includes("review")) {
-                await this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents);
+                await this.writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode);
             }
         }
     }
-    async writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents) {
+    async writeFormPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode) {
         const pagePath = join(basePath, "app", featureSlug, capSlug, "page.tsx");
         this.ensureDir(pagePath);
         let content = null;
         if (feature && appSpec) {
             try {
                 const { generatePage } = await import("../llm/code-gen.js");
-                const generated = await generatePage(feature, appSpec, cap, "form");
+                const generated = await generatePage(feature, appSpec, cap, "form", refCode?.pages);
                 content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
             }
             catch {
@@ -1719,12 +1966,12 @@ export default function ${pascalName}Page() {
         const pageDir = join(basePath, "app", featureSlug, capSlug);
         this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
-    async writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents) {
+    async writeListPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode) {
         let content = null;
         if (feature && appSpec) {
             try {
                 const { generatePage } = await import("../llm/code-gen.js");
-                const generated = await generatePage(feature, appSpec, cap, "list");
+                const generated = await generatePage(feature, appSpec, cap, "list", refCode?.pages);
                 content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
             }
             catch {
@@ -1817,12 +2064,12 @@ export default function ${pascalName}Page() {
         const pageDir = join(basePath, "app", featureSlug, capSlug);
         this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
-    async writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents) {
+    async writeDetailPage(basePath, featureSlug, capSlug, cap, pkg, feature, appSpec, fileContents, refCode) {
         let content = null;
         if (feature && appSpec) {
             try {
                 const { generatePage } = await import("../llm/code-gen.js");
-                const generated = await generatePage(feature, appSpec, cap, "detail");
+                const generated = await generatePage(feature, appSpec, cap, "detail", refCode?.pages);
                 content = ensureAesUiImports(normalizeClerkUseAuthBindings(ensureClientComponent(generated || "")));
             }
             catch {
@@ -1911,14 +2158,14 @@ export default function ${pascalName}DetailPage() {
         const pageDir = join(basePath, "app", featureSlug, "[id]");
         this.writePageWithServerWrapper(pageDir, content, basePath, fileContents || {});
     }
-    async writeComponents(basePath, featureSlug, pkg, feature, appSpec, fileContents) {
+    async writeComponents(basePath, featureSlug, pkg, feature, appSpec, fileContents, refCode) {
         const badgePath = join(basePath, "components", featureSlug, "status-badge.tsx");
         this.ensureDir(badgePath);
         let content = null;
         if (feature && appSpec) {
             try {
                 const { generateComponent } = await import("../llm/code-gen.js");
-                content = await generateComponent(feature, appSpec, "status-badge");
+                content = await generateComponent(feature, appSpec, "status-badge", refCode?.components);
             }
             catch {
                 // LLM unavailable

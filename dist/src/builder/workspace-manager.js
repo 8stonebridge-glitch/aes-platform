@@ -30,7 +30,11 @@ export class WorkspaceManager {
             }
         }
         else {
-            basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+            const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+            if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+                mkdirSync(buildDir, { recursive: true });
+            }
+            basePath = mkdtempSync(join(buildDir, "aes-build-"));
         }
         // Initialize git repo with AES identity for containerized environments
         gitExec(["init"], basePath);
@@ -59,7 +63,11 @@ export class WorkspaceManager {
         const slug = featureName.toLowerCase().replace(/[^a-z0-9]+/g, "-").substring(0, 40);
         const branch = `aes/${safeJobId}/${slug}`;
         const workspaceId = `ws-${safeJobId}-${slug}`;
-        const basePath = mkdtempSync(join(tmpdir(), "aes-build-"));
+        const buildDir = process.env.AES_BUILD_DIR || tmpdir();
+        if (buildDir !== tmpdir() && !existsSync(buildDir)) {
+            mkdirSync(buildDir, { recursive: true });
+        }
+        const basePath = mkdtempSync(join(buildDir, "aes-build-"));
         if (repoUrl) {
             // Clone the real repo — repoUrl is passed as a single argument, not interpolated into a shell string
             gitExec(["clone", "--depth", "1", repoUrl, "."], basePath);
@@ -200,10 +208,10 @@ export function cleanupOldWorkspaces(maxAgeMs = 3600000) {
     const removed = [];
     const errors = [];
     const now = Date.now();
-    const tmp = tmpdir();
+    const buildDir = process.env.AES_BUILD_DIR || tmpdir();
     let entries;
     try {
-        entries = readdirSync(tmp);
+        entries = readdirSync(buildDir);
     }
     catch {
         return { removed, errors };
@@ -211,7 +219,7 @@ export function cleanupOldWorkspaces(maxAgeMs = 3600000) {
     for (const entry of entries) {
         if (!entry.startsWith("aes-build-"))
             continue;
-        const fullPath = join(tmp, entry);
+        const fullPath = join(buildDir, entry);
         try {
             const stat = statSync(fullPath);
             if (!stat.isDirectory())
