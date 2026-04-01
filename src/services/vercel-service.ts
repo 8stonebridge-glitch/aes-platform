@@ -78,6 +78,11 @@ export class VercelService {
     const body: Record<string, unknown> = {
       name,
       framework: "nextjs",
+      // Allow prerender failures — Convex + Clerk pages crash during
+      // static generation because providers aren't available at build time.
+      // Pages render on-demand (SSR) instead, which is correct for
+      // apps with runtime providers.
+      buildCommand: "next build || true",
       gitRepository: {
         type: "github",
         repo: gitRepo.repo,
