@@ -286,6 +286,8 @@ export interface GraphGuidance {
   buildExtractedTech: { name: string; version: string; category: string }[];
   /** Learned component patterns — reusable UI building blocks */
   learnedComponentPatterns: { name: string; category: string; description: string; props?: string; usageExample?: string }[];
+  /** Component relationship graph — dependencies, variants, loading/error states, pairs */
+  componentRelationships: { component: string; related: { relationship: string; reason?: string; name: string; category?: string; props?: string; usage_example?: string }[] }[];
   /** Learned form patterns — validated form structures */
   learnedFormPatterns: { name: string; description: string; fields?: string; validationRules?: string }[];
   /** Learned navigation patterns */

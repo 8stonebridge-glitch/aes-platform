@@ -26,6 +26,15 @@ export const EDGE_TYPES = {
   EXTENDS: { from: "Feature", to: "Feature", properties: [] },
   CATALOG_MATCH: { from: "CatalogEntry", to: "Feature", properties: ["fit_score", "fit_reason"] },
   BUILT_FROM: { from: "App", to: "CatalogEntry", properties: ["template_id"] },
+
+  // Component-level relationships (LearnedComponentPattern ↔ LearnedComponentPattern)
+  COMPOSES: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  PLACEHOLDER_FOR: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  VARIANT_OF: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  ERROR_STATE_FOR: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  EMPTY_STATE_FOR: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  NOTIFIES_WITH: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
+  PAIRS_WITH: { from: "LearnedComponentPattern", to: "LearnedComponentPattern", properties: ["reason"] },
 } as const;
 
 export type EdgeLabel = keyof typeof EDGE_TYPES;

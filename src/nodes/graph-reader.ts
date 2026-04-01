@@ -396,6 +396,37 @@ LIMIT 15
   `.trim();
 }
 
+/**
+ * Traverse component relationships to pull the full dependency chain,
+ * loading states, error states, variants, and commonly paired components
+ * for a set of matched components. Call AFTER cypherLearnedComponentPatterns
+ * to enrich the initial matches with their graph neighbors.
+ */
+function cypherComponentRelationships(keywords: string[]): string {
+  const conditions = keywords
+    .map((kw) => `(toLower(c.name) CONTAINS '${esc(kw)}' OR toLower(c.description) CONTAINS '${esc(kw)}' OR toLower(c.category) CONTAINS '${esc(kw)}')`)
+    .join(" OR ");
+
+  return `
+MATCH (c:LearnedComponentPattern)
+WHERE ${conditions}
+WITH c
+OPTIONAL MATCH (c)-[r:DEPENDS_ON|COMPOSES|PLACEHOLDER_FOR|VARIANT_OF|ERROR_STATE_FOR|EMPTY_STATE_FOR|NOTIFIES_WITH|PAIRS_WITH]->(related:LearnedComponentPattern)
+WITH c, collect(DISTINCT {
+  relationship: type(r),
+  reason: r.reason,
+  name: related.name,
+  category: related.category,
+  props: related.props,
+  usage_example: related.usage_example
+}) AS related_components
+WHERE size(related_components) > 0
+RETURN c.name AS component,
+       related_components
+LIMIT 15
+  `.trim();
+}
+
 /** Learned form patterns — validated form structures. */
 function cypherLearnedFormPatterns(keywords: string[]): string {
   const conditions = keywords
@@ -745,6 +776,7 @@ export async function graphReader(
     learnedPageSections: [],
     learnedStatePatterns: [],
     learnedDesignSystems: [],
+    componentRelationships: [],
     preventionRules: [],
     fixPatterns: [],
     validatorHeuristics: [],
@@ -808,6 +840,8 @@ export async function graphReader(
       bxModels, bxIntegrations, bxPatterns, bxTech,
       // Learned design/UI patterns
       lComponentPatterns, lFormPatterns, lNavigation, lPageSections, lStatePatterns, lDesignSystems,
+      // Component relationship graph (dependencies, variants, loading states, etc.)
+      lComponentRelationships,
       // Failure memory
       preventionRules, fixPatterns, validatorHeuristics,
       // Schema references
@@ -848,6 +882,8 @@ export async function graphReader(
       neo4j.runCypher(cypherLearnedPageSections(keywords)).catch(() => []),
       neo4j.runCypher(cypherLearnedStatePatterns(keywords)).catch(() => []),
       neo4j.runCypher(cypherLearnedDesignSystems(keywords)).catch(() => []),
+      // Component relationship traversal (dependencies, variants, loading states)
+      neo4j.runCypher(cypherComponentRelationships(keywords)).catch(() => []),
       // Failure memory (not keyword-dependent — always load)
       neo4j.runCypher(cypherPreventionRules()).catch(() => []),
       neo4j.runCypher(cypherFixPatterns()).catch(() => []),
@@ -945,6 +981,8 @@ export async function graphReader(
     context.learnedPageSections = lPageSections;
     context.learnedStatePatterns = lStatePatterns;
     context.learnedDesignSystems = lDesignSystems;
+    // Component relationship graph — dependencies, variants, loading/error states, pairs
+    context.componentRelationships = lComponentRelationships;
 
     // Failure memory intelligence
     context.preventionRules = preventionRules;

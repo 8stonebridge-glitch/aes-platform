@@ -161,6 +161,8 @@ export const AESState = Annotation.Root({
     learnedPageSections: any[];
     learnedStatePatterns: any[];
     learnedDesignSystems: any[];
+    // Component relationship graph (dependencies, variants, loading/error states, pairs)
+    componentRelationships: any[];
     // Failure memory intelligence
     preventionRules: any[];
     fixPatterns: any[];
@@ -210,6 +212,7 @@ export const AESState = Annotation.Root({
       learnedPageSections: [],
       learnedStatePatterns: [],
       learnedDesignSystems: [],
+      componentRelationships: [],
       preventionRules: [],
       fixPatterns: [],
       validatorHeuristics: [],

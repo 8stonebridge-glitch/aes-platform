@@ -487,6 +487,7 @@ function buildGraphGuidance(
     buildExtractedPatterns: [],
     buildExtractedTech: [],
     learnedComponentPatterns: [],
+    componentRelationships: [],
     learnedFormPatterns: [],
     learnedNavigation: [],
     learnedPageSections: [],
@@ -647,6 +648,16 @@ function buildGraphGuidance(
         description: item.description ?? "",
         props: item.props ?? undefined,
         usageExample: item.usage_example ?? undefined,
+      });
+    }
+  }
+
+  // ── Component relationships (dependencies, variants, loading states, pairs) ──
+  for (const item of graphContext.componentRelationships ?? []) {
+    if (item.component && Array.isArray(item.related_components)) {
+      guidance.componentRelationships.push({
+        component: item.component,
+        related: item.related_components,
       });
     }
   }
@@ -984,6 +995,29 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
       parts.push(`- ${c.name} (${c.category}): ${c.description}`);
       if (c.props) parts.push(`  Props: ${c.props}`);
       if (c.usageExample) parts.push(`  Usage:\n\`\`\`tsx\n${c.usageExample}\n\`\`\``);
+    }
+  }
+
+  if (guidance.componentRelationships.length > 0) {
+    parts.push("\n## COMPONENT DEPENDENCY GRAPH — INCLUDE RELATED COMPONENTS");
+    parts.push("When you use a component, also include its dependencies, loading states, and error fallbacks:");
+    for (const rel of guidance.componentRelationships.slice(0, 15)) {
+      const groups: Record<string, string[]> = {};
+      for (const r of rel.related) {
+        const type = r.relationship ?? "RELATED";
+        if (!groups[type]) groups[type] = [];
+        groups[type].push(r.name + (r.reason ? ` (${r.reason})` : ""));
+      }
+      const lines = Object.entries(groups)
+        .map(([type, names]) => `  ${type}: ${names.join(", ")}`)
+        .join("\n");
+      parts.push(`- ${rel.component}:\n${lines}`);
+      // Include usage_example for dependency components the builder might not have seen
+      for (const r of rel.related) {
+        if (r.usage_example && r.relationship === "DEPENDS_ON") {
+          parts.push(`  Required dep "${r.name}":\n\`\`\`tsx\n${r.usage_example}\n\`\`\``);
+        }
+      }
     }
   }
 

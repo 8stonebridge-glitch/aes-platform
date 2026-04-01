@@ -364,3 +364,171 @@ CREATE (c12:LearnedComponentPattern {
   props: 'defaultValue, children',
   usage_example: '"use client";\nimport * as TabsPrimitive from "@radix-ui/react-tabs";\n\nexport function Tabs(props: React.ComponentProps<typeof TabsPrimitive.Root>) {\n  return <TabsPrimitive.Root {...props} />;\n}\n\nexport function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {\n  return (\n    <TabsPrimitive.List className={`inline-flex h-9 items-center justify-center rounded-lg bg-zinc-100 p-1 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 ${className ?? ""}`} {...props} />\n  );\n}\n\nexport function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {\n  return (\n    <TabsPrimitive.Trigger className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-white data-[state=active]:text-zinc-950 data-[state=active]:shadow dark:ring-offset-zinc-950 dark:data-[state=active]:bg-zinc-950 dark:data-[state=active]:text-zinc-50 ${className ?? ""}`} {...props} />\n  );\n}\n\nexport function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {\n  return (\n    <TabsPrimitive.Content className={`mt-2 ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 dark:ring-offset-zinc-950 ${className ?? ""}`} {...props} />\n  );\n}'
 });
+
+// ============================================================
+// CROSS-RELATIONSHIPS
+// These edges make the graph traversable so AES can pull
+// complete dependency chains, not just individual components.
+// ============================================================
+
+// ── DEPENDS_ON ──
+// "I need this other component to function"
+
+// AppShell needs navigation items rendered with buttons/links
+CREATE (t1)-[:DEPENDS_ON {reason: 'sidebar nav items'}]->(t4);
+
+// DataTable depends on Badge for status cells and Button for row actions
+CREATE (t5)-[:DEPENDS_ON {reason: 'status cells'}]->(t7);
+CREATE (t5)-[:DEPENDS_ON {reason: 'row actions'}]->(t4);
+
+// ConfirmDialog is built on Modal + needs action buttons
+CREATE (t14)-[:DEPENDS_ON {reason: 'dialog container'}]->(t13);
+CREATE (t14)-[:DEPENDS_ON {reason: 'confirm/cancel actions'}]->(t4);
+
+// Modal needs Button for close/action
+CREATE (t13)-[:DEPENDS_ON {reason: 'close and action buttons'}]->(t4);
+
+// FormField wraps input primitives
+CREATE (t9)-[:DEPENDS_ON {reason: 'text input primitive'}]->(t10);
+CREATE (t9)-[:DEPENDS_ON {reason: 'select primitive'}]->(t11);
+CREATE (t9)-[:DEPENDS_ON {reason: 'textarea primitive'}]->(t12);
+
+// FormSystem (react-hook-form) wraps FormField
+CREATE (c8)-[:DEPENDS_ON {reason: 'field wrapper'}]->(t9);
+CREATE (c8)-[:DEPENDS_ON {reason: 'text input'}]->(t10);
+CREATE (c8)-[:DEPENDS_ON {reason: 'select input'}]->(t11);
+
+// SearchInput is a specialized TextInput
+CREATE (t19)-[:DEPENDS_ON {reason: 'base input behavior'}]->(t10);
+
+// CatalystSidebarLayout uses Button for mobile menu toggle
+CREATE (c1)-[:DEPENDS_ON {reason: 'mobile menu trigger'}]->(t4);
+
+// CatalystTable depends on Badge for status and Button for actions
+CREATE (c2)-[:DEPENDS_ON {reason: 'status badges'}]->(t7);
+CREATE (c2)-[:DEPENDS_ON {reason: 'row actions'}]->(t4);
+
+// CatalystPagination depends on Button for page controls
+CREATE (c5)-[:DEPENDS_ON {reason: 'page navigation buttons'}]->(t4);
+
+// DropdownMenu uses Button as trigger
+CREATE (c9)-[:DEPENDS_ON {reason: 'menu trigger'}]->(t4);
+
+// Sheet (slide-out panel) needs Button for close
+CREATE (c6)-[:DEPENDS_ON {reason: 'close button'}]->(t4);
+
+// DashboardGrid typically contains StatCards
+CREATE (t20)-[:DEPENDS_ON {reason: 'stat display'}]->(t6);
+
+// ── COMPOSES ──
+// "I commonly appear inside this container"
+
+// PageHeader + PageContent compose inside AppShell
+CREATE (t1)-[:COMPOSES {reason: 'page structure'}]->(t2);
+CREATE (t1)-[:COMPOSES {reason: 'page structure'}]->(t3);
+
+// AppShell composes Breadcrumb for navigation context
+CREATE (t1)-[:COMPOSES {reason: 'navigation hierarchy'}]->(t17);
+
+// ListDetailLayout composes inside PageContent
+CREATE (t3)-[:COMPOSES {reason: 'list-detail pattern'}]->(t21);
+
+// DataTable composes inside PageContent
+CREATE (t3)-[:COMPOSES {reason: 'data display'}]->(t5);
+
+// DashboardGrid composes inside PageContent
+CREATE (t3)-[:COMPOSES {reason: 'dashboard layout'}]->(t20);
+
+// Tabs/RadixTabs compose inside PageContent
+CREATE (t3)-[:COMPOSES {reason: 'tabbed content'}]->(t18);
+CREATE (t3)-[:COMPOSES {reason: 'tabbed content'}]->(c12);
+
+// CatalystSidebarLayout composes the same page structure
+CREATE (c1)-[:COMPOSES {reason: 'page header'}]->(t2);
+CREATE (c1)-[:COMPOSES {reason: 'page content'}]->(t3);
+
+// Modal composes FormField for form dialogs
+CREATE (t13)-[:COMPOSES {reason: 'form inside dialog'}]->(t9);
+
+// Sheet composes FormSystem for slide-out forms
+CREATE (c6)-[:COMPOSES {reason: 'form inside panel'}]->(c8);
+
+// ── PLACEHOLDER_FOR ──
+// "I'm the loading state for this component"
+
+CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'table loading state'}]->(t5);
+CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'stat loading state'}]->(t6);
+CREATE (t15)-[:PLACEHOLDER_FOR {reason: 'list loading state'}]->(t21);
+CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'table loading state'}]->(t5);
+CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'card loading state'}]->(t6);
+CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'form loading state'}]->(c8);
+CREATE (c11)-[:PLACEHOLDER_FOR {reason: 'catalyst table loading'}]->(c2);
+
+// ── VARIANT_OF ──
+// "I'm an alternative implementation of the same concept"
+
+// Sheet is a panel variant of Modal
+CREATE (c6)-[:VARIANT_OF {reason: 'slide-out vs overlay dialog'}]->(t13);
+
+// CatalystSidebarLayout is a variant of AppShell
+CREATE (c1)-[:VARIANT_OF {reason: 'headless-ui vs plain sidebar'}]->(t1);
+
+// CatalystTable is a variant of DataTable
+CREATE (c2)-[:VARIANT_OF {reason: 'context-driven vs prop-driven table'}]->(t5);
+
+// RadixTabs is a variant of Tabs
+CREATE (c12)-[:VARIANT_OF {reason: 'radix vs plain tabs'}]->(t18);
+
+// Skeleton is a variant of LoadingSkeleton
+CREATE (c11)-[:VARIANT_OF {reason: 'pulse vs shimmer skeleton'}]->(t15);
+
+// CatalystCheckbox and CatalystSwitch are toggle variants
+CREATE (c4)-[:VARIANT_OF {reason: 'switch vs checkbox toggle'}]->(c3);
+
+// ── ERROR_STATE_FOR ──
+// "I'm what renders when this component fails"
+
+CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t5);
+CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t20);
+CREATE (t16)-[:ERROR_STATE_FOR {reason: 'fallback on crash'}]->(t21);
+
+// ── EMPTY_STATE_FOR ──
+// "I render when this component has no data"
+
+CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(t5);
+CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no rows placeholder'}]->(c2);
+CREATE (t15)-[:EMPTY_STATE_FOR {reason: 'no items placeholder'}]->(t21);
+
+// ── NOTIFIES_WITH ──
+// "I use this component to communicate outcomes"
+
+CREATE (t14)-[:NOTIFIES_WITH {reason: 'success/failure toast after confirm'}]->(t15);
+CREATE (c8)-[:NOTIFIES_WITH {reason: 'form submission feedback'}]->(t15);
+CREATE (t13)-[:NOTIFIES_WITH {reason: 'dialog action feedback'}]->(t15);
+
+// ── PAIRS_WITH ──
+// "We commonly appear together on the same page"
+
+// Search + Table
+CREATE (t19)-[:PAIRS_WITH {reason: 'filter table rows'}]->(t5);
+CREATE (t19)-[:PAIRS_WITH {reason: 'filter catalyst table'}]->(c2);
+
+// Pagination + Table
+CREATE (c5)-[:PAIRS_WITH {reason: 'paginate table rows'}]->(t5);
+CREATE (c5)-[:PAIRS_WITH {reason: 'paginate catalyst table'}]->(c2);
+
+// Tooltip + Button (action hints)
+CREATE (c7)-[:PAIRS_WITH {reason: 'action button hints'}]->(t4);
+
+// Tooltip + Avatar (user info on hover)
+CREATE (c7)-[:PAIRS_WITH {reason: 'user info on hover'}]->(t8);
+
+// Breadcrumb + PageHeader (navigation context)
+CREATE (t17)-[:PAIRS_WITH {reason: 'breadcrumb above header'}]->(t2);
+
+// Alert + FormSystem (form-level error display)
+CREATE (c10)-[:PAIRS_WITH {reason: 'form-level error/success'}]->(c8);
+
+// DropdownMenu + DataTable (row actions menu)
+CREATE (c9)-[:PAIRS_WITH {reason: 'row action menu'}]->(t5);
+CREATE (c9)-[:PAIRS_WITH {reason: 'row action menu'}]->(c2);
