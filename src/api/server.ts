@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
 import { runGraph, type GraphCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
 import { getLLMSemaphoreStats, resetLLMSemaphore } from "../llm/provider.js";
@@ -1009,6 +1010,8 @@ app.get("/api/graph/visualize", async (req, res) => {
 // Build fingerprint — changes on every deploy so Hermes can detect stale containers
 const BUILD_ID = `b-${Date.now().toString(36)}`;
 const BOOT_TIME = new Date().toISOString();
+const COMMIT_SHA = resolveCommitSha();
+const COMMIT_SHORT = COMMIT_SHA ? COMMIT_SHA.slice(0, 7) : null;
 
 app.get("/api/health", (_req, res) => {
   const sem = getLLMSemaphoreStats();
@@ -1016,11 +1019,40 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     version: "v15",
     build_id: BUILD_ID,
+    commit_sha: COMMIT_SHA,
+    commit_short: COMMIT_SHORT,
     booted_at: BOOT_TIME,
     math_layer: true,
     llm_slots: { active: sem.activeSlots, max: sem.maxSlots, queued: sem.queueLength },
   });
 });
+
+function resolveCommitSha(): string | null {
+  const envCandidates = [
+    process.env.AES_GIT_COMMIT_SHA,
+    process.env.RAILWAY_GIT_COMMIT_SHA,
+    process.env.GIT_COMMIT,
+    process.env.COMMIT_SHA,
+    process.env.SOURCE_COMMIT,
+  ];
+
+  for (const candidate of envCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  try {
+    const sha = execSync("git rev-parse HEAD", {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+    }).trim();
+    return sha.length > 0 ? sha : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Debug / admin endpoints ──────────────────────────────────────
 
