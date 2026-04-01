@@ -17,7 +17,7 @@
     "start": "node dist/src/api/index.js",
     "start:api": "node dist/src/api/index.js",
     "test": "vitest run",
-    "verify": "npm run build --prefix packages/math && npm run build --prefix packages/graph && npm run build --prefix packages/failure-memory && tsc --noEmit",
+    "verify": "tsc --noEmit",
     "paperclip": "tsx paperclip/aes-agent.ts"
   },
   "dependencies": {

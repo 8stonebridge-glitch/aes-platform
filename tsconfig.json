@@ -11,8 +11,12 @@
     "declaration": true,
     "paths": {
       "@aes/math": ["./packages/math/src/index.ts"],
-      "@aes/math/*": ["./packages/math/src/*"]
+      "@aes/math/*": ["./packages/math/src/*"],
+      "@aes/failure-memory": ["./packages/failure-memory/src/index.ts"],
+      "@aes/failure-memory/*": ["./packages/failure-memory/src/*"],
+      "@aes/graph": ["./packages/graph/src/index.ts"],
+      "@aes/graph/*": ["./packages/graph/src/*"]
     }
   },
-  "include": ["src", "packages/math/src"]
+  "include": ["src", "packages/math/src", "packages/failure-memory/src", "packages/graph/src"]
 }
