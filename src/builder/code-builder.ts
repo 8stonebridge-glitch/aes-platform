@@ -314,6 +314,18 @@ export interface GraphGuidance {
   reasoningRules: { title: string; summary: string; strategies: string }[];
   /** AES preflight checklists */
   aesPreflight: { title: string; steps: string }[];
+  /** Unified reasoner: domain decomposition with best source apps */
+  unifiedDomainSources: { domain: string; bestApp: string; features: string; models: string; integrations: string }[];
+  /** Unified reasoner: composite architecture blueprint */
+  unifiedBlueprint: string[];
+  /** Unified reasoner: knowledge gaps identified */
+  unifiedGaps: string[];
+  /** Unified reasoner: discovered knowledge from beam search */
+  unifiedDiscoveredKnowledge: { category: string; items: string }[];
+  /** Unified reasoner: universal patterns (found in 5+ apps) */
+  unifiedUniversalPatterns: { name: string; type: string; percentage: string }[];
+  /** Unified reasoner: concept confidence scores */
+  unifiedConceptScores: { concept: string; confidence: string; totalHits: string; evidence: string }[];
 }
 
 export interface BuilderContext {

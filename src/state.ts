@@ -175,6 +175,16 @@ export const AESState = Annotation.Root({
     aesPreflight: any[];
     // Whole-app context (LearnedApp with relationships)
     learnedAppContext: any[];
+    // Unified reasoner output (domain decomposition, beam search, blueprints)
+    unifiedDomains: any[];
+    unifiedDomainSources: any[];
+    unifiedConceptScores: any[];
+    unifiedBlueprint: string[];
+    unifiedGaps: string[];
+    unifiedCoverage: number;
+    unifiedTracedPaths: string[];
+    unifiedDiscoveredKnowledge: Record<string, string[]>;
+    unifiedUniversalPatterns: any[];
   }>({
     value: lastValue,
     default: () => ({
@@ -210,6 +220,15 @@ export const AESState = Annotation.Root({
       aesBlueprints: [],
       aesPreflight: [],
       learnedAppContext: [],
+      unifiedDomains: [],
+      unifiedDomainSources: [],
+      unifiedConceptScores: [],
+      unifiedBlueprint: [],
+      unifiedGaps: [],
+      unifiedCoverage: 0,
+      unifiedTracedPaths: [],
+      unifiedDiscoveredKnowledge: {},
+      unifiedUniversalPatterns: [],
     }),
   }),
 

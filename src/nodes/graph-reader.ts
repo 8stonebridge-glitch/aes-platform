@@ -24,6 +24,11 @@ import {
 } from "../services/embedding-service.js";
 import { rrfFuse, boostDualSource, type RankedItem } from "../services/rrf-fusion.js";
 import { loadDesignEvidenceFromDisk } from "../services/design-evidence-loader.js";
+import {
+  initUnifiedReasoner,
+  unifiedReason,
+  type UnifiedResult,
+} from "../tools/unified-graph-reasoner.js";
 
 // ─── Cypher Queries ──────────────────────────────────────────────────
 
@@ -750,6 +755,15 @@ export async function graphReader(
     aesBlueprints: [],
     aesPreflight: [],
     learnedAppContext: [],
+    unifiedDomains: [],
+    unifiedDomainSources: [],
+    unifiedConceptScores: [],
+    unifiedBlueprint: [],
+    unifiedGaps: [],
+    unifiedCoverage: 0,
+    unifiedTracedPaths: [],
+    unifiedDiscoveredKnowledge: {},
+    unifiedUniversalPatterns: [],
   };
 
   // ── Check vector search availability ──
@@ -757,6 +771,26 @@ export async function graphReader(
   if (vectorAvailable) {
     cb?.onStep("Vector search enabled — running hybrid keyword + semantic search");
   }
+
+  // ── Initialize and run unified reasoner in parallel with keyword queries ──
+  let unifiedResult: UnifiedResult | null = null;
+  const unifiedPromise = (async () => {
+    try {
+      await initUnifiedReasoner(neo4j);
+      cb?.onStep("Unified reasoner initialized — running domain decomposition + beam search + confidence scoring...");
+      const result = await unifiedReason(state.rawRequest);
+      cb?.onSuccess(`Unified reasoner: ${result.domains.length} domains, ${result.seedNodes.length} seeds, ${result.hops.length} hops, ${result.coveragePercent}% coverage, ${result.gaps.length} gaps`);
+      store.addLog(state.jobId, {
+        gate: "graph_reader",
+        message: `Unified reasoner: domains=[${result.domains.map(d => d.domain).join(",")}] coverage=${result.coveragePercent}% gaps=[${result.gaps.join(",")}] seeds=${result.seedNodes.length} hops=${result.hops.length} blueprint=${result.blueprint.length} lines`,
+      });
+      return result;
+    } catch (err: any) {
+      cb?.onWarn(`Unified reasoner failed: ${err.message} — continuing with keyword queries`);
+      store.addLog(state.jobId, { gate: "graph_reader", message: `Unified reasoner failed: ${err.message}` });
+      return null;
+    }
+  })();
 
   // Cypher runner adapter for vectorSearch (matches expected signature)
   const cypherRunner = async (cypher: string, params?: Record<string, any>) =>
@@ -993,6 +1027,26 @@ export async function graphReader(
   } catch (err: any) {
     cb?.onWarn(`Graph search failed: ${err.message} — continuing without context`);
     store.addLog(state.jobId, { gate: "graph_reader", message: `Graph search failed: ${err.message}` });
+  }
+
+  // ── Merge unified reasoner results ──
+  unifiedResult = await unifiedPromise;
+  if (unifiedResult) {
+    context.unifiedDomains = unifiedResult.domains;
+    context.unifiedDomainSources = unifiedResult.domainSources;
+    context.unifiedConceptScores = unifiedResult.conceptScores;
+    context.unifiedBlueprint = unifiedResult.blueprint;
+    context.unifiedGaps = unifiedResult.gaps;
+    context.unifiedCoverage = unifiedResult.coveragePercent;
+    context.unifiedTracedPaths = unifiedResult.tracedPaths.slice(0, 50); // Cap for state size
+    context.unifiedUniversalPatterns = unifiedResult.universalPatterns;
+
+    // Convert discoveredKnowledge Map<string, Set<string>> → Record<string, string[]>
+    const dk: Record<string, string[]> = {};
+    for (const [key, valueSet] of unifiedResult.discoveredKnowledge) {
+      dk[key] = Array.from(valueSet);
+    }
+    context.unifiedDiscoveredKnowledge = dk;
   }
 
   // ── Load design evidence (Paper MCP extractions) ──

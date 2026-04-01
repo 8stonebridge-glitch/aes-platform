@@ -115,7 +115,7 @@ interface HopResult {
   path: string;
 }
 
-interface UnifiedResult {
+export interface UnifiedResult {
   request: string;
 
   // From reasoning rules
@@ -980,7 +980,24 @@ async function findUniversalPatterns(): Promise<{ name: string; type: string; pe
 // MAIN: UNIFIED REASONING ENGINE
 // ═══════════════════════════════════════════════════════════════════════
 
-async function unifiedReason(request: string): Promise<UnifiedResult> {
+/**
+ * Initialize the unified reasoner for use by the pipeline.
+ * Must be called before unifiedReason() when used as an import.
+ */
+export async function initUnifiedReasoner(neo4jService: ReturnType<typeof getNeo4jService>): Promise<void> {
+  neo4j = neo4jService;
+  vectorEnabled = isEmbeddingAvailable();
+  if (vectorEnabled) {
+    try {
+      const indexes = await neo4j.runCypher(`SHOW INDEXES WHERE type = 'VECTOR'`);
+      if (indexes.length === 0) vectorEnabled = false;
+    } catch {
+      vectorEnabled = false;
+    }
+  }
+}
+
+export async function unifiedReason(request: string): Promise<UnifiedResult> {
   const result: UnifiedResult = {
     request,
     rulesLoaded: [],

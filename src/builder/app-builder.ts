@@ -501,6 +501,12 @@ function buildGraphGuidance(
     learnedAppContext: [],
     reasoningRules: [],
     aesPreflight: [],
+    unifiedDomainSources: [],
+    unifiedBlueprint: [],
+    unifiedGaps: [],
+    unifiedDiscoveredKnowledge: [],
+    unifiedUniversalPatterns: [],
+    unifiedConceptScores: [],
   };
   if (!graphContext) return guidance;
 
@@ -808,6 +814,59 @@ function buildGraphGuidance(
     }
   }
 
+  // ── Unified reasoner: domain sources ──
+  for (const item of graphContext.unifiedDomainSources ?? []) {
+    if (item.domain && item.bestApp) {
+      guidance.unifiedDomainSources.push({
+        domain: item.domain ?? "",
+        bestApp: item.bestApp ?? "",
+        features: Array.isArray(item.matchedFeatures) ? item.matchedFeatures.join(", ") : "",
+        models: Array.isArray(item.matchedModels) ? item.matchedModels.join(", ") : "",
+        integrations: Array.isArray(item.matchedIntegrations) ? item.matchedIntegrations.join(", ") : "",
+      });
+    }
+  }
+
+  // ── Unified reasoner: blueprint ──
+  guidance.unifiedBlueprint = graphContext.unifiedBlueprint ?? [];
+
+  // ── Unified reasoner: gaps ──
+  guidance.unifiedGaps = graphContext.unifiedGaps ?? [];
+
+  // ── Unified reasoner: discovered knowledge ──
+  const dk = graphContext.unifiedDiscoveredKnowledge ?? {};
+  for (const [category, items] of Object.entries(dk)) {
+    if (Array.isArray(items) && items.length > 0) {
+      guidance.unifiedDiscoveredKnowledge.push({
+        category,
+        items: items.slice(0, 15).join(", "),
+      });
+    }
+  }
+
+  // ── Unified reasoner: universal patterns ──
+  for (const item of graphContext.unifiedUniversalPatterns ?? []) {
+    if (item.name) {
+      guidance.unifiedUniversalPatterns.push({
+        name: item.name ?? "",
+        type: item.type ?? "",
+        percentage: `${item.percentage ?? 0}%`,
+      });
+    }
+  }
+
+  // ── Unified reasoner: concept confidence scores ──
+  for (const item of graphContext.unifiedConceptScores ?? []) {
+    if (item.concept) {
+      guidance.unifiedConceptScores.push({
+        concept: item.concept ?? "",
+        confidence: item.confidence ?? "GAP",
+        totalHits: `${item.totalHits ?? 0}`,
+        evidence: Array.isArray(item.evidence) ? item.evidence.slice(0, 5).join("; ") : "",
+      });
+    }
+  }
+
   return guidance;
 }
 
@@ -1036,6 +1095,58 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
     parts.push("\n## PREFLIGHT CHECKLISTS");
     for (const p of guidance.aesPreflight.slice(0, 5)) {
       parts.push(`- ${p.title}: ${p.steps}`);
+    }
+  }
+
+  // ── Unified reasoner intelligence ──
+
+  if (guidance.unifiedDomainSources.length > 0) {
+    parts.push("\n## DOMAIN DECOMPOSITION — BEST SOURCE APPS PER DOMAIN");
+    parts.push("The unified graph reasoner identified these domains and the best prior app to learn from for each:");
+    for (const d of guidance.unifiedDomainSources.slice(0, 8)) {
+      parts.push(`- ${d.domain} → best source: ${d.bestApp}`);
+      if (d.features) parts.push(`  Features to adopt: ${d.features}`);
+      if (d.models) parts.push(`  Models to adopt: ${d.models}`);
+      if (d.integrations) parts.push(`  Integrations: ${d.integrations}`);
+    }
+  }
+
+  if (guidance.unifiedBlueprint.length > 0) {
+    parts.push("\n## COMPOSITE ARCHITECTURE BLUEPRINT");
+    parts.push("Cross-domain blueprint assembled from best-source apps in the graph:");
+    for (const line of guidance.unifiedBlueprint.slice(0, 20)) {
+      parts.push(`  ${line}`);
+    }
+  }
+
+  if (guidance.unifiedDiscoveredKnowledge.length > 0) {
+    parts.push("\n## DISCOVERED KNOWLEDGE FROM GRAPH REASONING");
+    for (const dk of guidance.unifiedDiscoveredKnowledge.slice(0, 8)) {
+      parts.push(`- ${dk.category}: ${dk.items}`);
+    }
+  }
+
+  if (guidance.unifiedUniversalPatterns.length > 0) {
+    parts.push("\n## UNIVERSAL PATTERNS (FOUND IN 5+ PRIOR APPS)");
+    for (const p of guidance.unifiedUniversalPatterns.slice(0, 10)) {
+      parts.push(`- ${p.name} (${p.type}): used in ${p.percentage} of prior apps`);
+    }
+  }
+
+  if (guidance.unifiedConceptScores.length > 0) {
+    parts.push("\n## CONCEPT CONFIDENCE — WHAT THE GRAPH KNOWS VS GAPS");
+    for (const c of guidance.unifiedConceptScores.slice(0, 8)) {
+      const icon = c.confidence === "HIGH" ? "✓" : c.confidence === "MEDIUM" ? "~" : c.confidence === "LOW" ? "?" : "✗";
+      parts.push(`- [${icon} ${c.confidence}] ${c.concept} (${c.totalHits} evidence hits)`);
+      if (c.evidence) parts.push(`  Evidence: ${c.evidence}`);
+    }
+  }
+
+  if (guidance.unifiedGaps.length > 0) {
+    parts.push("\n## KNOWLEDGE GAPS — AREAS WHERE THE GRAPH HAS NO PRIOR DATA");
+    parts.push("Be extra careful generating code for these areas — no prior builds to learn from:");
+    for (const g of guidance.unifiedGaps.slice(0, 5)) {
+      parts.push(`- ${g}`);
     }
   }
 
