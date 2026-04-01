@@ -198,6 +198,58 @@ function ensureClientDirective(
   };
 }
 
+function ensureRouterBindings(
+  content: string,
+): { content: string; changed: boolean } {
+  if (!/\brouter\./.test(content)) {
+    return { content, changed: false };
+  }
+
+  let next = content;
+
+  const nextNavigationImport = /import\s*{([^}]*)}\s*from\s*["']next\/navigation["'];?/;
+  const existingImport = next.match(nextNavigationImport);
+  if (existingImport) {
+    const names = existingImport[1]
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (!names.includes("useRouter")) {
+      const merged = Array.from(new Set([...names, "useRouter"])).sort();
+      next = next.replace(
+        nextNavigationImport,
+        `import { ${merged.join(", ")} } from "next/navigation";`,
+      );
+    }
+  } else {
+    const lines = next.split("\n");
+    let insertAt = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i].trim();
+      if (line.startsWith("import ")) {
+        insertAt = i + 1;
+        continue;
+      }
+      if (line === '"use client";' || line === "'use client';" || line === "") {
+        insertAt = Math.max(insertAt, i + 1);
+        continue;
+      }
+      break;
+    }
+    lines.splice(insertAt, 0, 'import { useRouter } from "next/navigation";');
+    next = lines.join("\n");
+  }
+
+  if (!/\bconst\s+router\s*=\s*useRouter\(\)\s*;/.test(next)) {
+    next = next.replace(
+      /(export default function [^{]+\{\n)/,
+      `$1  const router = useRouter();\n`,
+    );
+  }
+
+  return { content: next, changed: next !== content };
+}
+
 function ensureAesUiImports(
   content: string,
 ): { content: string; changed: boolean } {
@@ -262,6 +314,28 @@ function normalizeClerkUseAuthBindings(
 
   if (/\bconst\s*{\s*[^}]*\borgId\b[^}]*}\s*=\s*useAuth\(\)\s*;/.test(next)) {
     next = next.replace(/\borg\b/g, "orgId");
+  }
+
+  const useAuthBindingRegex = /const\s*{\s*([^}]*)}\s*=\s*useAuth\(\)\s*;/g;
+  const bindingMatches = Array.from(next.matchAll(useAuthBindingRegex));
+  if (bindingMatches.length > 1) {
+    const mergedNames = Array.from(
+      new Set(
+        bindingMatches
+          .flatMap((match) => match[1].split(","))
+          .map((name) => name.trim())
+          .filter(Boolean)
+          .map((name) => (name === "org" ? "orgId" : name)),
+      ),
+    );
+
+    let seen = false;
+    next = next.replace(useAuthBindingRegex, () => {
+      if (seen) return "";
+      seen = true;
+      return `const { ${mergedNames.join(", ")} } = useAuth();`;
+    });
+    next = next.replace(/\n{3,}/g, "\n\n");
   }
 
   return { content: next, changed: next !== content };
@@ -480,6 +554,83 @@ describe("${description} smoke", () => {
   return rewritten;
 }
 
+function repairTestingLibraryFireEventImports(workspacePath: string): string[] {
+  const rewritten: string[] = [];
+
+  for (const absolutePath of collectSourceFiles(join(workspacePath, "tests"), [".ts", ".tsx"])) {
+    const relativePath = absolutePath.replace(`${workspacePath}/`, "");
+    const existing = readFileSync(absolutePath, "utf-8");
+    let repaired = existing;
+
+    if (/@testing-library\/react/.test(repaired) && /\bfireEvent\b/.test(repaired)) {
+      repaired = repaired.replace(
+        /import\s*{\s*([\s\S]*?)\s*}\s*from\s*["']@testing-library\/react["'];?/m,
+        (_full, names) => {
+          const parsed = String(names)
+            .split(",")
+            .map((name) => name.replace(/\s+/g, " ").trim())
+            .filter(Boolean);
+          if (!parsed.includes("fireEvent")) return _full;
+
+          const keep = parsed.filter((name) => name !== "fireEvent");
+          const reactImport = keep.length > 0
+            ? `import { ${keep.join(", ")} } from "@testing-library/react";`
+            : "";
+          const hasDomImport = /from\s*["']@testing-library\/dom["']/.test(repaired);
+          const domImport = hasDomImport ? "" : `import { fireEvent } from "@testing-library/dom";`;
+          return [reactImport, domImport].filter(Boolean).join("\n");
+        },
+      );
+    }
+
+    if (/\brender\s*\(/.test(repaired) && !/\bimport\s*{\s*[^}]*\brender\b[^}]*}\s*from\s*["']@testing-library\/react["']/.test(repaired)) {
+      const lines = repaired.split("\n");
+      let insertAt = 0;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i].trim();
+        if (line.startsWith("import ")) {
+          insertAt = i + 1;
+          continue;
+        }
+        if (line === "") {
+          insertAt = Math.max(insertAt, i + 1);
+          continue;
+        }
+        break;
+      }
+
+      const reactImportIndex = lines.findIndex((line) =>
+        /from\s*["']@testing-library\/react["']/.test(line),
+      );
+      if (reactImportIndex >= 0) {
+        const match = lines[reactImportIndex].match(/import\s*{\s*([^}]*)\s*}\s*from\s*["']@testing-library\/react["'];?/);
+        if (match) {
+          const merged = Array.from(
+            new Set(
+              match[1]
+                .split(",")
+                .map((name) => name.trim())
+                .filter(Boolean)
+                .concat("render"),
+            ),
+          ).sort();
+          lines[reactImportIndex] = `import { ${merged.join(", ")} } from "@testing-library/react";`;
+        }
+      } else {
+        lines.splice(insertAt, 0, `import { render } from "@testing-library/react";`);
+      }
+      repaired = lines.join("\n");
+    }
+
+    if (repaired !== existing) {
+      writeFileSync(absolutePath, repaired);
+      rewritten.push(relativePath);
+    }
+  }
+
+  return rewritten;
+}
+
 function repairLikelyUnsupportedTestingLibraryImports(workspacePath: string, compilerOutput: string): string[] {
   const rewritten: string[] = [];
   const matches = compilerOutput.matchAll(
@@ -492,10 +643,36 @@ function repairLikelyUnsupportedTestingLibraryImports(workspacePath: string, com
     if (!existsSync(absolutePath)) continue;
 
     const existing = readFileSync(absolutePath, "utf-8");
+    const missingExport = match[2];
     const description = relativePath
       .replace(/^tests\//, "")
       .replace(/\/[^/]+\.test\.tsx$/, "")
       .replace(/-/g, " ");
+
+    if (missingExport === "fireEvent") {
+      let repaired = existing;
+      repaired = repaired.replace(
+        /import\s*{\s*([\s\S]*?)\s*}\s*from\s*["']@testing-library\/react["'];?/m,
+        (_full, names) => {
+          const keep = String(names)
+            .split(",")
+            .map((name: string) => name.replace(/\s+/g, " ").trim())
+            .filter(Boolean)
+            .filter((name: string) => name !== "fireEvent");
+          const renderImport = keep.length > 0
+            ? `import { ${keep.join(", ")} } from "@testing-library/react";`
+            : "";
+          const hasDomImport = /from\s*["']@testing-library\/dom["']/.test(existing);
+          const domImport = hasDomImport ? "" : `import { fireEvent } from "@testing-library/dom";`;
+          return [renderImport, domImport].filter(Boolean).join("\n");
+        },
+      );
+      if (repaired !== existing) {
+        writeFileSync(absolutePath, repaired);
+        rewritten.push(relativePath);
+        continue;
+      }
+    }
 
     const replacement = `import { describe, it, expect } from "vitest";
 
@@ -580,6 +757,11 @@ function enforceSourceGuardrailsInWorkspace(workspacePath: string): GuardrailPat
       const original = readFileSync(filePath, "utf-8");
       let next = original;
       const patterns = new Set<GuardrailPatternId>();
+
+      const routerBindings = ensureRouterBindings(next);
+      if (routerBindings.changed) {
+        next = routerBindings.content;
+      }
 
       const clientDirective = ensureClientDirective(next);
       if (clientDirective.changed) {
@@ -695,25 +877,49 @@ function findFailingCheck(results: CheckResult[]): CheckResult | null {
   return results.find((result) => !result.passed && !result.skipped) ?? null;
 }
 
-function summarizeCompilerOutput(output: string, maxLines = 80): string {
+function isCompilerNoiseLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  return (
+    /^npm warn config production\b/i.test(trimmed) ||
+    /^npm warn EBADENGINE\b/i.test(trimmed) ||
+    /^Unsupported engine\b/i.test(trimmed) ||
+    /^current:\s*\{ node:/i.test(trimmed) ||
+    /^required:\s*\{ node:/i.test(trimmed) ||
+    /^\d+\s+packages are looking for funding\b/i.test(trimmed) ||
+    /^run `npm audit` for details\.?$/i.test(trimmed) ||
+    /^to address all issues, run:$/i.test(trimmed) ||
+    /^npm audit fix$/i.test(trimmed) ||
+    /^\d+\s+(low|moderate|high|critical) severity vulnerabilities$/i.test(trimmed)
+  );
+}
+
+function compilerSignalLines(output: string): string[] {
   const lines = output
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0);
+
+  const filtered = lines.filter((line) => !isCompilerNoiseLine(line));
+  return filtered.length > 0 ? filtered : lines;
+}
+
+function summarizeCompilerOutput(output: string, maxLines = 80): string {
+  const lines = compilerSignalLines(output);
   return lines.slice(-maxLines).join("\n").trim();
 }
 
 function extractPrimaryCompilerPattern(output: string): string {
-  const lines = summarizeCompilerOutput(output, 40)
-    .split("\n")
+  const lines = compilerSignalLines(output)
     .map((line) => line.trim())
     .filter(Boolean);
 
   const preferred = lines.find((line) =>
-    /Type error:|Module not found|Can't resolve|Cannot find name|Property .* does not exist|error TS\d+|Build failed/i.test(line),
+    /Type error:|Module not found|Can't resolve|Cannot find module|Cannot find name|Property .* does not exist|error TS\d+|Build failed|Expected \d+ arguments|No overload matches this call/i.test(line),
   );
 
-  return (preferred || lines[0] || "compile_gate_failure").slice(0, 400);
+  const fallback = lines.find((line) => !isCompilerNoiseLine(line)) || lines[0] || "compile_gate_failure";
+  return (preferred || fallback).slice(0, 400);
 }
 
 function categorizeCompilerPattern(pattern: string): string {
@@ -778,6 +984,7 @@ async function runPredeployCompileGate(args: {
   }
 
   const preflightRewrittenTests = repairBrokenGeneratedTestImports(workspacePath);
+  const preflightTestingLibraryFixes = repairTestingLibraryFireEventImports(workspacePath);
   if (preflightRewrittenTests.length > 0) {
     commitWorkspaceChanges(
       workspacePath,
@@ -786,6 +993,16 @@ async function runPredeployCompileGate(args: {
     store.addLog(jobId, {
       gate: "deploying",
       message: `[compile-gate] preflight test import repair: ${preflightRewrittenTests.join(", ")}`,
+    });
+  }
+  if (preflightTestingLibraryFixes.length > 0) {
+    commitWorkspaceChanges(
+      workspacePath,
+      "[AES] fix: normalize testing-library fireEvent imports before compile",
+    );
+    store.addLog(jobId, {
+      gate: "deploying",
+      message: `[compile-gate] preflight testing-library import repair: ${preflightTestingLibraryFixes.join(", ")}`,
     });
   }
 

@@ -61,6 +61,7 @@ CRITICAL: You MUST use @aes/ui components. NEVER use raw HTML elements:
 - Use <Input> from "@aes/ui" instead of <input>
 - Use <Card>, <CardHeader>, <CardContent> from "@aes/ui" instead of raw <div> containers
 - Use <Badge> from "@aes/ui" instead of custom <span> badges
+- Do not pass href or as="a" to Button. If navigation is needed, wrap Button inside <a> or use router/navigation separately.
 `;
 
 // ─── Public generators ───────────────────────────────────────────────
