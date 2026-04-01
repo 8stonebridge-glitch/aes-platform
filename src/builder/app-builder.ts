@@ -23,12 +23,15 @@ import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import type { BuilderRunRecord, FixTrailEntry } from "../types/artifacts.js";
 import type { JobRecord } from "../store.js";
 import type { GraphCallbacks } from "../graph.js";
+import type { AESStateType } from "../state.js";
+import type { GraphGuidance } from "./code-builder.js";
 import {
   generateAppLayout,
   generateSidebar,
   generateDashboard,
   generateUnifiedSchema,
 } from "../llm/app-gen.js";
+import { setGraphGuidanceBlock, clearGraphGuidanceBlock } from "../llm/code-gen.js";
 import {
   matchFeatureArchetype,
   deriveArchetypeSlots,
@@ -455,6 +458,98 @@ ${tables},
 `;
 }
 
+// ─── Graph Guidance ─────────────────────────────────────────────────
+
+/**
+ * Converts the raw graphContext (loaded once at Gate 0) into a structured
+ * GraphGuidance object that the builder and LLM prompts can consume.
+ * This gives every feature build access to prior violations, failure
+ * patterns, and corrections from the Neo4j graph.
+ */
+function buildGraphGuidance(
+  graphContext?: AESStateType["graphContext"],
+): GraphGuidance {
+  const guidance: GraphGuidance = {
+    violations: [],
+    failurePatterns: [],
+    corrections: [],
+    knownPatterns: [],
+  };
+  if (!graphContext) return guidance;
+
+  // Extract violations from failureHistory
+  for (const item of graphContext.failureHistory ?? []) {
+    if (item.code || item.description) {
+      guidance.violations.push({
+        code: item.code ?? "UNKNOWN",
+        description: item.description ?? "",
+        resolution: item.resolution ?? "",
+        severity: item.severity ?? "info",
+      });
+    }
+  }
+
+  // Extract corrections from learned corrections
+  for (const item of graphContext.learnedCorrections ?? []) {
+    if (item.description) {
+      guidance.corrections.push({
+        description: item.description ?? "",
+        resolution: item.resolution ?? item.fix ?? "",
+      });
+    }
+  }
+
+  // Extract known patterns from graph
+  for (const item of graphContext.knownPatterns ?? []) {
+    if (item.name || item.description) {
+      guidance.knownPatterns.push({
+        name: item.name ?? "",
+        description: item.description ?? "",
+      });
+    }
+  }
+
+  return guidance;
+}
+
+/**
+ * Formats graph guidance into a constraint block that can be injected
+ * into LLM system prompts. Only includes non-empty sections.
+ */
+export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
+  if (!guidance) return "";
+  const parts: string[] = [];
+
+  if (guidance.violations.length > 0) {
+    const blocking = guidance.violations.filter((v) => v.severity === "blocking");
+    if (blocking.length > 0) {
+      parts.push("## KNOWN BUILD FAILURES — AVOID THESE PATTERNS");
+      for (const v of blocking.slice(0, 10)) {
+        parts.push(`- ${v.code}: ${v.description}`);
+        if (v.resolution) parts.push(`  Fix: ${v.resolution}`);
+      }
+    }
+  }
+
+  if (guidance.corrections.length > 0) {
+    parts.push("\n## CORRECTIONS FROM PRIOR BUILDS");
+    for (const c of guidance.corrections.slice(0, 10)) {
+      parts.push(`- ${c.description}`);
+      if (c.resolution) parts.push(`  Resolution: ${c.resolution}`);
+    }
+  }
+
+  if (guidance.failurePatterns.length > 0) {
+    parts.push("\n## FAILURE PATTERNS TO PREVENT");
+    for (const f of guidance.failurePatterns.slice(0, 5)) {
+      parts.push(`- ${f.pattern}: ${f.diagnosis}`);
+      if (f.fixAction) parts.push(`  Prevention: ${f.fixAction}`);
+    }
+  }
+
+  return parts.length > 0 ? parts.join("\n") : "";
+}
+
 // ─── AppBuilder ─────────────────────────────────────────────────────
 
 export class AppBuilder {
@@ -477,6 +572,7 @@ export class AppBuilder {
     callbacks?: GraphCallbacks | null,
     targetPath?: string | null,
     reusableSourceFiles?: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>,
+    graphContext?: AESStateType["graphContext"],
   ): Promise<AppBuildResult> {
     const runId = `br-app-${randomUUID().substring(0, 8)}`;
     const startTime = Date.now();
@@ -544,6 +640,13 @@ export class AppBuilder {
       // ─── Phase 2: Build features into shared workspace ──────────────
       callbacks?.onStep(`Phase 2: Building ${featureBuildOrder.length} features...`);
 
+      // Inject graph guidance into LLM prompts for all feature builds
+      const graphGuidance = buildGraphGuidance(graphContext);
+      const guidanceBlock = formatGraphGuidanceForPrompt(graphGuidance);
+      if (guidanceBlock) {
+        setGraphGuidanceBlock(guidanceBlock);
+      }
+
       const features = appSpec?.features || [];
 
       for (let i = 0; i < featureBuildOrder.length; i++) {
@@ -583,8 +686,8 @@ export class AppBuilder {
           continue;
         }
 
-        // Prepare LLM context
-        const builderContext: BuilderContext = {};
+        // Prepare LLM context with graph guidance
+        const builderContext: BuilderContext = { graphGuidance };
         if (feature) {
           builderContext.feature = {
             name: feature.name,
@@ -700,6 +803,9 @@ export class AppBuilder {
           };
         }
       }
+
+      // Clear graph guidance after all features are built
+      clearGraphGuidanceBlock();
 
       // ─── Phase 3: Final commit ────────────────────────────────────
       callbacks?.onStep("Phase 3: Committing complete application...");

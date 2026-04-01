@@ -259,6 +259,17 @@ function normalizeConvexHandlerBindings(content: string): string {
 /**
  * Context for LLM code generation — enriches BuilderPackage with AppSpec data.
  */
+export interface GraphGuidance {
+  /** Prior violations relevant to this feature/app class */
+  violations: { code: string; description: string; resolution: string; severity: string }[];
+  /** Known failure patterns from prior builds */
+  failurePatterns: { pattern: string; diagnosis: string; fixAction: string }[];
+  /** Corrections learned from prior builds */
+  corrections: { description: string; resolution: string }[];
+  /** Reusable patterns from similar features */
+  knownPatterns: { name: string; description: string }[];
+}
+
 export interface BuilderContext {
   feature?: {
     name: string;
@@ -275,6 +286,8 @@ export interface BuilderContext {
     roles?: { role_id: string; name: string; description: string }[];
     permissions?: { role_id: string; resource: string; effect: string }[];
   };
+  /** Graph-derived guidance: prior violations, failure patterns, corrections */
+  graphGuidance?: GraphGuidance;
 }
 
 export class CodeBuilder {

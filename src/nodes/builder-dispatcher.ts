@@ -115,6 +115,7 @@ export async function builderDispatcher(
       cb,
       state.targetPath,
       state.reusableSourceFiles,
+      state.graphContext,
     );
 
     (result.run as any).workspace_path = result.workspace.path;

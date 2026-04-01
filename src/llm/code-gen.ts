@@ -31,6 +31,21 @@ interface AppContext {
 
 const LLM_TIMEOUT_MS = 30_000;
 
+// ─── Graph Guidance Injection ───────────────────────────────────────
+// Set by the AppBuilder before building each feature so LLM calls
+// get prior violations, corrections, and failure patterns as constraints.
+let _activeGraphGuidanceBlock = "";
+
+/** Called by AppBuilder to set the graph guidance block for all LLM calls in this module. */
+export function setGraphGuidanceBlock(block: string): void {
+  _activeGraphGuidanceBlock = block;
+}
+
+/** Clear the graph guidance block after a build completes. */
+export function clearGraphGuidanceBlock(): void {
+  _activeGraphGuidanceBlock = "";
+}
+
 /** Race a promise against a timeout; resolves to null on timeout. */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([
@@ -58,11 +73,13 @@ async function callLLM(
   if (!llm) return null;
 
   const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
+  const graphBlock = _activeGraphGuidanceBlock;
   const slotId = await acquireLLMSlot("code-gen");
   try {
+    const fullSystem = [groundTruth, graphBlock, systemPrompt].filter(Boolean).join("\n\n");
     const response = await withTimeout(
       llm.invoke([
-        { role: "system", content: `${groundTruth}\n\n${systemPrompt}` },
+        { role: "system", content: fullSystem },
         { role: "user", content: userPrompt },
       ]),
       LLM_TIMEOUT_MS,

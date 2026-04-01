@@ -108,6 +108,32 @@ LIMIT 10
   `.trim();
 }
 
+/** Query Violation nodes (compile/build failures recorded during prior builds). */
+function cypherViolations(): string {
+  return `
+MATCH (v:Violation)
+WHERE v.severity = 'blocking'
+RETURN v.code AS code, v.description AS description,
+       v.resolution AS resolution, v.severity AS severity,
+       v.gate AS gate
+ORDER BY v.timestamp DESC
+LIMIT 15
+  `.trim();
+}
+
+/** Query HermesRepairOutcome nodes (repair patterns from compile gate). */
+function cypherRepairOutcomes(): string {
+  return `
+MATCH (r:HermesRepairOutcome)
+WHERE r.success = true
+RETURN r.pattern AS pattern, r.diagnosis AS diagnosis,
+       r.fixAction AS fixAction, r.category AS category,
+       r.errorSnippet AS errorSnippet
+ORDER BY r.timestamp DESC
+LIMIT 15
+  `.trim();
+}
+
 /**
  * Find existing bridges that could be reused for similar features.
  * Returns the full bridge packet data stored on the Entity node.
@@ -477,6 +503,7 @@ export async function graphReader(
       builds, features, patterns, failures, bridges,
       lFeatures, lModels, lIntegrations, lPatterns, lFlows, lResearch, lCorrections,
       vectorResults,
+      violations, repairOutcomes,
     ] = await Promise.all([
       // Original keyword queries
       neo4j.runCypher(cypherPriorBuilds(keywords)).catch(() => []),
@@ -496,6 +523,9 @@ export async function graphReader(
       vectorAvailable
         ? vectorSearchAll(state.rawRequest, 15, cypherRunner).catch(() => [] as VectorSearchResult[])
         : Promise.resolve([] as VectorSearchResult[]),
+      // Build failure intelligence (not keyword-dependent — always load)
+      neo4j.runCypher(cypherViolations()).catch(() => []),
+      neo4j.runCypher(cypherRepairOutcomes()).catch(() => []),
     ]);
 
     // ── RRF Fusion: merge keyword + vector results for learned types ──
@@ -538,7 +568,28 @@ export async function graphReader(
     context.priorBuilds = builds;
     context.similarFeatures = features;
     context.knownPatterns = patterns;
-    context.failureHistory = failures;
+    // Merge FailurePattern + Violation + HermesRepairOutcome into failureHistory
+    context.failureHistory = [
+      ...failures,
+      ...violations.map((v: any) => ({
+        name: v.code ?? "violation",
+        code: v.code,
+        description: v.description,
+        resolution: v.resolution,
+        severity: v.severity ?? "blocking",
+        category: "violation",
+        gate: v.gate,
+      })),
+      ...repairOutcomes.map((r: any) => ({
+        name: r.pattern ?? "repair",
+        description: r.diagnosis,
+        resolution: r.fixAction,
+        severity: "info",
+        category: r.category ?? "repair",
+        pattern: r.pattern,
+        errorSnippet: r.errorSnippet,
+      })),
+    ];
     context.reusableBridges = bridges;
     context.learnedFeatures = fusedFeatures.rows;
     context.learnedModels = fusedModels.rows;
@@ -563,6 +614,9 @@ export async function graphReader(
       const parts = [];
       if (originalTotal > 0) {
         parts.push(`${builds.length} prior builds, ${features.length} similar features, ${patterns.length} patterns, ${failures.length} failure records, ${bridges.length} bridges`);
+      }
+      if (violations.length > 0 || repairOutcomes.length > 0) {
+        parts.push(`BUILD-INTEL: ${violations.length} violations, ${repairOutcomes.length} repair outcomes`);
       }
       if (learnedTotal > 0) {
         parts.push(`LEARNED: ${fusedFeatures.rows.length} features, ${fusedModels.rows.length} models, ${fusedIntegrations.rows.length} integrations, ${fusedPatterns.rows.length} patterns, ${fusedFlows.rows.length} flows, ${lResearch.length} research, ${lCorrections.length} corrections`);
