@@ -1944,9 +1944,15 @@ export class AppBuilder {
             jobId,
             requestId: "",
             rawRequest: appSpec?.summary || "",
+            currentGate: "building",
+            createdAt: new Date().toISOString(),
+            durability: "memory_only",
             appSpec,
+            userApproved: true,
             featureBuildOrder,
             featureBridges,
+            featureBuildIndex: 0,
+            buildResults: {},
             targetPath: targetPath || undefined,
           } as any;
           const pkg = compileBuilderPackage(
@@ -2101,9 +2107,15 @@ export class AppBuilder {
     callbacks?.onStep(`[parallel] Staging complete: ${successCount} succeeded, ${failCount} failed`);
 
     if (successCount === 0) {
+      // Log individual failure reasons for debugging
+      const failureReasons = parallelResults
+        .filter((pr: any) => !pr.success)
+        .map((pr: any) => `  ${pr.feature_id}: ${pr.error || "unknown error"}`)
+        .join("\n");
+      callbacks?.onWarn(`[parallel] All features failed. Reasons:\n${failureReasons}`);
       clearGraphGuidanceBlock();
       cleanupPool(pool);
-      throw new Error(`All ${failCount} parallel feature builds failed`);
+      throw new Error(`All ${failCount} parallel feature builds failed — falling back to sequential AppBuilder`);
     }
 
     // ── Stage 4: Conflict detection ──
