@@ -647,7 +647,7 @@ app.get("/api/jobs/:id/audit", async (req, res) => {
       gateTimeline.push({
         gate: log.gate,
         message: log.message,
-        timestamp: log.created_at || "",
+        timestamp: log.timestamp || "",
       });
     }
   }
