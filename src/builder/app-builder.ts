@@ -1926,6 +1926,7 @@ export class AppBuilder {
         dependencies: deps.filter((d: string) => featureBuildOrder.includes(d)),
         execute: async () => {
           const buildStart = Date.now();
+          try {
 
           // Create isolated worktree for this feature
           const worktree = createWorktree(pool, featureId, featureName);
@@ -2073,6 +2074,17 @@ export class AppBuilder {
             duration_ms: buildDuration,
             result: bundle,
           };
+
+          } catch (execErr: any) {
+            const errMsg = execErr instanceof Error ? execErr.message : String(execErr);
+            callbacks?.onWarn(`[parallel] ${featureName} FAILED: ${errMsg.slice(0, 300)}`);
+            return {
+              feature_id: featureId,
+              success: false,
+              duration_ms: Date.now() - buildStart,
+              error: errMsg,
+            };
+          }
         },
       };
     });
