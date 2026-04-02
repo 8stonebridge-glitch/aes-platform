@@ -454,6 +454,28 @@ app.post("/api/jobs/:id/approve", (req, res) => {
   res.json({ approved: true });
 });
 
+// ─── POST /api/jobs/:id/reject — Reject/cancel a build ─────────────
+
+app.post("/api/jobs/:id/reject", (req, res) => {
+  const jobId = req.params.id;
+  const store = getJobStore();
+  const job = store.get(jobId);
+  if (!job) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  const reason = req.body?.reason || "Rejected by operator";
+  store.update(jobId, {
+    userApproved: false,
+    currentGate: "failed" as any,
+    errorMessage: reason,
+  });
+  store.addLog(jobId, { gate: job.currentGate || "unknown", message: `Build rejected: ${reason}` });
+  broadcastToJob(jobId, "fail", { message: `Build rejected: ${reason}` });
+  res.json({ rejected: true, reason });
+});
+
 // ─── GET /api/jobs/:id — Get job status ────────────────────────────
 
 app.get("/api/jobs/:id", async (req, res) => {
@@ -1463,6 +1485,7 @@ export function startServer() {
     console.log(`  GET  /api/jobs/:id/stream                — SSE stream`);
     console.log(`  POST /api/jobs/:id/confirm               — Confirm intent`);
     console.log(`  POST /api/jobs/:id/approve               — Approve plan`);
+    console.log(`  POST /api/jobs/:id/reject                — Reject/cancel build`);
     console.log(`  GET  /api/jobs/:id                       — Job status`);
     console.log(`  GET  /api/jobs                           — List jobs`);
     console.log(`  GET  /api/jobs/:id/logs                  — Job logs`);

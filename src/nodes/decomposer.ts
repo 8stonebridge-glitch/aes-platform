@@ -685,40 +685,31 @@ export async function decomposer(
   let featureBuildOrder: string[];
   let usedLLM = false;
 
-  // Build graph guidance for the LLM from all available graph context fields
-  const graphGuidance = buildGraphGuidance(graphCtx);
-  if (graphGuidance) {
-    cb?.onStep("Graph guidance block built — passing prior knowledge to LLM decomposer");
-  }
+  // Primary path: template + graph features.
+  // LLM is the fallback, not the default — graph knowledge is more reliable.
+  cb?.onStep("Using template + graph decomposer (primary path)");
+  const templateResult = templateDecompose(state);
+  appSpec = templateResult.appSpec;
+  featureBuildOrder = templateResult.featureBuildOrder;
 
-  if (isLLMAvailable()) {
+  // If template produced very few features and LLM is available, try LLM to enrich
+  const graphGuidance = buildGraphGuidance(graphCtx);
+  if (appSpec.features.length <= 3 && isLLMAvailable() && priorFeatures.length === 0) {
     try {
-      cb?.onStep(
-        state.specRetryCount > 0
-          ? `LLM retry ${state.specRetryCount}/3 — fixing validation failures...`
-          : "Using LLM for application decomposition..."
-      );
-      const result = await llmDecompose(
+      cb?.onStep("Template produced minimal spec and no graph features available — trying LLM as fallback...");
+      const llmResult = await llmDecompose(
         state.intentBrief,
         state.specRetryCount,
         state.specValidationResults,
         graphGuidance || undefined
       );
-      appSpec = result.appSpec;
-      featureBuildOrder = result.featureBuildOrder;
+      appSpec = llmResult.appSpec;
+      featureBuildOrder = llmResult.featureBuildOrder;
       usedLLM = true;
-      cb?.onSuccess(`LLM decomposition complete — ${appSpec.features.length} features`);
+      cb?.onSuccess(`LLM fallback decomposition complete — ${appSpec.features.length} features`);
     } catch (err: any) {
-      cb?.onWarn(`LLM decomposition failed (${err.message}), falling back to template decomposer`);
-      const result = templateDecompose(state);
-      appSpec = result.appSpec;
-      featureBuildOrder = result.featureBuildOrder;
+      cb?.onWarn(`LLM fallback failed (${err.message}), continuing with template spec`);
     }
-  } else {
-    cb?.onStep("No LLM configured, using template decomposer");
-    const result = templateDecompose(state);
-    appSpec = result.appSpec;
-    featureBuildOrder = result.featureBuildOrder;
   }
 
   // Graph-derived features merge with template/LLM features — no cap.
