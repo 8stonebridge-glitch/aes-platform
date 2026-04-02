@@ -214,6 +214,24 @@ IMPORTS:
   import { useQuery, useMutation } from "convex/react";
   import { api } from "@/convex/_generated/api";
 
+USAGE — useQuery MUST receive an API reference, NEVER a primitive:
+  ✅ const data = useQuery(api.items.list, orgId ? { orgId } : "skip");
+  ✅ const item = useQuery(api.items.get, id ? { id } : "skip");
+  ✅ const data = useQuery(api.items.list, {});
+
+  ❌ FORBIDDEN: useQuery(itemId)            ← primitive as first arg, build failure (TS2345)
+  ❌ FORBIDDEN: useQuery("items:list")      ← string query name, build failure
+  ❌ FORBIDDEN: useQuery(api.items.list)     ← missing args object, always pass args or "skip"
+
+  The first argument is ALWAYS api.moduleName.functionName (a typed FunctionReference).
+  The second argument is ALWAYS an args object or "skip" to pause the query.
+
+USAGE — useMutation:
+  ✅ const createItem = useMutation(api.items.create);
+     await createItem({ orgId, title, createdBy: userId });
+
+  ❌ FORBIDDEN: useMutation("items:create") ← string, build failure
+
 ━━━ NEXT.JS APP ROUTER — "use client" DIRECTIVE ━━━
 
 A file MUST begin with "use client" on line 1 if it uses ANY of:
