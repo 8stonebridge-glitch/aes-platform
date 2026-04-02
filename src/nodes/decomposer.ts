@@ -722,7 +722,7 @@ export async function decomposer(
       appSpec.features.map((f: any) => f.name.toLowerCase())
     );
     const maxGraphDerivedAdds =
-      baseFeatureCount <= 4 ? 0 : baseFeatureCount <= 8 ? 1 : Math.min(3, Math.max(1, Math.floor(baseFeatureCount / 4)));
+      baseFeatureCount <= 2 ? 3 : baseFeatureCount <= 5 ? Math.max(3, Math.floor(baseFeatureCount / 2)) : Math.min(baseFeatureCount, Math.max(3, Math.floor(baseFeatureCount / 3)));
     const candidateFeatures: Array<{ prior: any; score: number }> = [];
     let added = 0;
 
