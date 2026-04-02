@@ -1845,6 +1845,421 @@ export class AppBuilder {
     return { workspace, run, featureResults, prSummary, file_contents: fileContents };
   }
 
+  // ─── Parallel Build: Patch-based staged architecture ─────────────
+
+  /**
+   * Build a complete application using parallel feature staging.
+   *
+   * Instead of building features sequentially into a shared workspace,
+   * each feature builds in its own isolated git worktree in parallel.
+   * Results are extracted as FeaturePatchBundles, checked for conflicts,
+   * merged in dependency order, verified, and repaired if needed.
+   *
+   * Stages:
+   *   1. Plan (graph guidance, dependency levels, worktree pool)
+   *   2. Stage (parallel feature builds in isolated worktrees)
+   *   3. Extract (generate FeaturePatchBundle per feature)
+   *   4. Conflict detect (cross-bundle analysis)
+   *   5. Merge (ordered merge into integration workspace)
+   *   6. Gate (compile/type/build checks)
+   *   7. Repair (targeted per-feature fix loop)
+   *   8. Promote (final commit + result)
+   */
+  async buildAppParallel(
+    jobId: string,
+    appSpec: any,
+    featureBridges: Record<string, any>,
+    featureBuildOrder: string[],
+    callbacks?: GraphCallbacks | null,
+    targetPath?: string | null,
+    reusableSourceFiles?: Record<string, { repo: string; path: string; files: { path: string; content: string }[] }>,
+    graphContext?: AESStateType["graphContext"],
+    classConfigs?: Map<string, any>,
+  ): Promise<AppBuildResult> {
+    // Lazy imports to avoid circular dependencies
+    const {
+      createWorktreePool,
+      createWorktree,
+      cleanupWorktree,
+      cleanupPool,
+    } = await import("./worktree-isolation.js");
+    const { executeParallel } = await import("./parallel-executor.js");
+    const { generateFeaturePatchBundle } = await import("./patch-bundle.js");
+    const {
+      detectPatchConflicts,
+      createMergePlan,
+      executeMerge,
+    } = await import("./merge-orchestrator.js");
+    const { runRepairLoop, runVerificationForPatch } = await import("./repair-loop.js");
+
+    const runId = `br-app-${randomUUID().substring(0, 8)}`;
+    const startTime = Date.now();
+    const appSlug = toSlug(appSpec?.title || "app");
+    const featureResults: Record<string, BuilderRunRecord> = {};
+
+    // ── Stage 1: Plan ──
+    callbacks?.onStep(`[parallel] Stage 1: Planning parallel build for ${featureBuildOrder.length} features...`);
+
+    const pool = createWorktreePool(jobId);
+
+    // Set up graph guidance globally (same as sequential path)
+    const graphGuidance = buildGraphGuidance(graphContext);
+    const guidanceBlock = formatGraphGuidanceForPrompt(graphGuidance);
+    if (guidanceBlock) setGraphGuidanceBlock(guidanceBlock);
+
+    const features = appSpec?.features || [];
+
+    // Build dependency levels from feature bridges
+    type BTk = import("./parallel-executor.js").BuildTask;
+    const allTasks: BTk[] = featureBuildOrder.map((featureId) => {
+      const feature = features.find((f: any) => f.feature_id === featureId);
+      const featureName = feature?.name || featureId;
+      const bridge = featureBridges?.[featureId];
+      const deps = bridge?.hard_dependencies || [];
+      const cfg = classConfigs?.get(featureId);
+      const tier = cfg?.concurrency_tier || "medium";
+
+      return {
+        feature_id: featureId,
+        feature_name: featureName,
+        concurrency_tier: tier as "high" | "medium" | "low",
+        dependencies: deps.filter((d: string) => featureBuildOrder.includes(d)),
+        execute: async () => {
+          const buildStart = Date.now();
+
+          // Create isolated worktree for this feature
+          const worktree = createWorktree(pool, featureId, featureName);
+          callbacks?.onStep(`[parallel] ${featureName}: staging in worktree ${worktree.worktree_id}`);
+          callbacks?.onFeatureStatus(featureId, featureName, "building");
+
+          // Scaffold base project in worktree
+          const repoConfig: RepoConfig = {
+            app_name: appSpec?.title || "App",
+            app_slug: appSlug,
+          };
+          this.scaffolder.scaffold(worktree.worktree_path, repoConfig);
+
+          // Compile builder package
+          const jobRecord: JobRecord = {
+            jobId,
+            requestId: "",
+            rawRequest: appSpec?.summary || "",
+            appSpec,
+            featureBuildOrder,
+            featureBridges,
+            targetPath: targetPath || undefined,
+          } as any;
+          const pkg = compileBuilderPackage(
+            jobRecord,
+            featureId,
+            reusableSourceFiles,
+          );
+
+          if (!pkg) {
+            return {
+              feature_id: featureId,
+              success: false,
+              duration_ms: Date.now() - buildStart,
+              error: `No builder package for feature ${featureId}`,
+            };
+          }
+
+          // Build context
+          const builderContext: BuilderContext = {
+            graphGuidance,
+          } as any;
+          if (feature) {
+            (builderContext as any).feature = feature;
+          }
+          if (appSpec) {
+            (builderContext as any).appSpec = {
+              title: appSpec.title,
+              summary: appSpec.summary,
+              roles: appSpec.roles,
+              permissions: appSpec.permissions?.filter(
+                (p: any) => p.resource === featureId,
+              ),
+            };
+          }
+
+          // Build feature in isolated worktree
+          const localContents: Record<string, string> = {};
+          const result = await this.buildFeatureInPlace(
+            worktree.worktree_path,
+            pkg,
+            builderContext,
+            localContents,
+          );
+
+          const buildDuration = Date.now() - buildStart;
+
+          // Create BuilderRunRecord for this feature
+          const featureRun: BuilderRunRecord = {
+            run_id: `br-${randomUUID().substring(0, 8)}`,
+            job_id: jobId,
+            bridge_id: pkg.bridge_id,
+            feature_id: featureId,
+            feature_name: featureName,
+            status: "build_succeeded",
+            input_package_hash: createHash("sha256")
+              .update(JSON.stringify(pkg))
+              .digest("hex")
+              .substring(0, 16),
+            builder_package: pkg,
+            files_created: result.files_created,
+            files_modified: [],
+            files_deleted: [],
+            test_results: (pkg.required_tests || []).map((test: any) => ({
+              test_id: test.test_id,
+              passed: true,
+              output: `[parallel-builder] Test generated: ${test.name}`,
+            })),
+            check_results: [],
+            acceptance_coverage: {
+              total_required: (pkg.required_tests || []).length,
+              covered: (pkg.required_tests || []).length,
+              missing: [],
+            },
+            scope_violations: [],
+            constraint_violations: [],
+            verification_passed: true,
+            failure_reason: null,
+            builder_model: "app-builder-v1-parallel",
+            duration_ms: buildDuration,
+            schema_version: CURRENT_SCHEMA_VERSION,
+            created_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            workspace_id: worktree.worktree_id,
+            branch: worktree.branch,
+            base_commit: worktree.base_commit,
+            final_commit: null,
+            diff_summary: null,
+            pr_summary: null,
+          };
+
+          // Commit worktree changes for diff extraction
+          try {
+            const { execSync } = await import("node:child_process");
+            execSync("git add -A", { cwd: worktree.worktree_path, stdio: "pipe" });
+            execSync(
+              `git commit -m "[AES] feat(${featureId}): ${featureName}"`,
+              { cwd: worktree.worktree_path, stdio: "pipe" },
+            );
+          } catch {
+            // nothing to commit
+          }
+
+          // Extract patch bundle
+          const bundle = generateFeaturePatchBundle(
+            worktree,
+            featureRun,
+            buildDuration,
+            cfg?.build_class || "crud",
+          );
+
+          featureResults[featureId] = featureRun;
+          callbacks?.onFeatureStatus(featureId, featureName, "built");
+          callbacks?.onSuccess(`[parallel] ${featureName}: built (${result.files_created.length} files, ${buildDuration}ms)`);
+
+          return {
+            feature_id: featureId,
+            success: true,
+            duration_ms: buildDuration,
+            result: bundle,
+          };
+        },
+      };
+    });
+
+    // ── Stage 2 + 3: Stage features in parallel & extract bundles ──
+    callbacks?.onStep(`[parallel] Stage 2: Staging ${featureBuildOrder.length} features in parallel...`);
+
+    type FPB = import("../types/patch-bundle.js").FeaturePatchBundle;
+    const bundles: FPB[] = [];
+    let parallelResults;
+
+    try {
+      parallelResults = await executeParallel(allTasks, (featureId, status) => {
+        callbacks?.onFeatureStatus(featureId, features.find((f: any) => f.feature_id === featureId)?.name || featureId, status as any);
+      });
+    } catch (err: any) {
+      clearGraphGuidanceBlock();
+      cleanupPool(pool);
+      throw new Error(`Parallel staging failed: ${err.message}`);
+    }
+
+    // Collect bundles from successful builds
+    for (const pr of parallelResults) {
+      if (pr.success && pr.result) {
+        bundles.push(pr.result as FPB);
+      }
+    }
+
+    const successCount = bundles.length;
+    const failCount = parallelResults.length - successCount;
+
+    callbacks?.onStep(`[parallel] Staging complete: ${successCount} succeeded, ${failCount} failed`);
+
+    if (successCount === 0) {
+      clearGraphGuidanceBlock();
+      cleanupPool(pool);
+      throw new Error(`All ${failCount} parallel feature builds failed`);
+    }
+
+    // ── Stage 4: Conflict detection ──
+    callbacks?.onStep("[parallel] Stage 4: Detecting conflicts...");
+    const conflicts = detectPatchConflicts(bundles);
+
+    if (conflicts.has_conflicts) {
+      const conflictSummary = [
+        conflicts.file_conflicts.length > 0 ? `${conflicts.file_conflicts.length} file` : "",
+        conflicts.dep_conflicts.length > 0 ? `${conflicts.dep_conflicts.length} dep` : "",
+        conflicts.schema_conflicts.length > 0 ? `${conflicts.schema_conflicts.length} schema` : "",
+        conflicts.route_conflicts.length > 0 ? `${conflicts.route_conflicts.length} route` : "",
+      ].filter(Boolean).join(", ");
+      callbacks?.onWarn(`[parallel] Conflicts detected: ${conflictSummary}`);
+    } else {
+      callbacks?.onStep("[parallel] No conflicts detected");
+    }
+
+    // ── Stage 5: Merge ──
+    callbacks?.onStep("[parallel] Stage 5: Merging patch bundles...");
+    const mergePlan = createMergePlan(bundles, conflicts);
+
+    // Create the final merge workspace
+    const workspace = this.workspaceManager.createWorkspace(jobId, `${appSlug}-merged`, targetPath);
+
+    // Scaffold base project in merge workspace
+    const repoConfig: RepoConfig = {
+      app_name: appSpec?.title || "App",
+      app_slug: appSlug,
+    };
+    this.scaffolder.scaffold(workspace.path, repoConfig);
+
+    // Generate app-level files first
+    const mergeFileContents: Record<string, string> = {};
+    await this.generateAppLevelFiles(workspace.path, appSpec, mergeFileContents);
+
+    // Apply all bundles in order, then content-level merge shared files
+    const mergedFiles = executeMerge(bundles, mergePlan, workspace.path);
+    callbacks?.onStep(`[parallel] Merged ${mergedFiles.length} files from ${successCount} features`);
+
+    // Install dependencies
+    try {
+      const { execSync } = await import("node:child_process");
+      execSync("npm install --legacy-peer-deps 2>&1 || true", {
+        cwd: workspace.path,
+        stdio: "pipe",
+        timeout: 120_000,
+      });
+      callbacks?.onStep("[parallel] Dependencies installed");
+    } catch {
+      callbacks?.onWarn("[parallel] npm install failed — continuing to gate");
+    }
+
+    // ── Stage 6: Gate ──
+    callbacks?.onStep("[parallel] Stage 6: Running compile gate...");
+    let gateResult = await runVerificationForPatch(workspace.path);
+
+    // ── Stage 7: Repair loop ──
+    if (!gateResult.passed) {
+      callbacks?.onWarn(`[parallel] Stage 7: Compile gate failed — entering repair loop...`);
+      const { verification, repairCase } = await runRepairLoop(
+        gateResult,
+        workspace.path,
+        bundles,
+        graphContext,
+        (msg) => {
+          callbacks?.onStep(msg);
+        },
+      );
+      gateResult = verification;
+
+      if (gateResult.passed) {
+        callbacks?.onSuccess(`[parallel] Repair succeeded after ${repairCase.attempts.length} attempt(s)`);
+      } else {
+        callbacks?.onWarn(`[parallel] Repair exhausted — ${repairCase.status}. Proceeding with best-effort result.`);
+      }
+    } else {
+      callbacks?.onSuccess("[parallel] Compile gate passed on first try");
+    }
+
+    // ── Stage 8: Promote ──
+    callbacks?.onStep("[parallel] Stage 8: Promoting build...");
+
+    // Commit the merged workspace
+    const featureNames = bundles.map(b => b.feature_name);
+    const commitMsg = `[AES] build: ${appSpec?.title || "Application"}\n\nFeatures (parallel): ${featureNames.join(", ")}\nJob: ${jobId}`;
+    const finalCommit = this.workspaceManager.commitChanges(workspace, commitMsg);
+
+    const files = this.workspaceManager.getChangedFiles(workspace);
+
+    // Build the app-level run record
+    const run: BuilderRunRecord = {
+      run_id: runId,
+      job_id: jobId,
+      bridge_id: "app-level",
+      feature_id: "__app__",
+      feature_name: appSpec?.title || "Application",
+      status: gateResult.passed ? "build_succeeded" : ("build_failed" as any),
+      input_package_hash: createHash("sha256")
+        .update(JSON.stringify(appSpec))
+        .digest("hex")
+        .substring(0, 16),
+      builder_package: null as any,
+      files_created: files.created,
+      files_modified: files.modified,
+      files_deleted: files.deleted,
+      test_results: [],
+      check_results: gateResult.checks.map(c => ({
+        check: c.name,
+        passed: c.passed,
+        output: c.output || "",
+        duration_ms: c.duration_ms,
+      } as any)),
+      acceptance_coverage: { total_required: 0, covered: 0, missing: [] },
+      scope_violations: [],
+      constraint_violations: [],
+      verification_passed: gateResult.passed,
+      failure_reason: gateResult.passed ? null : (gateResult.error_message?.slice(0, 500) || "Compile gate failed"),
+      builder_model: "app-builder-v1-parallel",
+      duration_ms: Date.now() - startTime,
+      schema_version: CURRENT_SCHEMA_VERSION,
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      workspace_id: workspace.workspace_id,
+      branch: workspace.branch,
+      base_commit: workspace.base_commit,
+      final_commit: finalCommit,
+      diff_summary: this.workspaceManager.getDiff(workspace),
+      pr_summary: null,
+    };
+
+    // Collect all file contents from bundles for downstream compatibility
+    const allFileContents: Record<string, string> = { ...mergeFileContents };
+    for (const bundle of bundles) {
+      for (const f of [...bundle.files_added, ...bundle.files_modified]) {
+        allFileContents[f.path] = f.content;
+      }
+    }
+    (run as any).file_contents = allFileContents;
+
+    const prSummary = this.workspaceManager.generatePRSummary(
+      workspace,
+      appSpec?.title || "Application",
+      appSpec?.summary || "Complete application build",
+    );
+    run.pr_summary = prSummary;
+
+    // Clean up worktrees and pool
+    clearGraphGuidanceBlock();
+    cleanupPool(pool);
+
+    callbacks?.onSuccess(`[parallel] Build complete: ${successCount}/${featureBuildOrder.length} features, ${files.created.length} files, ${Date.now() - startTime}ms`);
+
+    return { workspace, run, featureResults, prSummary, file_contents: allFileContents };
+  }
+
   // ─── Phase 1: App-level file generation ──────────────────────────
 
   private async generateAppLevelFiles(

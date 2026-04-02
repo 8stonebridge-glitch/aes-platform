@@ -103,10 +103,96 @@ export async function builderDispatcher(
     message: `Building ${featureBuildOrder.length} features (${preflightResults.ready.length} passed preflight)`,
   });
 
-  // ── Primary path: AppBuilder ──
+  // ── Primary path: Parallel patch-based build ──
   const appBuilder = new AppBuilder();
+  const useParallel = featureBuildOrder.length >= 2; // Parallel for 2+ features
 
+  if (useParallel) {
+    try {
+      cb?.onStep("Using parallel patch-based builder (primary path)...");
+      store.addLog(state.jobId, {
+        gate: "building",
+        message: `[parallel] Starting parallel build for ${featureBuildOrder.length} features`,
+      });
+
+      const result = await appBuilder.buildAppParallel(
+        state.jobId,
+        state.appSpec,
+        state.featureBridges,
+        state.featureBuildOrder,
+        cb,
+        state.targetPath,
+        state.reusableSourceFiles,
+        state.graphContext,
+        classConfigs,
+      );
+
+      (result.run as any).workspace_path = result.workspace.path;
+      buildResults["__app__"] = result.run;
+
+      for (const [featureId, featureRun] of Object.entries(result.featureResults)) {
+        buildResults[featureId] = featureRun;
+      }
+
+      store.update(state.jobId, {
+        builderRuns: [result.run, ...Object.values(result.featureResults)],
+        buildResults,
+      });
+
+      // ── P7: Run layered validation on parallel results ──
+      const pipeline = runValidationPipeline(
+        buildResults,
+        state.featureBridges || {},
+        classConfigs,
+      );
+      buildResults["__validation_pipeline__"] = {
+        summary: pipeline.summary,
+        l1_details: Object.fromEntries(pipeline.l1Results),
+        l2_details: Object.fromEntries(pipeline.l2Results),
+        l3_details: pipeline.l3Result,
+      };
+
+      cb?.onStep(`[P7] Validation: L1 ${pipeline.summary.l1_passed}/${pipeline.summary.total_features}, L2 ${pipeline.summary.l2_passed}/${pipeline.summary.total_features}, L3 ${pipeline.summary.l3_passed ? "pass" : "fail"}`);
+
+      const successCount = Object.values(result.featureResults).filter(
+        (r) => r.status === "build_succeeded",
+      ).length;
+      const failCount = Object.values(result.featureResults).filter(
+        (r) => r.status === "build_failed",
+      ).length;
+      const total = featureBuildOrder.length;
+
+      const summary = `Application built (parallel): ${successCount}/${total} features succeeded${failCount > 0 ? `, ${failCount} failed` : ""}`;
+      store.addLog(state.jobId, { gate: "building", message: summary });
+
+      if (successCount === 0 && failCount > 0) {
+        cb?.onFail(`All ${failCount} feature builds failed`);
+        return {
+          currentGate: "failed" as any,
+          buildResults,
+          fixTrailEntries,
+          errorMessage: `All ${failCount} feature builds failed`,
+        };
+      }
+
+      cb?.onSuccess(summary);
+      return { currentGate: "building" as any, buildResults, fixTrailEntries };
+    } catch (err: any) {
+      cb?.onWarn(`Parallel build failed: ${err.message} — falling back to sequential...`);
+      store.addLog(state.jobId, {
+        gate: "building",
+        message: `[parallel] FAILED: ${err.message} — falling back to sequential AppBuilder`,
+      });
+      // Fall through to sequential path below
+    }
+  }
+
+  // ── Fallback: Sequential AppBuilder ──
   try {
+    if (useParallel) {
+      cb?.onStep("Sequential fallback: building features one at a time...");
+    }
+
     const result = await appBuilder.buildApp(
       state.jobId,
       state.appSpec,
