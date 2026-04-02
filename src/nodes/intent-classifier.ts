@@ -9,7 +9,8 @@ import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 // ─── Keyword-based classification (fallback) ───────────────────────────
 
 const APP_CLASS_KEYWORDS: Record<string, string[]> = {
-  internal_ops_tool: ["internal", "ops", "admin", "backoffice", "back office", "dashboard", "management tool"],
+  admin_console: ["admin console", "admin panel", "admin dashboard", "backoffice", "back office", "user management"],
+  internal_ops_tool: ["internal", "ops", "project management", "task management", "kanban", "sprint", "issue tracking", "management tool"],
   customer_portal: ["portal", "customer", "client", "self-service", "account"],
   fintech_wallet: ["wallet", "fintech", "money", "payment", "transfer", "banking app", "send money"],
   digital_banking_portal: ["banking", "bank", "digital bank", "retail bank"],
@@ -149,6 +150,7 @@ function generateClarifyingQuestions(flags: string[], _input: string): string[] 
 
 function inferCoreOutcome(input: string, appClass: string): string {
   const outcomes: Record<string, string> = {
+    admin_console: "administering users, roles, and system settings",
     internal_ops_tool: "manage internal operations and data",
     customer_portal: "self-service account and activity management",
     fintech_wallet: "sending, receiving, and tracking money",
@@ -167,7 +169,8 @@ function inferCoreOutcome(input: string, appClass: string): string {
 
 function inferPrimaryUsers(appClass: string): string[] {
   const users: Record<string, string[]> = {
-    internal_ops_tool: ["internal staff", "administrators"],
+    admin_console: ["administrators", "system managers"],
+    internal_ops_tool: ["internal staff", "operators"],
     customer_portal: ["customers", "support staff"],
     fintech_wallet: ["consumers", "support administrators"],
     digital_banking_portal: ["retail customers", "bank staff"],

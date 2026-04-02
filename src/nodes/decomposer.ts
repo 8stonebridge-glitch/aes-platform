@@ -1,7 +1,8 @@
 import type { AESStateType } from "../state.js";
 import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { getCallbacks } from "../graph.js";
 import { getJobStore } from "../store.js";
@@ -11,7 +12,9 @@ import { CURRENT_SCHEMA_VERSION } from "../types/artifacts.js";
 import { applyDesignEvidenceToSpec } from "../services/design-evidence-loader.js";
 
 // ─── Templates directory ────────────────────────────────────────────────
-const TEMPLATES_DIR = "/tmp/aes-templates/apps";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const CATALOG_TEMPLATES_DIR = join(__dirname, "../../catalog/templates");
 
 interface TemplateData {
   id: string;
@@ -23,16 +26,16 @@ interface TemplateData {
 }
 
 function loadTemplate(appClass: string): TemplateData | null {
-  if (!existsSync(TEMPLATES_DIR)) return null;
+  if (!existsSync(CATALOG_TEMPLATES_DIR)) return null;
 
-  const dirs = readdirSync(TEMPLATES_DIR);
-  for (const dir of dirs) {
-    const yamlPath = join(TEMPLATES_DIR, dir, "template.yaml");
-    if (!existsSync(yamlPath)) continue;
-
-    const content = readFileSync(yamlPath, "utf-8");
-    const data = parseYaml(content) as TemplateData;
-    if (data.app_class === appClass) return data;
+  const files = readdirSync(CATALOG_TEMPLATES_DIR).filter((f) => f.endsWith(".yaml"));
+  for (const file of files) {
+    const yamlPath = join(CATALOG_TEMPLATES_DIR, file);
+    try {
+      const content = readFileSync(yamlPath, "utf-8");
+      const data = parseYaml(content) as TemplateData;
+      if (data.app_class === appClass) return data;
+    } catch { /* skip malformed files */ }
   }
 
   return null;
@@ -200,6 +203,11 @@ function deriveRoles(appClass: string): any[] {
       { role_id: "reviewer", name: "Reviewer", description: "Can review and approve/reject requests", scope: "org", inherits_from: ["submitter"] },
       { role_id: "auditor", name: "Auditor", description: "Read-only access to audit trails, request history, and compliance data", scope: "org", inherits_from: [] },
       { role_id: "admin", name: "Admin", description: "Full access including settings and user management", scope: "org", inherits_from: ["reviewer"] },
+    ],
+    admin_console: [
+      { role_id: "viewer", name: "Viewer", description: "Read-only access to dashboards and data", scope: "org", inherits_from: [] },
+      { role_id: "manager", name: "Manager", description: "Can manage users and view audit logs", scope: "org", inherits_from: ["viewer"] },
+      { role_id: "admin", name: "Admin", description: "Full access including settings and system configuration", scope: "org", inherits_from: ["manager"] },
     ],
     internal_ops_tool: [
       { role_id: "viewer", name: "Viewer", description: "Read-only access to dashboards and data", scope: "org", inherits_from: [] },
