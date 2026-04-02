@@ -60,11 +60,22 @@ export function createBaseRepo(
   } else {
     // Initialize fresh repo
     execSync("git init", { cwd: basePath, stdio: "pipe" });
+    // Set git identity (required in containerized environments)
+    execSync('git config user.email "aes-builder@aes.dev"', { cwd: basePath, stdio: "pipe" });
+    execSync('git config user.name "AES Builder"', { cwd: basePath, stdio: "pipe" });
     execSync("git checkout -b main", { cwd: basePath, stdio: "pipe" });
     // Create initial commit
     execSync("touch .aes-init", { cwd: basePath, stdio: "pipe" });
     execSync("git add -A", { cwd: basePath, stdio: "pipe" });
     execSync('git commit -m "AES base repo init"', { cwd: basePath, stdio: "pipe" });
+  }
+
+  // Ensure git identity is set (for cloned repos too)
+  try {
+    execSync('git config user.email "aes-builder@aes.dev"', { cwd: basePath, stdio: "pipe" });
+    execSync('git config user.name "AES Builder"', { cwd: basePath, stdio: "pipe" });
+  } catch {
+    // best effort
   }
 
   const branch = execSync("git branch --show-current", { cwd: basePath, stdio: "pipe" })
