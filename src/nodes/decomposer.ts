@@ -713,22 +713,18 @@ export async function decomposer(
     featureBuildOrder = result.featureBuildOrder;
   }
 
-  // Enrich with graph-derived features not already in the spec.
-  // Keep this intentionally conservative so prior graph context guides
-  // decomposition without silently expanding small apps into bloated specs.
+  // Graph-derived features merge with template/LLM features — no cap.
+  // Both sources are treated equally. Graph features that aren't already
+  // in the spec are added unlimited. Together they form the full spec.
   if (priorFeatures.length > 0) {
-    const baseFeatureCount = appSpec.features.length;
     const existingNames = new Set(
       appSpec.features.map((f: any) => f.name.toLowerCase())
     );
-    const maxGraphDerivedAdds =
-      baseFeatureCount <= 2 ? 3 : baseFeatureCount <= 5 ? Math.max(3, Math.floor(baseFeatureCount / 2)) : Math.min(baseFeatureCount, Math.max(3, Math.floor(baseFeatureCount / 3)));
-    const candidateFeatures: Array<{ prior: any; score: number }> = [];
     let added = 0;
 
     for (const prior of priorFeatures) {
       const priorName = (prior.name || "").toLowerCase();
-      // Skip if already exists or is an intent/app/bridge entity
+      // Skip if already exists or is a meta-entity
       if (
         !priorName ||
         existingNames.has(priorName) ||
@@ -737,45 +733,13 @@ export async function decomposer(
         priorName.startsWith("bridge:")
       ) continue;
 
-      // Check if this prior feature is relevant (shares words with existing features)
-      const priorWords = priorName.split(/[\s-_]+/).filter((w: string) => w.length > 2);
-      let bestOverlap = 0;
-      const isRelevant = appSpec.features.some((f: any) => {
-        const fWords = f.name.toLowerCase().split(/[\s-_]+/);
-        const overlap = priorWords.filter((pw: string) =>
-          fWords.some((fw: string) => fw === pw || fw.includes(pw) || pw.includes(fw))
-        ).length;
-        bestOverlap = Math.max(bestOverlap, overlap);
-        return overlap >= 2;
-      });
-
-      if (isRelevant && !existingNames.has(priorName)) {
-        candidateFeatures.push({ prior, score: bestOverlap });
-      }
-    }
-
-    const selectedGraphDerived = candidateFeatures
-      .sort((a, b) => b.score - a.score || (a.prior.name || "").localeCompare(b.prior.name || ""))
-      .slice(0, maxGraphDerivedAdds);
-
-    for (const { prior } of selectedGraphDerived) {
       const idx = appSpec.features.length;
-      const newFeature = featureFromDescription(
-        prior.name,
-        idx,
-        appSpec.app_class
-      );
+      const newFeature = featureFromDescription(prior.name, idx, appSpec.app_class);
       newFeature.description += ` [graph-derived from prior build v${prior.version || 1}]`;
       appSpec.features.push(newFeature);
-      existingNames.add((prior.name || "").toLowerCase());
+      existingNames.add(priorName);
       added++;
       cb?.onStep(`Graph-derived feature: ${prior.name}`);
-    }
-
-    if (candidateFeatures.length > selectedGraphDerived.length) {
-      cb?.onStep(
-        `Skipped ${candidateFeatures.length - selectedGraphDerived.length} low-priority graph-derived features to keep scope focused`
-      );
     }
 
     if (added > 0) {
