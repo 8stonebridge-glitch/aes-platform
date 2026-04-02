@@ -832,6 +832,29 @@ app.get("/api/governance/pending", (_req, res) => {
   res.json(pending);
 });
 
+// ─── POST /api/graph/learn — Write failure patterns and learnings to graph ──
+
+app.post("/api/graph/learn", async (req, res) => {
+  const { cypher, params } = req.body;
+  if (!cypher || typeof cypher !== "string") {
+    return res.status(400).json({ error: "cypher query is required" });
+  }
+
+  try {
+    const { getNeo4jService } = await import("../services/neo4j-service.js");
+    const neo4j = getNeo4jService();
+    const ok = await neo4j.connect();
+    if (!ok) {
+      return res.status(503).json({ error: "Neo4j unavailable" });
+    }
+
+    const result = await neo4j.runCypher(cypher, params || {});
+    res.json({ success: true, records: result.length, data: result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/self-audit — Analyze pipeline failure patterns ────────
 
 app.get("/api/self-audit", async (_req, res) => {
