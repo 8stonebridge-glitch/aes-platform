@@ -14,6 +14,58 @@ export interface CompilerRepairResult {
   summary: string;
 }
 
+// ─── Perplexity error research ──────────────────────────────────────
+const PERPLEXITY_TIMEOUT_MS = 15_000;
+
+/**
+ * Search Perplexity for a fix when graph hints and LLM repair fail.
+ * Returns actionable fix instructions or null.
+ */
+export async function searchPerplexityForFix(
+  errorPattern: string,
+  errorOutput: string,
+): Promise<string | null> {
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PERPLEXITY_TIMEOUT_MS);
+  try {
+    const query = `How to fix this TypeScript/Next.js compile error in a Next.js 15 + Convex + Clerk app:\n\n${errorPattern}\n\nFull error:\n${errorOutput.slice(0, 1500)}\n\nGive me the exact code fix. Be specific about what to change.`;
+
+    const res = await fetch("https://api.perplexity.ai/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "sonar",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a TypeScript/Next.js expert. Given a compile error, explain the root cause and provide the exact code fix. Be concise and actionable. Focus on the specific API patterns that cause this error and the correct replacement.",
+          },
+          { role: "user", content: query },
+        ],
+        max_tokens: 1024,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as any;
+    const content = data.choices?.[0]?.message?.content || "";
+    return content.length > 50 ? content : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 interface RepairCandidate {
   path: string;
   content: string;

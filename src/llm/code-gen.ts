@@ -41,6 +41,11 @@ export function setGraphGuidanceBlock(block: string): void {
   _activeGraphGuidanceBlock = block;
 }
 
+/** Get the current graph guidance block. */
+export function getGraphGuidanceBlock(): string {
+  return _activeGraphGuidanceBlock;
+}
+
 /** Clear the graph guidance block after a build completes. */
 export function clearGraphGuidanceBlock(): void {
   _activeGraphGuidanceBlock = "";

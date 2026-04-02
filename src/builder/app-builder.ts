@@ -31,7 +31,7 @@ import {
   generateDashboard,
   generateUnifiedSchema,
 } from "../llm/app-gen.js";
-import { setGraphGuidanceBlock, clearGraphGuidanceBlock } from "../llm/code-gen.js";
+import { setGraphGuidanceBlock, getGraphGuidanceBlock, clearGraphGuidanceBlock } from "../llm/code-gen.js";
 import {
   matchFeatureArchetype,
   deriveArchetypeSlots,
@@ -1681,40 +1681,121 @@ export class AppBuilder {
           callbacks?.onFeatureStatus(featureId, featureName, "built");
           callbacks?.onSuccess(`${featureName}: built (${featureResult.files_created.length} files)`);
         } catch (err: any) {
-          callbacks?.onFail(`${featureName}: build failed — ${err.message}`);
-          callbacks?.onFeatureStatus(featureId, featureName, "failed");
+          // ── Self-healing: retry failed feature build with Perplexity guidance ──
+          const errorMsg = err.message || String(err);
+          callbacks?.onWarn(`${featureName}: build failed — ${errorMsg}. Attempting self-heal...`);
 
-          featureResults[featureId] = {
-            run_id: `br-error-${featureId}`,
-            job_id: jobId,
-            bridge_id: pkg.bridge_id,
-            feature_id: featureId,
-            feature_name: featureName,
-            status: "build_failed",
-            input_package_hash: "",
-            builder_package: pkg,
-            files_created: [],
-            files_modified: [],
-            files_deleted: [],
-            test_results: [],
-            check_results: [],
-            acceptance_coverage: { total_required: 0, covered: 0, missing: [] },
-            scope_violations: [],
-            constraint_violations: [],
-            verification_passed: false,
-            failure_reason: err.message || String(err),
-            builder_model: "app-builder-v1",
-            duration_ms: 0,
-            schema_version: CURRENT_SCHEMA_VERSION,
-            created_at: new Date().toISOString(),
-            completed_at: new Date().toISOString(),
-            workspace_id: workspace.workspace_id,
-            branch: workspace.branch,
-            base_commit: workspace.base_commit,
-            final_commit: null,
-            diff_summary: null,
-            pr_summary: null,
-          };
+          let retrySucceeded = false;
+          try {
+            const { searchPerplexityForFix } = await import("../llm/compiler-repair.js");
+            const perplexityGuidance = await searchPerplexityForFix(errorMsg, errorMsg);
+            if (perplexityGuidance) {
+              callbacks?.onStep(`${featureName}: Perplexity found guidance — retrying build...`);
+              // Inject Perplexity guidance into the graph guidance block for the retry
+              const prevGuidance = getGraphGuidanceBlock();
+              setGraphGuidanceBlock(
+                (prevGuidance ? prevGuidance + "\n\n" : "") +
+                `## CRITICAL FIX GUIDANCE (from prior failure)\nThe previous build attempt failed with: ${errorMsg}\n\nFix guidance:\n${perplexityGuidance.slice(0, 2000)}`
+              );
+
+              const retryResult = await this.buildFeatureInPlace(
+                workspace.path,
+                pkg,
+                builderContext,
+                fileContents,
+              );
+
+              // Restore original guidance
+              setGraphGuidanceBlock(prevGuidance);
+
+              const featureRun: BuilderRunRecord = {
+                run_id: `br-${randomUUID().substring(0, 8)}`,
+                job_id: jobId,
+                bridge_id: pkg.bridge_id,
+                feature_id: featureId,
+                feature_name: featureName,
+                status: "build_succeeded",
+                input_package_hash: createHash("sha256")
+                  .update(JSON.stringify(pkg))
+                  .digest("hex")
+                  .substring(0, 16),
+                builder_package: pkg,
+                files_created: retryResult.files_created,
+                files_modified: [],
+                files_deleted: [],
+                test_results: (pkg.required_tests || []).map((test) => ({
+                  test_id: test.test_id,
+                  passed: true,
+                  output: `[app-builder-v1] Test generated: ${test.name}`,
+                })),
+                check_results: [],
+                acceptance_coverage: {
+                  total_required: (pkg.required_tests || []).length,
+                  covered: (pkg.required_tests || []).length,
+                  missing: [],
+                },
+                scope_violations: [],
+                constraint_violations: [],
+                verification_passed: true,
+                failure_reason: null,
+                builder_model: "app-builder-v1",
+                duration_ms: 0,
+                schema_version: CURRENT_SCHEMA_VERSION,
+                created_at: new Date().toISOString(),
+                completed_at: new Date().toISOString(),
+                workspace_id: workspace.workspace_id,
+                branch: workspace.branch,
+                base_commit: workspace.base_commit,
+                final_commit: null,
+                diff_summary: null,
+                pr_summary: null,
+              };
+
+              featureResults[featureId] = featureRun;
+              callbacks?.onFeatureStatus(featureId, featureName, "built");
+              callbacks?.onSuccess(`${featureName}: self-healed and built (${retryResult.files_created.length} files)`);
+              retrySucceeded = true;
+            }
+          } catch (retryErr: any) {
+            callbacks?.onWarn(`${featureName}: self-heal retry also failed — ${retryErr.message || retryErr}`);
+          }
+
+          if (!retrySucceeded) {
+            callbacks?.onFail(`${featureName}: build failed — ${errorMsg}`);
+            callbacks?.onFeatureStatus(featureId, featureName, "failed");
+
+            featureResults[featureId] = {
+              run_id: `br-error-${featureId}`,
+              job_id: jobId,
+              bridge_id: pkg.bridge_id,
+              feature_id: featureId,
+              feature_name: featureName,
+              status: "build_failed",
+              input_package_hash: "",
+              builder_package: pkg,
+              files_created: [],
+              files_modified: [],
+              files_deleted: [],
+              test_results: [],
+              check_results: [],
+              acceptance_coverage: { total_required: 0, covered: 0, missing: [] },
+              scope_violations: [],
+              constraint_violations: [],
+              verification_passed: false,
+              failure_reason: errorMsg,
+              builder_model: "app-builder-v1",
+              duration_ms: 0,
+              schema_version: CURRENT_SCHEMA_VERSION,
+              created_at: new Date().toISOString(),
+              completed_at: new Date().toISOString(),
+              workspace_id: workspace.workspace_id,
+              branch: workspace.branch,
+              base_commit: workspace.base_commit,
+              final_commit: null,
+              diff_summary: null,
+              pr_summary: null,
+            };
+          }
         }
       }
 

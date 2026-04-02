@@ -34,7 +34,7 @@ import {
   VercelService,
   isVercelConfigured,
 } from "../services/vercel-service.js";
-import { repairFilesForCompilerErrors } from "../llm/compiler-repair.js";
+import { repairFilesForCompilerErrors, searchPerplexityForFix } from "../llm/compiler-repair.js";
 import type { CheckResult } from "../types/artifacts.js";
 import {
   deployToCloudflare,
@@ -70,7 +70,7 @@ const HERMES_REPAIR_URL = (
   process.env.HERMES_URL ||
   ""
 ).replace(/\/+$/, "");
-const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 3;
+const PREDEPLOY_MAX_REPAIR_ATTEMPTS = 5;
 
 const AES_UI_COMPONENTS = [
   "Button",
@@ -1401,6 +1401,53 @@ async function runPredeployCompileGate(args: {
     );
 
     if (changedFiles.length === 0) {
+      // ── Perplexity escalation: search for a fix when all local repair fails ──
+      store.addLog(jobId, {
+        gate: "deploying",
+        message: `[compile-gate] local repair produced no changes — searching Perplexity for fix...`,
+      });
+      const perplexityFix = await searchPerplexityForFix(pattern, output);
+      if (perplexityFix) {
+        store.addLog(jobId, {
+          gate: "deploying",
+          message: `[compile-gate] Perplexity found guidance (${perplexityFix.length} chars) — retrying LLM repair with external knowledge`,
+        });
+        // Feed Perplexity findings into LLM repair as additional hints
+        const perplexityRepair = await repairFilesForCompilerErrors({
+          workspacePath,
+          errorOutput: output,
+          hermesHints: [...combinedHints, `PERPLEXITY FIX GUIDANCE: ${perplexityFix}`],
+        });
+        if (perplexityRepair.repaired && perplexityRepair.filesChanged.length > 0) {
+          // Re-apply guardrails after Perplexity-guided repair
+          enforceSourceGuardrailsInWorkspace(workspacePath);
+          commitWorkspaceChanges(
+            workspacePath,
+            `[AES] fix: Perplexity-guided repair for ${failingCheck.check} errors`,
+          );
+          pendingSuccesses.push({
+            pattern,
+            category,
+            diagnosis: `Predeploy ${failingCheck.check} failed — repaired with Perplexity guidance.`,
+            fixAction: `Perplexity-guided repair: ${perplexityRepair.summary}`,
+            filesChanged: perplexityRepair.filesChanged,
+            errorSnippet: pattern,
+          });
+          store.addLog(jobId, {
+            gate: "deploying",
+            message: `[compile-gate] Perplexity-guided repair changed ${perplexityRepair.filesChanged.length} file(s) — retrying checks`,
+          });
+          continue; // retry the compile checks
+        }
+      }
+      // If we still have attempts left, continue the loop rather than giving up
+      if (attempt < PREDEPLOY_MAX_REPAIR_ATTEMPTS) {
+        store.addLog(jobId, {
+          gate: "deploying",
+          message: `[compile-gate] no repair succeeded on attempt ${attempt + 1} — will retry`,
+        });
+        continue;
+      }
       return {
         passed: false,
         errorMessage: `Compile gate could not repair ${failingCheck.check}: ${pattern}`,
