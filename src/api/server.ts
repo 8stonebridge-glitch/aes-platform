@@ -637,11 +637,103 @@ app.get("/api/jobs/:id/audit", async (req, res) => {
     return;
   }
 
+  const logs = store.getLogs(jobId);
+  const builderRuns = job.builderRuns || [];
+
+  // ── Gate timeline: extract gate transitions with timestamps ──
+  const gateTimeline: Array<{ gate: string; message: string; timestamp: string }> = [];
+  for (const log of logs) {
+    if (log.gate && !gateTimeline.some((g) => g.gate === log.gate)) {
+      gateTimeline.push({
+        gate: log.gate,
+        message: log.message,
+        timestamp: log.created_at || "",
+      });
+    }
+  }
+
+  // ── Veto summary: per-feature veto results ──
+  const vetoSummary: Array<{
+    feature_id: string;
+    feature_name: string;
+    blocked: boolean;
+    vetoes: Array<{ code: string; reason: string }>;
+  }> = [];
+  if (job.vetoResults && job.appSpec?.features) {
+    const features = job.appSpec.features as Array<{ feature_id: string; name: string }>;
+    const featureMap = new Map(features.map((f) => [f.feature_id, f.name]));
+    const vetosByFeature = new Map<string, Array<{ code: string; reason: string }>>();
+    for (const vr of job.vetoResults as Array<{ code: string; triggered: boolean; reason: string; blocking_feature_ids: string[] }>) {
+      if (vr.triggered) {
+        for (const fid of vr.blocking_feature_ids) {
+          if (!vetosByFeature.has(fid)) vetosByFeature.set(fid, []);
+          vetosByFeature.get(fid)!.push({ code: vr.code, reason: vr.reason });
+        }
+      }
+    }
+    for (const f of features) {
+      const fVetoes = vetosByFeature.get(f.feature_id) || [];
+      vetoSummary.push({
+        feature_id: f.feature_id,
+        feature_name: f.name,
+        blocked: fVetoes.length > 0,
+        vetoes: fVetoes,
+      });
+    }
+  }
+
+  // ── Feature build audit: per-feature build outcome ──
+  const featureBuildAudit = builderRuns
+    .filter((r: any) => r.feature_id && r.feature_id !== "__app__")
+    .map((r: any) => ({
+      feature_id: r.feature_id,
+      feature_name: r.feature_name,
+      run_id: r.run_id,
+      status: r.status,
+      files_created: r.files_created?.length || 0,
+      files_modified: r.files_modified?.length || 0,
+      scope_violations: r.scope_violations || [],
+      verification_passed: r.verification_passed,
+      duration_ms: r.duration_ms,
+      failure_reason: r.failure_reason,
+    }));
+
+  // ── Pipeline summary ──
+  const totalFeatures = job.appSpec?.features?.length || 0;
+  const builtCount = featureBuildAudit.filter((f: any) => f.status === "build_succeeded").length;
+  const failedCount = featureBuildAudit.filter((f: any) => f.status === "build_failed").length;
+  const blockedCount = vetoSummary.filter((v) => v.blocked).length;
+  const skippedCount = totalFeatures - builtCount - failedCount - blockedCount;
+
+  const pipelineSummary = {
+    job_id: jobId,
+    intent: job.rawRequest || "",
+    app_class: job.intentBrief?.inferred_app_class || job.appSpec?.app_class || "",
+    risk_class: job.intentBrief?.inferred_risk_class || job.appSpec?.risk_class || "",
+    final_gate: job.currentGate || "",
+    deploy_target: job.deployTarget || "local",
+    preview_url: job.previewUrl || null,
+    autonomous: job.autonomous || false,
+    features: {
+      total: totalFeatures,
+      built: builtCount,
+      failed: failedCount,
+      blocked: blockedCount,
+      skipped: skippedCount > 0 ? skippedCount : 0,
+    },
+    confidence: job.appSpec?.confidence || null,
+    error: job.errorMessage || null,
+    created_at: (job as any).createdAt || "",
+  };
+
   res.json({
-    jobId,
-    logs: store.getLogs(jobId),
+    pipelineSummary,
+    gateTimeline,
+    vetoSummary,
+    featureBuildAudit,
+    builderRuns,
     fixTrailEntries: job.fixTrailEntries || [],
-    builderRuns: job.builderRuns || [],
+    logs,
   });
 });
 
