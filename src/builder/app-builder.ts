@@ -1195,6 +1195,10 @@ export function formatGraphGuidanceForPrompt(guidance?: GraphGuidance): string {
 // ─── Reference Code Collection ─────────────────────────────────────
 // Collects actual code artifacts from the BuilderPackage and GraphGuidance
 // to inject as reference material into LLM generation prompts.
+//
+// Items are scored by relevance using unified reasoner concept scores and
+// domain sources, then sorted so the highest-value items survive truncation.
+// Output uses structured few-shot example format instead of flat code dumps.
 
 interface ReferenceCodeBundle {
   schema: string;   // Reference code for schema generation
@@ -1204,45 +1208,143 @@ interface ReferenceCodeBundle {
   components: string; // Reference code for component generation
 }
 
+/** A reference item with a relevance score for ranking before truncation. */
+interface ScoredRefItem {
+  /** Formatted content ready for prompt injection */
+  content: string;
+  /** Relevance score — higher = survives truncation. Range: 0-10 */
+  score: number;
+}
+
+type RefCategory = "schema" | "query" | "mutation" | "page" | "component";
+
+/**
+ * Build a relevance scorer from unified reasoner output.
+ * Returns a function that scores a reference item based on keyword overlap
+ * with HIGH/MEDIUM confidence concepts and best-source-app matches.
+ */
+function buildRelevanceScorer(guidance?: GraphGuidance): (text: string, source: string, tier: "proven" | "extracted" | "learned" | "reference" | "generic") => number {
+  if (!guidance) return (_t, _s, tier) => tier === "proven" ? 6 : tier === "extracted" ? 5 : tier === "learned" ? 4 : tier === "reference" ? 3 : 1;
+
+  // Build lookup from concept scores: concept name → confidence weight
+  const conceptWeights = new Map<string, number>();
+  for (const cs of guidance.unifiedConceptScores) {
+    const w = cs.confidence === "HIGH" ? 3 : cs.confidence === "MEDIUM" ? 2 : cs.confidence === "LOW" ? 1 : 0;
+    if (w > 0) conceptWeights.set(cs.concept.toLowerCase(), w);
+  }
+
+  // Build set of best-source apps for domain bonus
+  const bestApps = new Set<string>();
+  for (const ds of guidance.unifiedDomainSources) {
+    if (ds.bestApp && ds.bestApp !== "NONE") bestApps.add(ds.bestApp.toLowerCase());
+  }
+
+  return (text: string, source: string, tier: "proven" | "extracted" | "learned" | "reference" | "generic") => {
+    // Base score from evidence tier
+    let score = tier === "proven" ? 6 : tier === "extracted" ? 5 : tier === "learned" ? 4 : tier === "reference" ? 3 : 1;
+
+    const textLower = text.toLowerCase();
+    const sourceLower = source.toLowerCase();
+
+    // Concept match bonus: +1 to +3 per matching concept (cap at +4)
+    let conceptBonus = 0;
+    for (const [concept, weight] of conceptWeights) {
+      if (textLower.includes(concept) || sourceLower.includes(concept)) {
+        conceptBonus += weight;
+      }
+    }
+    score += Math.min(conceptBonus, 4);
+
+    // Best-source-app bonus: +2 if from a top-ranked app
+    if (bestApps.size > 0) {
+      for (const app of bestApps) {
+        if (sourceLower.includes(app)) { score += 2; break; }
+      }
+    }
+
+    return score;
+  };
+}
+
+/**
+ * Format a reference item as a structured few-shot example.
+ * Uses clear delimiters so the LLM can parse individual examples.
+ */
+function formatAsExample(label: string, source: string, code: string, kind: string): string {
+  return `### Example: ${label}\n<!-- source: ${source} | kind: ${kind} -->\n\`\`\`typescript\n${code}\n\`\`\``;
+}
+
+/**
+ * Sort scored items by relevance (descending), then cap at char limit.
+ * Returns structured output with clear example boundaries.
+ */
+function capByRelevance(items: ScoredRefItem[], limit = 8000): string {
+  // Sort by score descending — highest-relevance items first
+  const sorted = [...items].sort((a, b) => b.score - a.score);
+  const kept: string[] = [];
+  let total = 0;
+  for (const item of sorted) {
+    if (total + item.content.length > limit) {
+      // If we haven't kept anything yet, take at least one (truncated)
+      if (kept.length === 0 && item.content.length > 0) {
+        kept.push(item.content.slice(0, limit) + "\n// ... (truncated)");
+      }
+      break;
+    }
+    kept.push(item.content);
+    total += item.content.length;
+  }
+  return kept.join("\n\n");
+}
+
 /**
  * Collect reusable code from BuilderPackage source_files and graph_hints,
  * plus GraphGuidance code samples, into categorized reference blocks.
+ *
+ * Items are ranked by relevance score (from unified reasoner concept scores
+ * and domain-source matches) before truncation, so the most relevant items
+ * survive the per-category cap. Output uses structured few-shot examples.
  */
 function collectReferenceCode(
   pkg: BuilderPackage,
   guidance?: GraphGuidance,
 ): ReferenceCodeBundle {
-  const schemaParts: string[] = [];
-  const queryParts: string[] = [];
-  const mutationParts: string[] = [];
-  const pageParts: string[] = [];
-  const componentParts: string[] = [];
+  const buckets: Record<RefCategory, ScoredRefItem[]> = {
+    schema: [], query: [], mutation: [], page: [], component: [],
+  };
+
+  const scorer = buildRelevanceScorer(guidance);
 
   // ── 1. Reusable source files from GitHub (via catalog-searcher) ──
-  for (const [candidateId, entry] of Object.entries(pkg.source_files || {})) {
+  for (const [_candidateId, entry] of Object.entries(pkg.source_files || {})) {
     for (const file of entry.files || []) {
       const path = file.path.toLowerCase();
       const content = file.content;
       if (!content || content.length < 30) continue;
 
-      // Cap individual files at 3000 chars to keep context manageable
       const capped = content.length > 3000 ? content.slice(0, 3000) + "\n// ... (truncated)" : content;
+      const source = `${entry.repo}/${file.path}`;
 
-      if (path.includes("schema")) {
-        schemaParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
-      } else if (path.includes("quer")) {
-        queryParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
-      } else if (path.includes("mutat") || path.includes("action")) {
-        mutationParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
-      } else if (path.includes("page") || path.includes("/app/")) {
-        pageParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
-      } else if (path.includes("component")) {
-        componentParts.push(`// From ${entry.repo} — ${file.path}\n${capped}`);
-      } else {
-        // General — add to all categories as background reference
+      let cat: RefCategory;
+      if (path.includes("schema")) cat = "schema";
+      else if (path.includes("quer")) cat = "query";
+      else if (path.includes("mutat") || path.includes("action")) cat = "mutation";
+      else if (path.includes("page") || path.includes("/app/")) cat = "page";
+      else if (path.includes("component")) cat = "component";
+      else {
+        // General reference — add to pages at reduced cap
         const shortRef = content.length > 1500 ? content.slice(0, 1500) + "\n// ..." : content;
-        pageParts.push(`// Reference from ${entry.repo} — ${file.path}\n${shortRef}`);
+        buckets.page.push({
+          content: formatAsExample(file.path, source, shortRef, "reference"),
+          score: scorer(shortRef, source, "generic"),
+        });
+        continue;
       }
+
+      buckets[cat].push({
+        content: formatAsExample(file.path, source, capped, cat),
+        score: scorer(capped, source, "reference"),
+      });
     }
   }
 
@@ -1250,12 +1352,20 @@ function collectReferenceCode(
   if (pkg.graph_hints) {
     for (const model of pkg.graph_hints.proven_models || []) {
       if (model.fields) {
-        schemaParts.push(`// Proven model "${model.name}" from ${model.appClass}: fields: ${model.fields}`);
+        const text = `// Proven model: fields: ${model.fields}`;
+        buckets.schema.push({
+          content: formatAsExample(`Proven model "${model.name}"`, model.appClass || "graph", text, "schema"),
+          score: scorer(text, model.appClass || "", "proven"),
+        });
       }
     }
     for (const model of pkg.graph_hints.relevant_models || []) {
       if (model.fields) {
-        schemaParts.push(`// Relevant model "${model.name}" from ${model.source}: fields: ${model.fields}`);
+        const text = `// Relevant model: fields: ${model.fields}`;
+        buckets.schema.push({
+          content: formatAsExample(`Relevant model "${model.name}"`, model.source || "graph", text, "schema"),
+          score: scorer(text, model.source || "", "learned"),
+        });
       }
     }
   }
@@ -1265,82 +1375,92 @@ function collectReferenceCode(
     for (const p of guidance.buildExtractedPatterns || []) {
       if (p.codeSample && p.codeSample.length > 50) {
         const type = (p.type || "").toLowerCase();
-        const target = type.includes("schema") ? schemaParts
-          : type.includes("quer") ? queryParts
-          : type.includes("mutat") ? mutationParts
-          : type.includes("component") || type.includes("ui") ? componentParts
-          : pageParts;
-        target.push(`// Build-extracted pattern "${p.name}" (${p.type}):\n${p.codeSample}`);
+        const cat: RefCategory = type.includes("schema") ? "schema"
+          : type.includes("quer") ? "query"
+          : type.includes("mutat") ? "mutation"
+          : type.includes("component") || type.includes("ui") ? "component"
+          : "page";
+        buckets[cat].push({
+          content: formatAsExample(`Build-extracted: ${p.name}`, `prior-build/${p.type}`, p.codeSample, cat),
+          score: scorer(p.codeSample, p.name, "extracted"),
+        });
       }
     }
 
     // ── 4a. Learned model schema sources (Prisma, Drizzle, Convex defineTable) ──
     for (const m of guidance.learnedModels || []) {
       if (m.schemaSource && m.schemaSource.length > 50) {
-        schemaParts.push(`// Learned model "${m.name}" schema:\n${m.schemaSource}`);
+        buckets.schema.push({
+          content: formatAsExample(`Learned model "${m.name}"`, "graph/learned-model", m.schemaSource, "schema"),
+          score: scorer(m.schemaSource, m.name, "learned"),
+        });
       }
     }
 
-    // ── 4. Convex schema text from prior builds ──
+    // ── 4b. Convex schema text from prior builds ──
     for (const s of guidance.convexSchemas || []) {
       if (s.schemaText && s.schemaText.length > 50) {
-        schemaParts.push(`// Working schema "${s.name}" from ${s.appClass}:\n${s.schemaText}`);
+        buckets.schema.push({
+          content: formatAsExample(`Working schema "${s.name}"`, `prior-build/${s.appClass}`, s.schemaText, "schema"),
+          score: scorer(s.schemaText, s.appClass || s.name, "proven"),
+        });
       }
     }
 
     // ── 5. Reference schema text ──
     for (const s of guidance.referenceSchemas || []) {
       if (s.schemaText && s.schemaText.length > 50) {
-        schemaParts.push(`// Reference schema "${s.name}" (${s.domain}):\n${s.schemaText}`);
+        buckets.schema.push({
+          content: formatAsExample(`Reference schema "${s.name}"`, `reference/${s.domain}`, s.schemaText, "schema"),
+          score: scorer(s.schemaText, s.domain || s.name, "reference"),
+        });
       }
     }
 
     // ── 6. Component patterns with usage examples (cross-app) ──
     for (const c of guidance.learnedComponentPatterns || []) {
       if (c.usageExample && c.usageExample.length > 50) {
-        componentParts.push(`// Component "${c.name}" (${c.category}) — adapt this structure:\n${c.usageExample}`);
+        buckets.component.push({
+          content: formatAsExample(`Component "${c.name}" (${c.category})`, "graph/component-pattern", c.usageExample, "component"),
+          score: scorer(c.usageExample, c.name, "learned"),
+        });
       }
     }
 
     // ── 7. Form patterns with field definitions ──
     for (const f of guidance.learnedFormPatterns || []) {
       if (f.fields || f.validationRules) {
-        pageParts.push(`// Form pattern "${f.name}": fields=${f.fields || "?"}, validation=${f.validationRules || "?"}`);
+        const text = `// Form: ${f.name}\n// Fields: ${f.fields || "?"}\n// Validation: ${f.validationRules || "?"}`;
+        buckets.page.push({
+          content: formatAsExample(`Form pattern "${f.name}"`, "graph/form-pattern", text, "page"),
+          score: scorer(text, f.name, "learned"),
+        });
       }
     }
 
-    // ── 8. Cross-domain blueprint — tells LLM which app to reference per domain ──
+    // ── 8. Cross-domain blueprint — always first (score: max) ──
     if (guidance.unifiedDomainSources.length > 0) {
-      const blueprintNote: string[] = ["// CROSS-APP REFERENCE MAP — each domain pulls from a different source app:"];
+      const lines: string[] = ["// CROSS-APP REFERENCE MAP — each domain pulls from a different source app:"];
       for (const ds of guidance.unifiedDomainSources) {
         if (ds.bestApp && ds.bestApp !== "NONE") {
-          blueprintNote.push(`//   ${ds.domain} → ${ds.bestApp} (features: ${ds.features}, models: ${ds.models})`);
+          lines.push(`//   ${ds.domain} → ${ds.bestApp} (features: ${ds.features}, models: ${ds.models})`);
         }
       }
-      schemaParts.unshift(blueprintNote.join("\n"));
-      pageParts.unshift(blueprintNote.join("\n"));
-      componentParts.unshift(blueprintNote.join("\n"));
+      const blueprintContent = lines.join("\n");
+      // Blueprint gets max score so it's always included first
+      for (const cat of ["schema", "page", "component"] as RefCategory[]) {
+        buckets[cat].push({ content: blueprintContent, score: 100 });
+      }
     }
   }
 
-  // Compose final blocks — cap total size per category to ~8000 chars
-  const cap = (parts: string[], limit = 8000): string => {
-    const joined: string[] = [];
-    let total = 0;
-    for (const p of parts) {
-      if (total + p.length > limit) break;
-      joined.push(p);
-      total += p.length;
-    }
-    return joined.join("\n\n");
-  };
-
+  // Sort by relevance and cap per category
   return {
-    schema: cap(schemaParts),
-    queries: cap(queryParts),
-    mutations: cap(mutationParts),
-    pages: cap(pageParts),
-    components: cap(componentParts),
+    schema: capByRelevance(buckets.schema),
+    queries: capByRelevance(buckets.query),
+    mutations: capByRelevance(buckets.mutation),
+    pages: capByRelevance(buckets.page),
+    components: capByRelevance(buckets.component),
   };
 }
 
@@ -1651,17 +1771,14 @@ export class AppBuilder {
     appSpec: any,
     fileContents: Record<string, string>,
   ): Promise<void> {
-    // 1. Layout (overrides scaffolder's basic one)
-    await this.generateLayout(basePath, appSpec, fileContents);
-
-    // 2. Sidebar
-    await this.generateSidebarFile(basePath, appSpec, fileContents);
-
-    // 3. Dashboard
-    await this.generateDashboardFile(basePath, appSpec, fileContents);
-
-    // 4. Unified schema (overrides scaffolder's audit-only one)
-    await this.generateSchemaFile(basePath, appSpec, fileContents);
+    // All 4 app-level files are independent — generate them in parallel
+    // Each writes to a different file path, so no conflict.
+    await Promise.all([
+      this.generateLayout(basePath, appSpec, fileContents),
+      this.generateSidebarFile(basePath, appSpec, fileContents),
+      this.generateDashboardFile(basePath, appSpec, fileContents),
+      this.generateSchemaFile(basePath, appSpec, fileContents),
+    ]);
   }
 
   private async generateLayout(
@@ -1858,44 +1975,92 @@ export class AppBuilder {
     const fragments: GeneratedFragment[] = [];
     const completedKinds = new Set<PartKind>();
 
-    // Process parts in dependency order
-    // Deterministic parts run immediately; LLM parts call generateFeaturePart
-    for (const part of decomposed.parts) {
-      // Check dependencies
-      if (!dependenciesSatisfied(part, completedKinds)) {
-        // Dependencies not met — skip (shouldn't happen with correct ordering)
-        fragments.push({ part, code: "", success: false, error: "dependencies not satisfied" });
-        continue;
-      }
+    // ── Parallel part execution ──────────────────────────────────────
+    // Group parts into dependency levels (like the P5 parallel executor)
+    // and run independent parts concurrently to reduce LLM round-trips.
+    //
+    // Level 0: parts with no dependencies (e.g., query, mutation, validation)
+    // Level 1: parts depending on level 0 (e.g., data-loader depends on query)
+    // Level 2: parts depending on level 1 (e.g., page-shell depends on data-loader)
 
-      if (part.deterministic) {
-        // Deterministic part — use preamble directly, no LLM
-        fragments.push({ part, code: part.preamble || "", success: true });
-        completedKinds.add(part.kind);
-        continue;
-      }
+    // First, resolve deterministic parts immediately (they don't need LLM)
+    const deterministicParts = decomposed.parts.filter(p => p.deterministic);
+    const llmParts = decomposed.parts.filter(p => !p.deterministic);
 
-      // LLM part — narrow, focused generation with reference code
-      const partRefCode = part.kind === "query" ? refCode.queries
-        : part.kind === "mutation" ? refCode.mutations
-        : part.kind === "component" ? refCode.components
-        : part.kind === "validation" ? refCode.schema
-        : refCode.pages;
-      let code: string | null = null;
-      try {
-        const { generateFeaturePart } = await import("../llm/code-gen.js");
-        code = await generateFeaturePart(part.prompt, part.kind, partRefCode || undefined);
-      } catch {
-        // LLM unavailable
-      }
-
-      if (code) {
-        fragments.push({ part, code, success: true });
-      } else {
-        // LLM failed — mark as failed but continue (other parts still run)
-        fragments.push({ part, code: "", success: false, error: "LLM unavailable or failed" });
-      }
+    for (const part of deterministicParts) {
+      fragments.push({ part, code: part.preamble || "", success: true });
       completedKinds.add(part.kind);
+    }
+
+    // Group LLM parts into dependency levels
+    const remaining = new Set(llmParts.map(p => p.kind));
+    const partMap = new Map(llmParts.map(p => [p.kind, p]));
+    const assigned = new Set<PartKind>();
+    const levels: PartKind[][] = [];
+
+    while (remaining.size > 0) {
+      const level: PartKind[] = [];
+      for (const kind of remaining) {
+        const part = partMap.get(kind)!;
+        // Ready if all deps are either completed (deterministic) or assigned to prior levels
+        const ready = part.dependsOn.every(
+          dep => completedKinds.has(dep) || assigned.has(dep)
+        );
+        if (ready) level.push(kind);
+      }
+      if (level.length === 0) {
+        // Circular or unresolvable — force all remaining into one level
+        for (const kind of remaining) level.push(kind);
+      }
+      for (const kind of level) {
+        remaining.delete(kind);
+        assigned.add(kind);
+      }
+      levels.push(level);
+    }
+
+    // Execute each level — parts within a level run in parallel
+    const { generateFeaturePart } = await import("../llm/code-gen.js");
+
+    for (const level of levels) {
+      const levelResults = await Promise.allSettled(
+        level.map(async (kind) => {
+          const part = partMap.get(kind)!;
+
+          // Select reference code for this part kind
+          const partRefCode = kind === "query" ? refCode.queries
+            : kind === "mutation" ? refCode.mutations
+            : kind === "component" ? refCode.components
+            : kind === "validation" ? refCode.schema
+            : refCode.pages;
+
+          try {
+            const code = await generateFeaturePart(part.prompt, part.kind, partRefCode || undefined);
+            return { part, code, success: !!code };
+          } catch {
+            return { part, code: null, success: false };
+          }
+        })
+      );
+
+      for (const result of levelResults) {
+        if (result.status === "fulfilled") {
+          const { part, code, success } = result.value;
+          fragments.push({
+            part,
+            code: code || "",
+            success,
+            error: success ? undefined : "LLM unavailable or failed",
+          });
+          completedKinds.add(part.kind);
+        } else {
+          // Promise rejected — shouldn't happen with our catch, but handle it
+          const kind = level[levelResults.indexOf(result)];
+          const part = partMap.get(kind)!;
+          fragments.push({ part, code: "", success: false, error: "generation error" });
+          completedKinds.add(part.kind);
+        }
+      }
     }
 
     // Compose fragments into final files

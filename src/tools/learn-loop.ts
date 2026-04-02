@@ -267,7 +267,16 @@ async function runScenario(scenario: TestScenario): Promise<{ pass: number; fail
         missed: '${esc(r.missed.join(", "))}',
         result_count: ${r.rows.length},
         timestamp: '${esc(new Date().toISOString())}'
-      }) RETURN f.session_id
+      })
+      WITH f
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+         OR toLower(app.app_class) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+      WITH f, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        CREATE (app)-[:HAS_FEEDBACK]->(f)
+      )
+      RETURN f.session_id
     `);
   }
 
@@ -280,7 +289,16 @@ async function runScenario(scenario: TestScenario): Promise<{ pass: number; fail
         correction: '${esc(c.correction)}',
         app_description: '${esc(scenario.description)}',
         timestamp: '${esc(new Date().toISOString())}'
-      }) RETURN c.session_id
+      })
+      WITH c
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+         OR toLower(app.app_class) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+      WITH c, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        CREATE (app)-[:HAS_CORRECTION]->(c)
+      )
+      RETURN c.session_id
     `);
   }
 
@@ -294,7 +312,16 @@ async function runScenario(scenario: TestScenario): Promise<{ pass: number; fail
       fail_count: ${fail},
       correction_count: ${scenario.corrections.length},
       timestamp: '${esc(new Date().toISOString())}'
-    }) RETURN b.session_id
+    })
+    WITH b
+    OPTIONAL MATCH (app:LearnedApp)
+    WHERE toLower(app.name) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+       OR toLower(app.app_class) CONTAINS toLower('${esc(scenario.description.split(" ").slice(0, 3).join(" "))}')
+    WITH b, app LIMIT 1
+    FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+      CREATE (app)-[:HAS_BLUEPRINT_RESULT]->(b)
+    )
+    RETURN b.session_id
   `);
 
   console.log(`\n  Score: ${avgScore.toFixed(1)}/5 | ${pass} pass, ${fail} fail | ${scenario.corrections.length} corrections written`);

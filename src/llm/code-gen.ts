@@ -76,7 +76,13 @@ async function callLLM(
   const groundTruth = await getGenerationGroundTruthForPacks(contractPackIds);
   const graphBlock = _activeGraphGuidanceBlock;
   const refBlock = referenceCode
-    ? `\n\n## REFERENCE CODE FROM PRIOR BUILDS — ADAPT, DO NOT COPY BLINDLY\nThe following code is from prior successful builds in the knowledge graph.\nUse it as a structural reference — adapt field names, table names, and logic to fit the current feature.\nDo NOT copy verbatim if the domain differs. Do reuse proven patterns and structure.\n\n${referenceCode}`
+    ? `\n\n## REFERENCE EXAMPLES FROM PRIOR BUILDS (ranked by relevance)
+The following examples are from prior successful builds in the knowledge graph, ranked by relevance to the current task.
+Each example is a proven pattern — adapt field names, table names, and logic to fit the current feature.
+Do NOT copy verbatim if the domain differs. Do reuse the structural patterns and architecture.
+Higher-ranked examples are more relevant to your current domain.
+
+${referenceCode}`
     : "";
   const slotId = await acquireLLMSlot("code-gen");
   try {

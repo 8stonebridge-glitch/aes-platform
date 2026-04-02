@@ -463,13 +463,19 @@ async function writeCommunities(result: CommunityDetectionResult): Promise<void>
     }
   }
 
-  // Store modularity as a graph property
+  // Store modularity as a graph property, linked to the first community as anchor
   await q(`
     MERGE (m:GraphMetric {name: 'community_modularity'})
     SET m.value = ${result.modularity.toFixed(6)},
         m.community_count = ${result.communities.length},
         m.total_apps = ${result.totalApps},
         m.computed_at = '${now}'
+    WITH m
+    OPTIONAL MATCH (c:GraphCommunity)
+    WITH m, collect(c) AS communities
+    FOREACH (c IN communities |
+      MERGE (m)-[:MEASURES]->(c)
+    )
   `);
 }
 

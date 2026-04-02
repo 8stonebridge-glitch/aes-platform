@@ -160,6 +160,305 @@ export const NODE_TYPES = {
     optional: ["description", "enforcement"],
     indexes: ["node_id", "name"],
   },
+
+  // ── Learned knowledge layer (learn-app.ts, research-and-backfill.ts) ──
+  LearnedApp: {
+    required: ["app_id", "name"],
+    optional: ["description", "url", "category", "source", "analyzed_at"],
+    indexes: ["app_id", "name"],
+  },
+  LearnedFeature: {
+    required: ["feature_id", "name"],
+    optional: ["description", "category", "priority", "app_id"],
+    indexes: ["feature_id", "name"],
+  },
+  LearnedDataModel: {
+    required: ["name"],
+    optional: ["description", "domain", "fields", "relationships_to", "code_sample"],
+    indexes: ["name"],
+  },
+  LearnedApiDomain: {
+    required: ["name"],
+    optional: ["description", "endpoints", "auth_method"],
+    indexes: ["name"],
+  },
+  LearnedComponentGroup: {
+    required: ["name"],
+    optional: ["description", "components", "framework"],
+    indexes: ["name"],
+  },
+  LearnedPageSection: {
+    required: ["name"],
+    optional: ["description", "layout", "components"],
+    indexes: ["name"],
+  },
+  LearnedDesignSystem: {
+    required: ["name"],
+    optional: ["description", "colors", "typography", "spacing", "framework"],
+    indexes: ["name"],
+  },
+  LearnedUserFlow: {
+    required: ["name"],
+    optional: ["description", "domain", "steps", "entry_point", "success_criteria"],
+    indexes: ["name"],
+  },
+  LearnedFormPattern: {
+    required: ["name"],
+    optional: ["description", "fields", "validation_rules", "submission_pattern"],
+    indexes: ["name"],
+  },
+  LearnedStatePattern: {
+    required: ["name"],
+    optional: ["description", "state_shape", "actions", "selectors"],
+    indexes: ["name"],
+  },
+  LearnedNavigation: {
+    required: ["name"],
+    optional: ["description", "structure", "type"],
+    indexes: ["name"],
+  },
+
+  // ── Learning feedback layer (learn-loop.ts, learn-loop-perplexity.ts) ──
+  LearnedFeedback: {
+    required: ["session_id", "section"],
+    optional: ["app_description", "score", "feedback", "created_at"],
+    indexes: ["session_id"],
+  },
+  LearnedCorrection: {
+    required: ["session_id"],
+    optional: ["app_description", "section", "original", "corrected", "reason", "created_at"],
+    indexes: ["session_id"],
+  },
+  LearnedBlueprintResult: {
+    required: ["session_id"],
+    optional: ["app_description", "result", "score", "created_at"],
+    indexes: ["session_id"],
+  },
+  LearnedResearch: {
+    required: ["name"],
+    optional: ["description", "domain", "source", "findings", "created_at"],
+    indexes: ["name", "domain"],
+  },
+
+  // ── AES self-knowledge layer (store-reasoning-lesson.ts, store-evolution-*.ts) ──
+  AESEvolution: {
+    required: ["evolution_id"],
+    optional: ["description", "trigger", "outcome", "created_at"],
+    indexes: ["evolution_id"],
+  },
+  AESReasoningRule: {
+    required: ["rule_id", "name"],
+    optional: ["description", "condition", "action", "confidence"],
+    indexes: ["rule_id", "name"],
+  },
+  AESSearchStrategy: {
+    required: ["name"],
+    optional: ["description", "query_pattern", "target_labels"],
+    indexes: ["name"],
+  },
+  AESPreflight: {
+    required: ["name"],
+    optional: ["description", "check_type", "implementation"],
+    indexes: ["name"],
+  },
+  AESLesson: {
+    required: ["name"],
+    optional: ["description", "context", "insight", "created_at"],
+    indexes: ["name"],
+  },
+  AESBlueprint: {
+    required: ["name"],
+    optional: ["description", "domains", "strategy", "created_at"],
+    indexes: ["name"],
+  },
+
+  // ── Build extraction layer (post-build-extract.ts) ──
+  BuildExtraction: {
+    required: ["extraction_id"],
+    optional: ["run_id", "app_id", "feature_id", "created_at"],
+    indexes: ["extraction_id", "run_id"],
+  },
+  BuildExtractedTech: {
+    required: ["name"],
+    optional: ["version", "category", "extraction_id"],
+    indexes: ["name"],
+  },
+  BuildExtractedModel: {
+    required: ["name"],
+    optional: ["description", "fields", "extraction_id"],
+    indexes: ["name"],
+  },
+  BuildExtractedIntegration: {
+    required: ["name"],
+    optional: ["provider", "type", "extraction_id"],
+    indexes: ["name"],
+  },
+  BuildExtractedPattern: {
+    required: ["name"],
+    optional: ["type", "description", "extraction_id"],
+    indexes: ["name"],
+  },
+  BuildCheck: {
+    required: ["check_id", "name"],
+    optional: ["status", "message", "extraction_id"],
+    indexes: ["check_id"],
+  },
+
+  // ── Build outcome layer (temporal-success.ts) ──
+  BuildOutcome: {
+    required: ["outcome_id"],
+    optional: ["run_id", "status", "duration_ms", "created_at"],
+    indexes: ["outcome_id", "run_id"],
+  },
+  ReasoningPath: {
+    required: ["path_id"],
+    optional: ["description", "steps", "outcome_id"],
+    indexes: ["path_id"],
+  },
+
+  // ── Graph analysis layer (community-detect.ts) ──
+  GraphCommunity: {
+    required: ["community_id", "name"],
+    optional: ["description", "member_count", "density"],
+    indexes: ["community_id"],
+  },
+  GraphMetric: {
+    required: ["metric_id", "name"],
+    optional: ["value", "computed_at"],
+    indexes: ["metric_id"],
+  },
+
+  // ── Versioned truth layer (versioned-truth.ts, graph-updater.ts) ──
+  Entity: {
+    required: ["entity_id", "entity_type"],
+    optional: ["name", "status", "created_at"],
+    indexes: ["entity_id", "entity_type"],
+  },
+  Version: {
+    required: ["version_id"],
+    optional: ["entity_id", "version_number", "data", "created_at"],
+    indexes: ["version_id", "entity_id"],
+  },
+  ChangeEvent: {
+    required: ["event_id"],
+    optional: ["entity_id", "change_type", "description", "created_at"],
+    indexes: ["event_id", "entity_id"],
+  },
+  PipelineOutcome: {
+    required: ["outcome_id"],
+    optional: ["run_id", "status", "gate", "created_at"],
+    indexes: ["outcome_id", "run_id"],
+  },
+
+  // ── Design evidence layer (design-extract.ts) ──
+  DesignEvidence: {
+    required: ["evidence_id"],
+    optional: ["name", "source", "description", "created_at"],
+    indexes: ["evidence_id"],
+  },
+  DesignScreen: {
+    required: ["screen_id", "name"],
+    optional: ["description", "route", "layout"],
+    indexes: ["screen_id"],
+  },
+  DesignComponent: {
+    required: ["name"],
+    optional: ["description", "props", "screen_id"],
+    indexes: ["name"],
+  },
+  DesignDataView: {
+    required: ["name"],
+    optional: ["description", "data_source", "screen_id"],
+    indexes: ["name"],
+  },
+  DesignForm: {
+    required: ["name"],
+    optional: ["description", "fields", "screen_id"],
+    indexes: ["name"],
+  },
+  DesignAction: {
+    required: ["name"],
+    optional: ["description", "trigger", "screen_id"],
+    indexes: ["name"],
+  },
+  DesignState: {
+    required: ["name"],
+    optional: ["description", "type", "screen_id"],
+    indexes: ["name"],
+  },
+  DesignVerification: {
+    required: ["verification_id"],
+    optional: ["status", "findings", "created_at"],
+    indexes: ["verification_id"],
+  },
+
+  // ── Operations layer (reconnect-orphans.ts, store.ts, auto-build-runner.ts) ──
+  ResearchHub: {
+    required: ["hub_id"],
+    optional: ["name", "description", "created_at"],
+    indexes: ["hub_id"],
+  },
+  BuildHistory: {
+    required: ["history_id"],
+    optional: ["app_id", "created_at"],
+    indexes: ["history_id"],
+  },
+  BuildRun: {
+    required: ["run_id"],
+    optional: ["status", "app_id", "feature_id", "created_at"],
+    indexes: ["run_id"],
+  },
+  FeatureBuild: {
+    required: ["build_id"],
+    optional: ["feature_id", "run_id", "status", "created_at"],
+    indexes: ["build_id", "run_id"],
+  },
+  HermesRepairOutcome: {
+    required: ["pattern"],
+    optional: ["category", "service", "diagnosis", "fix_action", "error_snippet", "created_at"],
+    indexes: ["pattern", "category"],
+  },
+
+  // ── Learn-UI layer (learn-ui.ts — parallel schema to Learned* nodes) ──
+  UIComponentGroup: {
+    required: ["name"],
+    optional: ["description", "components", "framework"],
+    indexes: ["name"],
+  },
+  PageSection: {
+    required: ["name"],
+    optional: ["description", "layout", "route"],
+    indexes: ["name"],
+  },
+  NavItem: {
+    required: ["name"],
+    optional: ["description", "href", "icon"],
+    indexes: ["name"],
+  },
+  LayoutPattern: {
+    required: ["name"],
+    optional: ["description", "type", "structure"],
+    indexes: ["name"],
+  },
+
+  // ── Reverse engineer layer ──
+  DataModelGroup: {
+    required: ["name"],
+    optional: ["description", "models"],
+    indexes: ["name"],
+  },
+  DataModel: {
+    required: ["name"],
+    optional: ["description", "domain", "fields", "relationships_to"],
+    indexes: ["name"],
+  },
+
+  // ── Service anchor (store.ts — connects HermesRepairOutcome to a service) ──
+  ServiceAnchor: {
+    required: ["name"],
+    optional: ["description"],
+    indexes: ["name"],
+  },
 } as const;
 
 export type NodeLabel = keyof typeof NODE_TYPES;

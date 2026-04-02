@@ -226,30 +226,72 @@ async function main() {
   let succeeded = 0;
   let failed = 0;
 
-  for (let i = 0; i < repos.length; i++) {
-    const repo = repos[i];
-    console.log(`\n  ▸ [${i + 1}/${repos.length}] ${repo.name} (${repo.category})`);
-    console.log(`    ${repo.url}`);
+  // Parse concurrency flag (default: 3 parallel repo scans)
+  const concurrencyIdx = args.indexOf("--concurrency");
+  const maxConcurrency = concurrencyIdx >= 0 ? parseInt(args[concurrencyIdx + 1] || "3", 10) : 3;
+  const serial = args.includes("--serial");
 
-    // Clone
-    const dir = cloneRepo(repo);
-    if (!dir) {
-      failed++;
-      continue;
-    }
+  if (serial || maxConcurrency <= 1) {
+    // Sequential mode (original behavior)
+    for (let i = 0; i < repos.length; i++) {
+      const repo = repos[i];
+      console.log(`\n  ▸ [${i + 1}/${repos.length}] ${repo.name} (${repo.category})`);
+      console.log(`    ${repo.url}`);
 
-    // Scan
-    const ok = scanRepo(dir, repo);
-    if (ok) {
-      succeeded++;
-    } else {
-      failed++;
-    }
+      const dir = cloneRepo(repo);
+      if (!dir) { failed++; continue; }
 
-    // Cleanup (unless --keep)
-    if (!keepClones) {
-      cleanupRepo(repo);
+      const ok = scanRepo(dir, repo);
+      if (ok) { succeeded++; } else { failed++; }
+
+      if (!keepClones) cleanupRepo(repo);
     }
+  } else {
+    // Parallel mode — process repos with semaphore
+    console.log(`  Concurrency: ${maxConcurrency} parallel\n`);
+
+    // Simple semaphore for controlling parallelism
+    let running = 0;
+    const queue: Array<() => void> = [];
+    const acquire = () => new Promise<void>(resolve => {
+      if (running < maxConcurrency) { running++; resolve(); }
+      else queue.push(() => { running++; resolve(); });
+    });
+    const release = () => { running--; if (queue.length > 0) queue.shift()!(); };
+
+    // Clone all repos first (parallel with semaphore — I/O bound)
+    console.log(`  Phase 1: Cloning ${repos.length} repos (max ${maxConcurrency} parallel)...`);
+    const cloneResults = await Promise.allSettled(
+      repos.map(async (repo, i) => {
+        await acquire();
+        try {
+          console.log(`  ▸ [${i + 1}/${repos.length}] Cloning ${repo.name}...`);
+          return { repo, dir: cloneRepo(repo) };
+        } finally { release(); }
+      })
+    );
+
+    // Scan repos in parallel (CPU + I/O bound — main bottleneck)
+    console.log(`\n  Phase 2: Scanning repos (max ${maxConcurrency} parallel)...`);
+    running = 0; // reset semaphore
+    const scanResults = await Promise.allSettled(
+      cloneResults.map(async (result, i) => {
+        if (result.status !== "fulfilled" || !result.value.dir) {
+          failed++;
+          return;
+        }
+        const { repo, dir } = result.value;
+        await acquire();
+        try {
+          console.log(`  ▸ [${i + 1}/${repos.length}] Scanning ${repo.name} (${repo.category})...`);
+          const ok = scanRepo(dir, repo);
+          if (ok) { succeeded++; } else { failed++; }
+        } finally {
+          release();
+          if (!keepClones) cleanupRepo(result.value.repo);
+        }
+      })
+    );
   }
 
   console.log(`\n${"═".repeat(65)}`);

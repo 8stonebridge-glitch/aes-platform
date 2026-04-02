@@ -1026,6 +1026,9 @@ ON CREATE SET m.category = '${esc(model.category)}',
               m.field_count = ${model.fields.length},
               m.relation_count = ${model.relations.length},
               m.created_at = '${now}'
+WITH m
+MATCH (dm:DataModelGroup {name: '${esc(model.category)}', source: '${esc(analysis.name)}'})
+MERGE (dm)-[:CONTAINS_MODEL]->(m)
 RETURN m.name
     `.trim();
 

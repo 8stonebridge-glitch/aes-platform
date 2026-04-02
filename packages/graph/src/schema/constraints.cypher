@@ -78,3 +78,59 @@ CREATE INDEX feature_spec_feature_id_idx IF NOT EXISTS FOR (fs:FeatureSpec) ON (
 CREATE INDEX feature_spec_status_idx IF NOT EXISTS FOR (fs:FeatureSpec) ON (fs.status);
 CREATE INDEX runtime_service_name_idx IF NOT EXISTS FOR (rs:RuntimeService) ON (rs.name);
 CREATE INDEX data_store_type_idx IF NOT EXISTS FOR (ds:DataStore) ON (ds.type);
+
+// ============================================================
+// Runtime-created node constraints and indexes
+// ============================================================
+
+// Learned app knowledge layer
+CREATE CONSTRAINT learned_app_id_unique IF NOT EXISTS FOR (la:LearnedApp) REQUIRE la.app_id IS UNIQUE;
+CREATE CONSTRAINT learned_feature_id_unique IF NOT EXISTS FOR (lf:LearnedFeature) REQUIRE lf.feature_id IS UNIQUE;
+CREATE INDEX learned_app_name_idx IF NOT EXISTS FOR (la:LearnedApp) ON (la.name);
+CREATE INDEX learned_feature_name_idx IF NOT EXISTS FOR (lf:LearnedFeature) ON (lf.name);
+CREATE INDEX learned_data_model_name_idx IF NOT EXISTS FOR (ldm:LearnedDataModel) ON (ldm.name);
+CREATE INDEX learned_user_flow_name_idx IF NOT EXISTS FOR (luf:LearnedUserFlow) ON (luf.name);
+CREATE INDEX learned_form_pattern_name_idx IF NOT EXISTS FOR (lfp:LearnedFormPattern) ON (lfp.name);
+CREATE INDEX learned_state_pattern_name_idx IF NOT EXISTS FOR (lsp:LearnedStatePattern) ON (lsp.name);
+CREATE INDEX learned_research_domain_idx IF NOT EXISTS FOR (lr:LearnedResearch) ON (lr.domain);
+
+// Learning feedback layer
+CREATE INDEX learned_feedback_session_idx IF NOT EXISTS FOR (lf:LearnedFeedback) ON (lf.session_id);
+CREATE INDEX learned_correction_session_idx IF NOT EXISTS FOR (lc:LearnedCorrection) ON (lc.session_id);
+CREATE INDEX learned_blueprint_session_idx IF NOT EXISTS FOR (lb:LearnedBlueprintResult) ON (lb.session_id);
+
+// AES self-knowledge layer
+CREATE CONSTRAINT aes_evolution_id_unique IF NOT EXISTS FOR (ae:AESEvolution) REQUIRE ae.evolution_id IS UNIQUE;
+CREATE CONSTRAINT aes_reasoning_rule_id_unique IF NOT EXISTS FOR (ar:AESReasoningRule) REQUIRE ar.rule_id IS UNIQUE;
+CREATE INDEX aes_reasoning_rule_name_idx IF NOT EXISTS FOR (ar:AESReasoningRule) ON (ar.name);
+CREATE INDEX aes_lesson_name_idx IF NOT EXISTS FOR (al:AESLesson) ON (al.name);
+CREATE INDEX aes_blueprint_name_idx IF NOT EXISTS FOR (ab:AESBlueprint) ON (ab.name);
+
+// Build extraction layer
+CREATE CONSTRAINT build_extraction_id_unique IF NOT EXISTS FOR (be:BuildExtraction) REQUIRE be.extraction_id IS UNIQUE;
+CREATE INDEX build_extraction_run_idx IF NOT EXISTS FOR (be:BuildExtraction) ON (be.run_id);
+CREATE INDEX build_extracted_tech_name_idx IF NOT EXISTS FOR (bt:BuildExtractedTech) ON (bt.name);
+CREATE INDEX build_extracted_model_name_idx IF NOT EXISTS FOR (bm:BuildExtractedModel) ON (bm.name);
+CREATE INDEX build_extracted_pattern_name_idx IF NOT EXISTS FOR (bp2:BuildExtractedPattern) ON (bp2.name);
+
+// Build outcome layer
+CREATE CONSTRAINT build_outcome_id_unique IF NOT EXISTS FOR (bo:BuildOutcome) REQUIRE bo.outcome_id IS UNIQUE;
+CREATE INDEX build_outcome_run_idx IF NOT EXISTS FOR (bo:BuildOutcome) ON (bo.run_id);
+
+// Versioned truth layer
+CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.entity_id IS UNIQUE;
+CREATE CONSTRAINT version_id_unique IF NOT EXISTS FOR (v:Version) REQUIRE v.version_id IS UNIQUE;
+CREATE CONSTRAINT change_event_id_unique IF NOT EXISTS FOR (ce2:ChangeEvent) REQUIRE ce2.event_id IS UNIQUE;
+CREATE INDEX entity_type_idx IF NOT EXISTS FOR (e:Entity) ON (e.entity_type);
+
+// Design evidence layer
+CREATE CONSTRAINT design_evidence_id_unique IF NOT EXISTS FOR (de:DesignEvidence) REQUIRE de.evidence_id IS UNIQUE;
+CREATE CONSTRAINT design_screen_id_unique IF NOT EXISTS FOR (ds2:DesignScreen) REQUIRE ds2.screen_id IS UNIQUE;
+
+// Graph analysis layer
+CREATE CONSTRAINT graph_community_id_unique IF NOT EXISTS FOR (gc:GraphCommunity) REQUIRE gc.community_id IS UNIQUE;
+
+// Operations layer
+CREATE INDEX build_run_id_idx IF NOT EXISTS FOR (br:BuildRun) ON (br.run_id);
+CREATE INDEX hermes_repair_pattern_idx IF NOT EXISTS FOR (hr:HermesRepairOutcome) ON (hr.pattern);
+CREATE INDEX hermes_repair_category_idx IF NOT EXISTS FOR (hr:HermesRepairOutcome) ON (hr.category);

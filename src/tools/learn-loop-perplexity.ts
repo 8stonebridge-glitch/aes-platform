@@ -279,7 +279,16 @@ async function main() {
           source: 'perplexity-research',
           app_description: '${esc(PERPLEXITY.app)}',
           timestamp: '${esc(new Date().toISOString())}'
-        }) RETURN c.session_id
+        })
+        WITH c
+        OPTIONAL MATCH (app:LearnedApp)
+        WHERE toLower(app.name) CONTAINS 'barber'
+           OR toLower(app.app_class) CONTAINS 'booking'
+        WITH c, app LIMIT 1
+        FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+          CREATE (app)-[:HAS_CORRECTION]->(c)
+        )
+        RETURN c.session_id
       `);
       correctionCount++;
     }
@@ -298,7 +307,16 @@ async function main() {
         matched: '${esc(r.graph_found.join("; "))}',
         missed: '${esc(r.graph_missing.join("; "))}',
         timestamp: '${esc(new Date().toISOString())}'
-      }) RETURN f.session_id
+      })
+      WITH f
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS 'barber'
+         OR toLower(app.app_class) CONTAINS 'booking'
+      WITH f, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        CREATE (app)-[:HAS_FEEDBACK]->(f)
+      )
+      RETURN f.session_id
     `);
   }
 
@@ -309,6 +327,14 @@ async function main() {
       SET r.fields = '${esc(model.fields)}',
           r.source = 'perplexity-research',
           r.timestamp = '${esc(new Date().toISOString())}'
+      WITH r
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS 'barber'
+         OR toLower(app.app_class) CONTAINS 'booking'
+      WITH r, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (app)-[:HAS_RESEARCH]->(r)
+      )
       RETURN r.name
     `);
   }
@@ -320,6 +346,14 @@ async function main() {
           r.why = '${esc(int.why)}',
           r.source = 'perplexity-research',
           r.timestamp = '${esc(new Date().toISOString())}'
+      WITH r
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS 'barber'
+         OR toLower(app.app_class) CONTAINS 'booking'
+      WITH r, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (app)-[:HAS_RESEARCH]->(r)
+      )
       RETURN r.name
     `);
   }
@@ -329,6 +363,14 @@ async function main() {
       MERGE (r:LearnedResearch {name: '${esc(feat)}', domain: 'barber_booking', type: 'feature'})
       SET r.source = 'perplexity-research',
           r.timestamp = '${esc(new Date().toISOString())}'
+      WITH r
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS 'barber'
+         OR toLower(app.app_class) CONTAINS 'booking'
+      WITH r, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (app)-[:HAS_RESEARCH]->(r)
+      )
       RETURN r.name
     `);
   }
@@ -339,6 +381,14 @@ async function main() {
       SET r.description = '${esc(flow)}',
           r.source = 'perplexity-research',
           r.timestamp = '${esc(new Date().toISOString())}'
+      WITH r
+      OPTIONAL MATCH (app:LearnedApp)
+      WHERE toLower(app.name) CONTAINS 'barber'
+         OR toLower(app.app_class) CONTAINS 'booking'
+      WITH r, app LIMIT 1
+      FOREACH (_ IN CASE WHEN app IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (app)-[:HAS_RESEARCH]->(r)
+      )
       RETURN r.name
     `);
   }

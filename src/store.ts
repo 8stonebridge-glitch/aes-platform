@@ -684,6 +684,15 @@ export class JobStore {
           service: outcome.service ?? "aes-release",
         },
       );
+      // Link the repair outcome to a service anchor so it is not an orphan node
+      const svc = outcome.service ?? "aes-release";
+      await neo4j.runCypher(
+        `MATCH (r:HermesRepairOutcome {pattern: $pattern, service: $service})
+         WHERE r.timestamp = datetime()
+         MERGE (s:ServiceAnchor {name: $service})
+         MERGE (r)-[:REPAIR_FOR]->(s)`,
+        { pattern: outcome.pattern ?? "", service: svc },
+      );
     } catch {
       // best-effort — don't block the pipeline
     }

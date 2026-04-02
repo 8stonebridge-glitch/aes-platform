@@ -282,7 +282,7 @@ async function writeToGraph(research: ResearchResult): Promise<{
     stats.uiPatterns++;
   }
 
-  // 9. Also write as LearnedResearch for audit trail
+  // 9. Also write as LearnedResearch for audit trail, linked to the LearnedApp
   await q(`
     MERGE (r:LearnedResearch {scenario: '${esc(research.app_description)}', source: 'perplexity-backfill'})
     SET r.app_class = '${esc(research.app_class)}',
@@ -291,6 +291,9 @@ async function writeToGraph(research: ResearchResult): Promise<{
         r.model_count = ${research.data_models.length},
         r.integration_count = ${research.integrations.length},
         r.created_at = '${now}'
+    WITH r
+    MATCH (a:LearnedApp {source_id: '${esc(appId)}'})
+    MERGE (r)-[:RESEARCH_FOR]->(a)
   `);
 
   return stats;
