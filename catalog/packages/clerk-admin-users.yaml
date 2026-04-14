@@ -1,0 +1,23 @@
+id: "clerk-admin-users"
+name: "Clerk Admin User Management"
+description: "Server-side Clerk user creation and deletion via Backend API. Allows admins to create user accounts directly with email + password instead of sending invitation emails. Includes breach-detection bypass and structured error handling."
+type: "integration"
+repo: "aes-platform"
+package_path: "packages/integrations/src/clerk"
+branch_or_tag: "main"
+owning_team: "aes-core"
+dependencies:
+  - "auth-module"
+tests:
+  suite: "clerk-admin-users-unit"
+  last_run: "2026-04-14T00:00:00Z"
+  status: "unknown"
+usage_constraints:
+  - "Requires CLERK_SECRET_KEY environment variable"
+  - "Must set skip_password_checks: true to avoid silent breach-detection rejection"
+  - "email_address parameter must be an array, not a string"
+  - "Created user has no session — they must sign in with provided credentials"
+last_validation_date: "2026-04-14T00:00:00Z"
+tags: ["integration", "clerk", "auth", "admin", "user-management"]
+promotion_tier: "CANONICAL"
+donor_lineage: ["payrail-standalone"]
